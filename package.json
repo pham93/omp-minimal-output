@@ -1,0 +1,12 @@
+{
+  "name": "@local/omp-minimal-output",
+  "version": "0.3.0",
+  "description": "Grok-build-style minimal console output for omp",
+  "type": "module",
+  "main": "index.ts",
+  "pi": { "extensions": ["./index.ts"] },
+  "files": ["index.ts", "filters.ts", "minimal-output.yml", "README.md"],
+  "keywords": ["pi", "pi-coding-agent", "pi-package", "extension", "minimal-output"],
+  "license": "MIT",
+  "peerDependencies": { "@oh-my-pi/pi-coding-agent": "*" }
+}

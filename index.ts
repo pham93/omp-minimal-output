@@ -1,0 +1,1641 @@
+import type { ExtensionAPI, ToolResultEvent } from "@oh-my-pi/pi-coding-agent";
+import type { markFramedBlockComponent } from "@oh-my-pi/pi-coding-agent/tui/output-block";
+import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
+import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
+import { collapseToolText } from "./filters.ts";
+
+// Initialized at import so tool_result works before session_start fires.
+// Shared row-animation frame, read at render time by pending rows.
+let spinFrame = 0;
+// Fade start (ms epoch) for rows that are appearing now. Missing keys are
+// rest opacity — never start a fade on a rebuild of existing transcript rows.
+const textFades = new Map<string, number>();
+// Elapsed base for the live row timer (ms epoch). Maintained by the
+// tool handlers below; renderers only read it.
+let spinStartedAt = 0;
+let activityStartedAt = 0;
+let activityLabel = "";
+let activityLive = false;
+let activityTotal = "";
+// Per-turn mirror identity for the aside-channel records below. The live row
+// is sent once per turn; a settled record goes out on every tool drain.
+// Renderer state freezes in message details so old rows never mirror a later run.
+let activityRunId: string | null = null;
+let activityLiveSent = false;
+let activityApiDead = false;
+const activityProcessTag = Math.floor(Math.random() * 36 ** 6).toString(36);
+let activityRunSeq = 0;
+const activitySettledTotals = new Map<string, { total: number; label: string }>();
+const liveRuns = new Map<string, { label: string; startedAt: number; fp: string }>();
+let activityLeadFp = "";
+let enabled = true;
+let thoughtLive = false;
+let thoughtStartedAt = 0;
+let thoughtText = "";
+let thoughtSettledLabel = "";
+let thoughtWidgetOn = false;
+let thoughtUi: { setWidget?: (key: string, content: unknown, options?: { placement?: string }) => void; requestRender?: () => void } | undefined;
+const THOUGHT_PREVIEW_LINES = 3;
+const THOUGHT_WIDGET_KEY = "minimal-thinking";
+const wrappedTools = new Set<string>(["bash", "read", "grep", "glob", "write"]);
+
+interface GroupRow {
+	fp: string;
+	body: string;
+	live: boolean;
+	error: boolean;
+	right: string;
+	startedAt: number;
+}
+interface ToolGroup {
+	label: string;
+	rows: Map<string, GroupRow>;
+}
+const toolGroups = new Map<string, ToolGroup>();
+const fpToGroup = new Map<string, string>();
+
+type MarkFlush = typeof markFramedBlockComponent;
+// Core drops its outer wrapper (state tint + 1-col padding) only for
+// framed-marked components. The mark is off the extension surface, but the
+// package export map exposes the module — load it lazily so a future core
+// move degrades to today's tinted card instead of breaking this file.
+let markFlush: MarkFlush | undefined;
+import("@oh-my-pi/pi-coding-agent/tui/output-block")
+	.then((m) => {
+		if (typeof m.markFramedBlockComponent === "function") markFlush = m.markFramedBlockComponent;
+	})
+	.catch(() => {});
+
+type TextItem = { type: string; text?: string };
+
+function textItemOf(content: unknown): { list: TextItem[]; item: TextItem } | undefined {
+	if (!Array.isArray(content)) return undefined;
+	const list = content as TextItem[];
+	const item = list.find((c) => c?.type === "text" && typeof c.text === "string");
+	return item?.text !== undefined ? { list, item } : undefined;
+}
+
+function isCollapseTarget(event: ToolResultEvent): boolean {
+	return event.type === "tool_result" && ["bash", "read", "grep", "glob"].includes(event.toolName);
+}
+
+async function spillToolOutput(toolName: string, original: string): Promise<string | null> {
+	try {
+		const safe = toolName.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 32) || "tool";
+		const path = `${tmpdir()}/omp-minimal-${safe}-${Date.now()}.log`;
+		await writeFile(path, original, "utf-8");
+		return path;
+	} catch {
+		return null;
+	}
+}
+
+function summarizeEvent(event: unknown): string {
+	try {
+		const e = event as Record<string, unknown>;
+		const tool = String(e["toolName"] ?? e["name"] ?? "tool");
+		const input = (e["input"] ?? e["args"] ?? {}) as Record<string, unknown>;
+		const raw =
+			input["command"] ?? input["path"] ?? input["pattern"] ?? input["query"] ?? input["file"] ?? "";
+		const oneLine = String(raw ?? "").replace(/\s+/g, " ").trim();
+		const short = oneLine;
+		return short ? `${tool} ${short}` : tool;
+	} catch {
+		return "tool";
+	}
+}
+
+// English intent (`arguments.i`, literal key; no pi-wire dependency).
+function intentFromUnknown(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+function intentFromToolArgs(args: unknown): string | undefined {
+	if (typeof args !== "object" || args === null) return undefined;
+	return intentFromUnknown((args as Record<string, unknown>)["i"]);
+}
+
+function intentFromAssistantMessage(message: unknown): string | undefined {
+	try {
+		const content = (message as { content?: unknown })?.content;
+		if (!Array.isArray(content)) return undefined;
+		let found: string | undefined;
+		for (const item of content as Array<{ type?: unknown; arguments?: unknown }>) {
+			if (item?.type !== "toolCall") continue;
+			const next = intentFromToolArgs(item.arguments);
+			if (next) found = next;
+		}
+		return found;
+	} catch {
+		return undefined;
+	}
+}
+
+function intentFromEvent(event: unknown): string | undefined {
+	try {
+		const e = event as { intent?: unknown; args?: unknown; input?: unknown };
+		return intentFromUnknown(e?.intent) ?? intentFromToolArgs(e?.args ?? e?.input);
+	} catch {
+		return undefined;
+	}
+}
+
+function setWorking(ctx: unknown, message: string | undefined): void {
+	try {
+		const c = ctx as { hasUI?: unknown; ui?: { setWorkingMessage?: (m: string | undefined) => void } };
+		if (c?.hasUI === true) c.ui?.setWorkingMessage?.(message);
+	} catch {
+		// No UI or stubbed surface (RPC/ACP/headless): nothing to pulse.
+	}
+}
+
+// ── v2 shared renderer helpers (same file, no new modules) ──
+
+function shortCommandText(cmd: string): string {
+	const oneLine = cmd.replace(/\s+/g, " ").trim();
+	return oneLine || "bash";
+}
+
+function wrapToWidth(text: string, width: number): string[] {
+	const max = Math.max(8, Math.floor(width));
+	const out: string[] = [];
+	for (const para of text.split(/\n+/)) {
+		const words = para.trim().split(/\s+/).filter(Boolean);
+		if (words.length === 0) continue;
+		let line = "";
+		for (const word of words) {
+			const next = line ? `${line} ${word}` : word;
+			if (visibleWidth(next) <= max) {
+				line = next;
+				continue;
+			}
+			if (line) out.push(line);
+			if (visibleWidth(word) <= max) {
+				line = word;
+				continue;
+			}
+			let rest = word;
+			while (visibleWidth(rest) > max) {
+				let lo = 1;
+				let hi = rest.length;
+				while (lo < hi) {
+					const mid = Math.ceil((lo + hi) / 2);
+					if (visibleWidth(rest.slice(0, mid)) <= max) lo = mid;
+					else hi = mid - 1;
+				}
+				out.push(rest.slice(0, lo));
+				rest = rest.slice(lo);
+			}
+			line = rest;
+		}
+		if (line) out.push(line);
+	}
+	return out;
+}
+
+function wrapLatestLines(text: string, width: number, maxLines: number): string[] {
+	if (!text.trim() || maxLines <= 0) return [];
+	return wrapToWidth(text.trim(), width).slice(-maxLines);
+}
+
+function truncatePlain(text: string, max: number): string {
+	if (max <= 0) return "";
+	if (visibleWidth(text) <= max) return text;
+	const budget = Math.max(1, max - 1);
+	let lo = 0;
+	let hi = text.length;
+	while (lo < hi) {
+		const mid = Math.ceil((lo + hi) / 2);
+		if (visibleWidth(text.slice(0, mid)) <= budget) lo = mid;
+		else hi = mid - 1;
+	}
+	return `${text.slice(0, lo)}…`;
+}
+
+function shortPathText(p: string): string {
+	const one = String(p ?? "").replace(/\s+/g, " ").trim();
+	if (!one) return "file";
+	return one.length > 80 ? `${one.slice(0, 80)}…` : one;
+}
+
+// Full pre-collapse text stashed by the tool_result handler. Expanded rows
+// read it so ctrl+o shows everything; collapsed rows keep the one-liner.
+function expandedStash(result: unknown): string | undefined {
+	if (typeof result !== "object" || result === null) return undefined;
+	if (!("details" in result)) return undefined;
+	const details = result.details;
+	if (typeof details !== "object" || details === null) return undefined;
+	if (!("minimalFullText" in details)) return undefined;
+	const full = details.minimalFullText;
+	return typeof full === "string" && full ? full : undefined;
+}
+
+// Merge the stashed full text into existing result details without dropping
+// tool-owned keys (async state, per-file results, …).
+function stashFullText(prev: unknown, full: string): Record<string, unknown> {
+	const merged: Record<string, unknown> = {};
+	if (typeof prev === "object" && prev !== null && !Array.isArray(prev)) {
+		for (const [key, value] of Object.entries(prev)) merged[key] = value;
+	}
+	merged.minimalFullText = full;
+	return merged;
+}
+
+function toolResultText(result: unknown): string {
+	try {
+		const r = result as { content?: unknown };
+		if (typeof result === "string") return result;
+		if (Array.isArray(r?.content)) {
+			const item = (r.content as Array<{ type?: string; text?: unknown }>).find(
+				(c) => c?.type === "text" && typeof c.text === "string",
+			);
+			if (item && typeof item.text === "string") return item.text as string;
+		}
+		return "";
+	} catch {
+		return "";
+	}
+}
+// Label for grep/glob rows. Native grep sends {path, pattern}; native glob
+// sends {path} (live-probed 2026-09-11) — the chain degrades to an unlabeled
+// one-liner rather than crashing when a key is absent.
+function argsFingerprint(args: unknown): string {
+	if (typeof args !== "object" || args === null) return "";
+	const fields = args as Record<string, unknown>;
+	const primary =
+		fields["command"] ??
+		fields["path"] ??
+		fields["file_path"] ??
+		fields["pattern"] ??
+		fields["query"] ??
+		fields["code"];
+	if (typeof primary === "string" && primary) return primary;
+	if (typeof primary === "number" && Number.isFinite(primary)) return String(primary);
+	const skip = new Set(["i", "__partialJson"]);
+	const parts: string[] = [];
+	for (const key of Object.keys(fields).sort()) {
+		if (skip.has(key)) continue;
+		const v = fields[key];
+		if (v === undefined || v === null || v === "") continue;
+		if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+			const s = String(v);
+			parts.push(`${key}=${s.length > 160 ? `${s.slice(0, 160)}#${s.length}` : s}`);
+		}
+	}
+	return parts.join(";");
+}
+
+const fpsByBase = new Map<string, string>();
+
+function toolFpBase(toolName: string, args: unknown): string {
+	return `${toolName}:${argsFingerprint(args)}`;
+}
+
+function toolFingerprint(toolName: string, args: unknown): string {
+	const base = toolFpBase(toolName, args);
+	return fpsByBase.get(base) ?? base;
+}
+
+function eventFingerprint(event: unknown): string {
+	const e = event as { toolName?: unknown; toolCallId?: unknown; input?: unknown; args?: unknown };
+	const name = typeof e.toolName === "string" ? e.toolName : "";
+	const args = e.input ?? e.args;
+	const base = toolFpBase(name, args);
+	const id = typeof e.toolCallId === "string" && e.toolCallId ? e.toolCallId : "";
+	const fp = id ? `${base}#${id}` : base;
+	fpsByBase.set(base, fp);
+	if (fpsByBase.size > 200) {
+		const oldest = fpsByBase.keys().next();
+		if (!oldest.done) fpsByBase.delete(oldest.value);
+	}
+	return fp;
+}
+
+function titleCaseWords(raw: string): string {
+	return raw
+		.replace(/[/_-]+/g, " ")
+		.replace(/([a-z])([A-Z])/g, "$1 $2")
+		.split(/\s+/)
+		.filter(Boolean)
+		.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+		.join(" ");
+}
+
+function stripKindSuffix(text: string): string {
+	return text.replace(/\s*\((?:Edit|Write|Create|Delete|Read|Search|Glob|Bash)\)\s*$/i, "").trimEnd();
+}
+
+function fileNameFromArgs(args: unknown): string {
+	const fields = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+	const raw =
+		(typeof fields["path"] === "string" && fields["path"]) ||
+		(typeof fields["file_path"] === "string" && fields["file_path"]) ||
+		(typeof fields["file"] === "string" && fields["file"]) ||
+		"";
+	if (raw.trim()) {
+		const one = raw.replace(/\s+/g, " ").trim();
+		return one.split("/").pop() || one;
+	}
+	const blob =
+		(typeof fields["input"] === "string" && fields["input"]) ||
+		(typeof fields["patch"] === "string" && fields["patch"]) ||
+		"";
+	const marked = /(?:Update File|Add File|Delete File):\s*(\S+)/.exec(blob);
+	if (marked?.[1]) {
+		const p = marked[1].trim();
+		return p.split("/").pop() || p;
+	}
+	return "file";
+}
+
+function toolActionLabel(toolName: string, args: unknown): string {
+	const fields = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+	const name = toolName.trim();
+	if (name === "read") {
+		const path = typeof fields["path"] === "string" ? fields["path"] : "file";
+		const base = path.split("/").pop() || path;
+		return `Read ${base}`;
+	}
+	if (name === "write") {
+		return `Write ${fileNameFromArgs(args)}`;
+	}
+	if (name === "bash" || name === "shell") {
+		const cmd = typeof fields["command"] === "string" ? fields["command"] : "";
+		return shortCommandText(cmd) || "Bash";
+	}
+	if (name === "grep") {
+		const pattern = searchPatternText(args);
+		return pattern.trim() ? `Search \`${shortCommandText(pattern)}\`` : "Search";
+	}
+	if (name === "glob") {
+		const pattern = searchPatternText(args);
+		return pattern.trim() ? `Glob \`${shortCommandText(pattern)}\`` : "Glob";
+	}
+	const slash = name.lastIndexOf("/");
+	if (slash >= 0) {
+		const ns = titleCaseWords(name.slice(0, slash).replace(/^mcp[_-]?/i, ""));
+		const action = titleCaseWords(name.slice(slash + 1));
+		return `${ns} ${action}`.trim();
+	}
+	return titleCaseWords(name) || name;
+}
+
+function searchPatternText(args: unknown): string {
+	if (typeof args !== "object" || args === null) return "";
+	const fields = args as Record<string, unknown>;
+	const raw = fields["pattern"] ?? fields["query"] ?? fields["path"] ?? "";
+	return typeof raw === "string" ? raw : "";
+}
+
+function isToolError(result: unknown, options?: unknown): boolean {
+	if (typeof options === "object" && options !== null && "isError" in options) {
+		if ((options as { isError: unknown }).isError === true) return true;
+	}
+	if (typeof result !== "object" || result === null) return false;
+	const r = result as { isError?: unknown; details?: unknown };
+	if (r.isError === true) return true;
+	const d = r.details;
+	if (typeof d !== "object" || d === null) return false;
+	const fields = d as Record<string, unknown>;
+	const raw = fields["exitCode"] ?? fields["exit_code"] ?? fields["code"];
+	if (typeof raw === "number" && Number.isFinite(raw) && raw !== 0) return true;
+	return false;
+}
+
+function stripLead(line: string): string {
+	return line.replace(/^\s*◆\s*/, "").replace(/^\$\s+/, "").trim();
+}
+
+function displayToolBody(line: string): string {
+	const s = stripLead(line);
+	if (/^grep\b/i.test(s)) return s.replace(/^grep\b/i, "Search");
+	if (/^glob\b/i.test(s)) return s.replace(/^glob\b/i, "Glob");
+	return s;
+}
+
+function durationSuffix(result: unknown): string {
+	try {
+		const r = result as { details?: unknown };
+		const d = r?.details as Record<string, unknown> | undefined;
+		if (!d || typeof d !== "object") return "";
+		for (const [k, v] of Object.entries(d)) {
+			if (typeof v === "number" && Number.isFinite(v) && /ms|milli|duration|wall|elapsed/i.test(k)) {
+				if (/sec/i.test(k) && !/ms/i.test(k)) return ` (${v.toFixed(1)}s)`;
+				return ` (${(v / 1000).toFixed(1)}s)`;
+			}
+		}
+		return "";
+	} catch {
+		return "";
+	}
+}
+
+type MinimalTheme = { fg: (kind: string, text: string) => string };
+
+function isMinimalTheme(value: unknown): value is MinimalTheme {
+	if (typeof value !== "object" || value === null) return false;
+	if (!("fg" in value)) return false;
+	return typeof (value as { fg: unknown }).fg === "function";
+}
+
+const TOOL_TEXT_OPACITY = 0.5;
+const TEXT_FADE_MS = 1600;
+const MARK_OPACITY = 1;
+const SETTLE_MS = 500;
+const TOOL_INDENT = "  ";
+const LINE_WIDTH_RATIO = 0.7;
+const settleAt = new Map<string, number>();
+const TOKEN_FALLBACK: Record<string, [number, number, number]> = {
+	success: [158, 206, 106],
+	error: [247, 118, 142],
+	accent: [122, 162, 247],
+	text: [229, 229, 231],
+	dim: [128, 128, 128],
+};
+
+function parseHexRgb(hex: string): [number, number, number] | undefined {
+	const h = hex.startsWith("#") ? hex.slice(1) : hex;
+	if (!/^[0-9a-fA-F]{6}$/.test(h)) return undefined;
+	const n = Number.parseInt(h, 16);
+	return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function themeTokenRgb(theme: unknown, token: string): [number, number, number] | undefined {
+	if (typeof theme === "object" && theme !== null && "getColorHex" in theme) {
+		const fn = (theme as { getColorHex: unknown }).getColorHex;
+		if (typeof fn === "function") {
+			try {
+				const hex = (fn as (k: string) => unknown).call(theme, token);
+				if (typeof hex === "string") {
+					const rgb = parseHexRgb(hex);
+					if (rgb) return rgb;
+				}
+			} catch {
+				// Token missing or theme without a hex map.
+			}
+		}
+	}
+	if (isMinimalTheme(theme)) {
+		try {
+			const sample = theme.fg(token, " ");
+			const m = /38;2;(\d+);(\d+);(\d+)/.exec(sample);
+			if (m?.[1] !== undefined && m[2] !== undefined && m[3] !== undefined) {
+				return [Number(m[1]), Number(m[2]), Number(m[3])];
+			}
+		} catch {
+			// Unstyleable.
+		}
+	}
+	return TOKEN_FALLBACK[token];
+}
+
+function themeBgRgb(theme: unknown): [number, number, number] {
+	if (typeof theme === "object" && theme !== null && "isLight" in theme) {
+		if ((theme as { isLight: unknown }).isLight === true) return [255, 255, 255];
+	}
+	return [0, 0, 0];
+}
+
+function paintBold(theme: unknown, text: string): string {
+	if (!text) return text;
+	if (typeof theme === "object" && theme !== null && "bold" in theme) {
+		const fn = (theme as { bold: unknown }).bold;
+		if (typeof fn === "function") {
+			try {
+				return (fn as (s: string) => string).call(theme, text);
+			} catch {
+				// Fall through to SGR bold.
+			}
+		}
+	}
+	return `\x1b[1m${text}\x1b[22m`;
+}
+
+function paintMark(theme: unknown, mark: string, token: string): string {
+	let colored = mark;
+	if (isMinimalTheme(theme)) {
+		try {
+			colored = theme.fg(token, mark);
+		} catch {
+			colored = paintAt(theme, mark, token, MARK_OPACITY);
+		}
+	} else {
+		colored = paintAt(theme, mark, token, MARK_OPACITY);
+	}
+	return paintBold(theme, colored);
+}
+
+function paintAt(theme: unknown, text: string, token: string, opacity: number): string {
+	if (!text) return text;
+	const a = Math.min(1, Math.max(0, opacity));
+	const fg = themeTokenRgb(theme, token);
+	if (!fg) {
+		if (isMinimalTheme(theme)) {
+			try {
+				return theme.fg(token, text);
+			} catch {
+				return text;
+			}
+		}
+		return text;
+	}
+	const bg = themeBgRgb(theme);
+	const r = Math.round(bg[0] + (fg[0] - bg[0]) * a);
+	const g = Math.round(bg[1] + (fg[1] - bg[1]) * a);
+	const b = Math.round(bg[2] + (fg[2] - bg[2]) * a);
+	return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+}
+
+function markSettling(key: string): void {
+	settleAt.set(key, Date.now());
+}
+
+function isSettling(key: string): boolean {
+	const started = settleAt.get(key);
+	return started !== undefined && Date.now() - started < SETTLE_MS;
+}
+
+function anySettling(): boolean {
+	const now = Date.now();
+	for (const started of settleAt.values()) {
+		if (now - started < SETTLE_MS) return true;
+	}
+	return false;
+}
+
+function fadeOpacity(target: number, startedAt: number): number {
+	if (!(startedAt > 0)) return target;
+	const t = Math.min(1, Math.max(0, (Date.now() - startedAt) / TEXT_FADE_MS));
+	const eased = 1 - (1 - t) ** 3;
+	return eased * target;
+}
+
+function pruneFades(now: number): void {
+	if (textFades.size <= 80) return;
+	for (const [key, started] of textFades) {
+		if (now - started >= TEXT_FADE_MS) textFades.delete(key);
+	}
+}
+
+// Start a fade only for a row that is appearing now. A missing key on a
+// settled/historical row means rest opacity — never treat it as a new fade.
+function rowOpacity(live: boolean, fadeKey: string | undefined): number {
+	if (!fadeKey) return TOOL_TEXT_OPACITY;
+	const existing = textFades.get(fadeKey);
+	if (existing !== undefined) return fadeOpacity(TOOL_TEXT_OPACITY, existing);
+	if (!live) return TOOL_TEXT_OPACITY;
+	const now = Date.now();
+	textFades.set(fadeKey, now);
+	pruneFades(now);
+	return fadeOpacity(TOOL_TEXT_OPACITY, now);
+}
+
+function elapsedSuffix(startedAt: number): string {
+	if (!(startedAt > 0)) return " (0s)";
+	return ` (${Math.max(0, Math.floor((Date.now() - startedAt) / 1000))}s)`;
+}
+
+// Pending rows animate: core repaints (not re-invokes) renderers, so the row
+// must read the shared spin frame and fade progress at render time instead of
+// snapshotting them. Only the appearing live row fades in; settled rows stay
+// at rest opacity. Indicator is full-color (live accent / settled green / error red).
+function formatRowLine(
+	theme: unknown,
+	width: number,
+	opts: {
+		body: string;
+		indent?: boolean;
+		live?: boolean;
+		error?: boolean;
+		right?: string;
+		fadeKey?: string;
+	},
+): string {
+	const live = opts.live === true;
+	const settling = !live && opts.fadeKey !== undefined && isSettling(opts.fadeKey);
+	const spin = live || settling;
+	const op = rowOpacity(live, opts.fadeKey);
+	const markToken = spin ? "accent" : opts.error ? "error" : "success";
+	const mark = spin ? (SPIN_FRAMES[spinFrame % SPIN_FRAMES.length] ?? "◈") : "◆";
+	const pad = opts.indent === true ? TOOL_INDENT : " ";
+	const w = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
+	const prefix = `${pad}${paintMark(theme, mark, markToken)} `;
+	const right = opts.right ?? "";
+	const tail = right ? paintAt(theme, right, "dim", op) : "";
+	const bodyBudget = Math.max(1, w - visibleWidth(prefix) - (tail ? visibleWidth(tail) + 1 : 0));
+	const body = truncatePlain(stripKindSuffix(opts.body), bodyBudget);
+	const left = `${prefix}${paintBold(theme, paintAt(theme, body, "text", op))}`;
+	if (!tail) return left;
+	const gap = Math.max(0, w - visibleWidth(left) - visibleWidth(tail));
+	return `${left}${" ".repeat(gap)}${tail}`;
+}
+
+function thoughtFadeKey(): string {
+	return activityRunId ? `thought:${activityRunId}` : "thought:live";
+}
+
+function thinkingRailLines(theme: unknown, width: number, text: string, indent: boolean): string[] {
+	if (!text.trim()) return [];
+	const pad = indent ? TOOL_INDENT : " ";
+	const bar = `${pad}│ `;
+	const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
+	const lines: string[] = [];
+	for (const preview of wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES)) {
+		lines.push(
+			`${paintAt(theme, bar, "accent", TOOL_TEXT_OPACITY)}${paintAt(theme, preview, "text", TOOL_TEXT_OPACITY)}`,
+		);
+	}
+	return lines;
+}
+
+function paintThinkingVisual(theme: unknown): Container {
+	const c = new Container();
+	c.addChild({
+		render: (width: number): readonly string[] => {
+			const live = thoughtLive;
+			const body = live ? "Thinking..." : thoughtSettledLabel || "Thought";
+			const lines: string[] = [
+				formatRowLine(theme, width, {
+					body,
+					live,
+					fadeKey: thoughtFadeKey(),
+				}),
+			];
+			if (live) lines.push(...thinkingRailLines(theme, width, thoughtText, false));
+			return lines;
+		},
+	});
+	return c;
+}
+
+function bindThoughtUi(ctx: unknown): void {
+	if (typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
+	const ui = (ctx as { ui?: typeof thoughtUi }).ui;
+	if (ui) thoughtUi = ui;
+}
+
+function setThoughtWidget(show: boolean): void {
+	const ui = thoughtUi;
+	if (!ui || typeof ui.setWidget !== "function") return;
+	try {
+		if (!show) {
+			if (thoughtWidgetOn) ui.setWidget(THOUGHT_WIDGET_KEY, undefined);
+			thoughtWidgetOn = false;
+			return;
+		}
+		if (thoughtWidgetOn) {
+			if (typeof ui.requestRender === "function") ui.requestRender();
+			return;
+		}
+		ui.setWidget(THOUGHT_WIDGET_KEY, (_tui: unknown, theme: unknown) => paintThinkingVisual(theme), {
+			placement: "aboveEditor",
+		});
+		thoughtWidgetOn = true;
+	} catch {
+		thoughtWidgetOn = false;
+	}
+}
+
+function resetThought(): void {
+	thoughtLive = false;
+	thoughtStartedAt = 0;
+	thoughtText = "";
+	thoughtSettledLabel = "";
+	setThoughtWidget(false);
+}
+
+function paintRow(
+	theme: unknown,
+	opts: {
+		body: string | (() => string);
+		indent?: boolean;
+		live?: boolean;
+		error?: boolean;
+		right?: string | (() => string);
+		fadeKey?: string;
+		liveRight?: () => string;
+		isLive?: () => boolean;
+	},
+) {
+	const c = new Container();
+	const render = (width: number): readonly string[] => {
+		const live = opts.isLive ? opts.isLive() : opts.live === true;
+		const body = typeof opts.body === "function" ? opts.body() : opts.body;
+		const right = live && opts.liveRight ? opts.liveRight() : typeof opts.right === "function" ? opts.right() : (opts.right ?? "");
+		return [
+			formatRowLine(theme, width, {
+				body,
+				indent: opts.indent,
+				live,
+				error: opts.error,
+				right,
+				fadeKey: opts.fadeKey,
+			}),
+		];
+	};
+	c.addChild({ render });
+	markFlush?.(c);
+	return c;
+}
+
+
+function emptyBlock(): Container {
+	const c = new Container();
+	c.addChild({ render: (): readonly string[] => [] });
+	markFlush?.(c);
+	return c;
+}
+
+function upsertGroupRow(fp: string, row: Omit<GroupRow, "fp">): string {
+	let gid = fpToGroup.get(fp);
+	if (!gid) {
+		gid = activityRunId ?? `_anon:${fp}`;
+		fpToGroup.set(fp, gid);
+	}
+	let group = toolGroups.get(gid);
+	if (!group) {
+		group = { label: activityLabel, rows: new Map() };
+		toolGroups.set(gid, group);
+	}
+	if (activityLabel) group.label = activityLabel;
+	const prev = group.rows.get(fp);
+	group.rows.set(fp, {
+		fp,
+		body: row.body,
+		live: row.live,
+		error: row.error,
+		right: row.right,
+		startedAt: prev?.startedAt ?? row.startedAt,
+	});
+	if (toolGroups.size > 40) {
+		const oldest = toolGroups.keys().next();
+		if (!oldest.done && oldest.value !== gid) toolGroups.delete(oldest.value);
+	}
+	return gid;
+}
+
+function isGroupLead(gid: string, fp: string): boolean {
+	if (fp.startsWith("thought:")) return false;
+	const group = toolGroups.get(gid);
+	if (!group) return false;
+	for (const key of group.rows.keys()) {
+		if (key.startsWith("thought:")) continue;
+		return key === fp;
+	}
+	return false;
+}
+
+function rowIsLive(fp: string): boolean {
+	if (thoughtLive && fp.startsWith("thought:")) return true;
+	for (const value of liveRuns.values()) {
+		if (value.fp === fp) return true;
+	}
+	return false;
+}
+
+function paintGroup(theme: unknown, gid: string): Container {
+	const c = new Container();
+	c.addChild({
+		render: (width: number): readonly string[] => {
+			const group = toolGroups.get(gid);
+			if (!group) return [];
+			const lines: string[] = [];
+			const anyLive = [...group.rows.values()].some((row) => rowIsLive(row.fp));
+			const headerLive = anyLive && activityLive;
+			const header = activityRunId === gid && activityLabel ? activityLabel : group.label;
+			if (header.trim()) {
+				lines.push(
+					formatRowLine(theme, width, {
+						body: header,
+						live: headerLive,
+						fadeKey: `act:${gid}`,
+						right: headerLive ? elapsedSuffix(activityStartedAt) : "",
+					}),
+				);
+			}
+			const rows = [...group.rows.values()].sort((a, b) => a.startedAt - b.startedAt);
+			const shown: Array<{ body: string; fps: string[]; live: boolean; error: boolean; startedAt: number; right: string }> =
+				[];
+			for (const row of rows) {
+				const live = rowIsLive(row.fp);
+				const isRead = row.fp.startsWith("read:");
+				const last = shown[shown.length - 1];
+				if (isRead && last && last.fps[0]?.startsWith("read:")) {
+					last.fps.push(row.fp);
+					last.body = `Read ${last.fps.length} files`;
+					last.live = last.live || live;
+					last.error = last.error || row.error;
+					continue;
+				}
+				shown.push({
+					body: row.body,
+					fps: [row.fp],
+					live,
+					error: row.error,
+					startedAt: row.startedAt,
+					right: row.right,
+				});
+			}
+			for (const row of shown) {
+				const settleKey = row.fps[0] ?? row.body;
+				const isThought = settleKey.startsWith("thought:");
+				lines.push(
+					formatRowLine(theme, width, {
+						body: row.body,
+						indent: true,
+						live: row.live,
+						error: row.error,
+						fadeKey: settleKey,
+						right: isThought ? "" : row.live ? elapsedSuffix(row.startedAt) : row.right,
+					}),
+				);
+				if (isThought && row.live) {
+					lines.push(...thinkingRailLines(theme, width, thoughtText, true));
+				}
+			}
+			return lines;
+		},
+	});
+	markFlush?.(c);
+	return c;
+}
+
+// Core inserts a blank line between every tool block. Paint the whole nested
+// group inside the lead tool and return an empty framed block for siblings.
+function renderToolVisual(
+	theme: unknown,
+	fp: string,
+	opts: { body: string; live: boolean; error: boolean; right?: string },
+): Container {
+	const gid = upsertGroupRow(fp, {
+		body: opts.body,
+		live: opts.live,
+		error: opts.error,
+		right: opts.right ?? "",
+		startedAt: Date.now(),
+	});
+	if (!isGroupLead(gid, fp)) return emptyBlock();
+	return paintGroup(theme, gid);
+}
+const SPIN_FRAMES = ["◈", "◉", "◎", "○"] as const;
+
+type ActivityDetails = { kind?: unknown; label?: unknown; startedAt?: unknown; total?: unknown; runId?: unknown };
+
+function activityDetailsOf(message: unknown): {
+	kind: string;
+	label: string;
+	startedAt: number;
+	total: number;
+	runId: string;
+} | undefined {
+	try {
+		const details = ((message as { details?: unknown })?.details ?? {}) as ActivityDetails;
+		if (typeof details.label !== "string" || !details.label) return undefined;
+		return {
+			kind: details.kind === "settled" ? "settled" : "live",
+			label: details.label,
+			startedAt:
+				typeof details.startedAt === "number" && Number.isFinite(details.startedAt) ? details.startedAt : 0,
+			total:
+				typeof details.total === "number" && Number.isFinite(details.total) && details.total >= 0
+					? Math.floor(details.total)
+					: 0,
+			runId: typeof details.runId === "string" ? details.runId : "",
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function activityStaleTail(startedAt: number): string {
+	if (!(startedAt > 0)) return " (…)";
+	const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+	if (elapsed > 3600) return " (…)";
+	return ` (${elapsed}s)`;
+}
+
+// Mirror rows read frozen message details first: settled records are pure
+// functions of their own payload, so rebuilds and resumed sessions can never
+// show a later run's label. Only the current turn's live row follows shared
+// module state (animated frame + latest label + burst elapsed on the 120ms
+// pump repaints); anything retired freezes via the settled-totals map.
+function activityRenderer(_message: unknown, _options: unknown, theme: unknown) {
+	const d = activityDetailsOf(_message);
+	if (!d) return new Container();
+	if (d.kind === "settled") {
+		return paintRow(theme, { body: d.label, right: ` (${d.total}s)` });
+	}
+	if (d.runId !== "" && d.runId === activityRunId && activityLive) {
+		const runId = d.runId;
+		const frozenRight = () => {
+			const frozen = activitySettledTotals.get(runId);
+			if (frozen !== undefined) return ` (${frozen.total}s)`;
+			return activityStaleTail(d.startedAt);
+		};
+		return paintRow(theme, {
+			body: () => {
+				if (runId === activityRunId && activityLive) return activityLabel || d.label;
+				return activitySettledTotals.get(runId)?.label || d.label;
+			},
+			live: true,
+			fadeKey: `act:${runId}`,
+			isLive: () => runId === activityRunId && activityLive,
+			liveRight: () => elapsedSuffix(activityStartedAt > 0 ? activityStartedAt : d.startedAt),
+			right: frozenRight,
+		});
+	}
+	const frozen = d.runId ? activitySettledTotals.get(d.runId) : undefined;
+	if (frozen !== undefined) {
+		return paintRow(theme, {
+			body: frozen.label || activityLabel || d.label,
+			right: ` (${frozen.total}s)`,
+		});
+	}
+	return paintRow(theme, {
+		body: d.label,
+		right: activityStaleTail(d.startedAt),
+	});
+}
+
+// Managed-timer probe: timer fns live on the handler ctx alongside ui/hasUI
+// (non-enumerable on some surfaces), so feature-detect instead of assuming shape.
+function pulseTimers(ctx: unknown):
+	| { setInterval: (fn: () => void, ms: number) => unknown; clearTimer: (h: unknown) => void }
+	| undefined {
+	if (typeof ctx !== "object" || ctx === null) return undefined;
+	if (!("setInterval" in ctx) || !("clearTimer" in ctx)) return undefined;
+	const every = ctx.setInterval;
+	const clear = ctx.clearTimer;
+	if (typeof every !== "function" || typeof clear !== "function") return undefined;
+	// Reason: handler ctx is structurally typed upstream; call through unknown fn values.
+	const setEvery = every as (fn: () => void, ms: number) => unknown;
+	const clearOne = clear as (h: unknown) => void;
+	return {
+		setInterval: (fn, ms) => setEvery(fn, ms),
+		clearTimer: (h) => clearOne(h),
+	};
+}
+
+export default function (pi: ExtensionAPI) {
+	let loaded = false;
+	let spinTimer: unknown = undefined;
+	let spinUi: unknown;
+	pi.registerMessageRenderer("minimal-activity", (message, options, theme) =>
+		activityRenderer(message, options, theme),
+	);
+	// Aside-channel records: the only extension path that paints transcript
+	// rows. Non-interrupting by core design (step-boundary pickup, never
+	// steers the run), triggerTurn false, empty content, hidden from the
+	// queue UI. Async failures surface once through core's error toast;
+	// a missing API (older host) disables sends silently — rows still work.
+	const sendActivityRecord = (details: Record<string, unknown>): void => {
+		if (!enabled || activityApiDead) return;
+		try {
+			pi.sendMessage(
+				{ customType: "minimal-activity", content: "", display: true, details },
+				{ triggerTurn: false, deliverAs: "aside" },
+			);
+		} catch {
+			activityApiDead = true;
+		}
+	};
+	const rememberSettledTotal = (runId: string, total: number, label: string): void => {
+		activitySettledTotals.set(runId, { total, label });
+		if (activitySettledTotals.size > 100) {
+			const oldest = activitySettledTotals.keys().next();
+			if (!oldest.done) activitySettledTotals.delete(oldest.value);
+		}
+	};
+	const freezeActivityRun = (): void => {
+		if (activityRunId !== null && !activitySettledTotals.has(activityRunId)) {
+			const base = activityStartedAt > 0 ? activityStartedAt : Date.now();
+			rememberSettledTotal(
+				activityRunId,
+				Math.max(0, Math.floor((Date.now() - base) / 1000)),
+				activityLabel,
+			);
+		}
+	};
+	const applyIntent = (text: string, startedAt: number): void => {
+		if (!text) return;
+		if (activityRunId !== null && text === activityLabel) {
+			activityLive = true;
+			return;
+		}
+		// Several tools share one status row. While any tool in the group is
+		// live, keep the parent and (optionally) refresh its label in place.
+		if (activityRunId !== null && liveRuns.size > 0) {
+			activityLabel = text;
+			activityLive = true;
+			return;
+		}
+		if (activityRunId !== null && activityLabel) {
+			freezeActivityRun();
+			activityRunId = `${activityProcessTag}-${activityRunSeq++}`;
+			activityLiveSent = false;
+			activityLeadFp = "";
+		}
+		activityLabel = text;
+		if (activityRunId === null) activityRunId = `${activityProcessTag}-${activityRunSeq++}`;
+		activityStartedAt = startedAt;
+		if (!activityLiveSent) {
+			activityLiveSent = true;
+			textFades.set(`act:${activityRunId}`, Date.now());
+		}
+		activityLive = true;
+	};
+	// Row animation pump. Core only ticks spinner frames for its own
+	// renderers, so custom rows animate themselves: one managed 120ms timer
+	// advances the shared frame, repaints, and mirrors the latest label to
+	// the working line. Row components read the frame at render time, so
+	// every repaint cycles them without re-invoking renderers.
+	function ensureSpinTimer(ctx: unknown): void {
+		bindThoughtUi(ctx);
+		if (typeof ctx === "object" && ctx !== null && "ui" in ctx) {
+			const ui = ctx.ui;
+			if (typeof ui === "object" && ui !== null && "requestRender" in ui) {
+				spinUi = ui;
+			}
+		}
+		if (spinTimer !== undefined) return;
+		const timers = pulseTimers(ctx);
+		if (!timers) return;
+		try {
+			spinTimer = timers.setInterval(() => {
+				spinFrame = (spinFrame + 1) % SPIN_FRAMES.length;
+				const pump = spinUi;
+				if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
+					const paint = pump.requestRender;
+					// Reason: narrowed to a callable via typeof; signature cast only.
+					if (typeof paint === "function") {
+						try {
+							(paint as () => void)();
+						} catch {
+							// Repaint is best-effort; the next tick retries.
+						}
+					}
+				}
+			}, 120);
+		} catch {
+			spinTimer = undefined;
+		}
+	}
+	function extractThinking(message: unknown): { text: string; live: boolean } {
+		try {
+			const content = (message as { content?: unknown })?.content;
+			if (!Array.isArray(content)) return { text: "", live: false };
+			let text = "";
+			let lastIsThinking = false;
+			for (const item of content as Array<{ type?: unknown; thinking?: unknown; text?: unknown }>) {
+				const kind = item?.type;
+				if (kind === "thinking" || kind === "reasoning" || kind === "redactedThinking") {
+					const chunk =
+						typeof item.thinking === "string" ? item.thinking : typeof item.text === "string" ? item.text : "";
+					if (chunk) text = chunk;
+					lastIsThinking = true;
+				} else if (kind === "text" || kind === "toolCall") {
+					lastIsThinking = false;
+				}
+			}
+			return { text, live: lastIsThinking };
+		} catch {
+			return { text: "", live: false };
+		}
+	}
+	function syncThought(): void {
+		if (!activityRunId) return;
+		const fp = `thought:${activityRunId}`;
+		if (thoughtLive) {
+			if (thoughtStartedAt === 0) thoughtStartedAt = Date.now();
+			thoughtSettledLabel = "";
+			upsertGroupRow(fp, {
+				body: "Thinking...",
+				live: true,
+				error: false,
+				right: "",
+				startedAt: thoughtStartedAt,
+			});
+			return;
+		}
+		if (thoughtStartedAt > 0) {
+			const sec = Math.max(0, Math.floor((Date.now() - thoughtStartedAt) / 1000));
+			thoughtSettledLabel = sec > 0 ? `Thought for ${sec}s` : "Thought";
+			upsertGroupRow(fp, {
+				body: thoughtSettledLabel,
+				live: false,
+				error: false,
+				right: "",
+				startedAt: thoughtStartedAt,
+			});
+			markSettling(fp);
+			thoughtStartedAt = 0;
+		}
+	}
+	function tryWrapTool(name: string, source?: unknown): void {
+		if (!name || wrappedTools.has(name) || name === "edit") return;
+		// One-liners for bash/read/grep/glob/write. Leave native `edit` (diff card)
+		// alone — wrapping it collapsed the hunks to a single line.
+		if (name !== "bash" && name !== "read" && name !== "grep" && name !== "glob" && name !== "write") return;
+		wrappedTools.add(name);
+		const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
+		const description = typeof src["description"] === "string" ? src["description"] : name;
+		const parameters = src["parameters"] ?? pi.zod.object({}).passthrough();
+		try {
+			pi.registerTool({
+				name,
+				description,
+				parameters: parameters as never,
+				mergeCallAndResult: true,
+				async execute(_toolCallId, params, signal, onUpdate, ctx) {
+					const c = ctx as unknown as {
+						invokeTool?: (
+							p: Record<string, unknown>,
+							o?: { signal?: AbortSignal; onUpdate?: unknown },
+						) => Promise<unknown>;
+					};
+					if (typeof c?.invokeTool !== "function") {
+						throw new Error(`minimal-output: native ${name} unavailable`);
+					}
+					return (await c.invokeTool(params as Record<string, unknown>, {
+						signal: signal as AbortSignal,
+						onUpdate: onUpdate as unknown,
+					})) as never;
+				},
+				renderCall(args, options, theme) {
+					const partial = (options as { isPartial?: boolean })?.isPartial === true;
+					return renderToolVisual(theme, toolFingerprint(name, args), {
+						body: toolActionLabel(name, args),
+						live: partial,
+						error: false,
+					});
+				},
+				renderResult(result, options, theme, args) {
+					return renderToolVisual(theme, toolFingerprint(name, args), {
+						body: toolActionLabel(name, args),
+						live: false,
+						error: isToolError(result, options),
+						right: durationSuffix(result),
+					});
+				},
+			});
+		} catch {
+			// Already registered or host rejected the wrap.
+		}
+	}
+	function wrapAllTools(): void {
+		const api = pi as unknown as { getAllTools?: () => unknown };
+		if (typeof api.getAllTools !== "function") return;
+		try {
+			const tools = api.getAllTools();
+			if (!Array.isArray(tools)) return;
+			for (const tool of tools) {
+				const name =
+					typeof tool === "string"
+						? tool
+						: typeof tool === "object" && tool !== null && "name" in tool && typeof (tool as { name: unknown }).name === "string"
+							? (tool as { name: string }).name
+							: "";
+				if (name) tryWrapTool(name, tool);
+			}
+		} catch {
+			// Registry not ready.
+		}
+	}
+	function stopSpinTimerIfIdle(ctx: unknown): void {
+		if (activityLive || thoughtLive || liveRuns.size !== 0 || anySettling() || spinTimer === undefined) return;
+		try {
+			pulseTimers(ctx)?.clearTimer(spinTimer);
+		} catch {
+			// Clear is best-effort; the managed timer dies with the session regardless.
+		}
+		spinTimer = undefined;
+		const pump = spinUi;
+		if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
+			const paint = pump.requestRender;
+			if (typeof paint === "function") {
+				try {
+					(paint as () => void)();
+				} catch {
+					// Repaint is best-effort; the settled line paints on the next render.
+				}
+			}
+		}
+	}
+	pi.on("session_start", async (_event, ctx) => {
+		if (loaded) return;
+		loaded = true;
+		bindThoughtUi(ctx);
+		wrapAllTools();
+		try {
+			if (enabled && ctx.hasUI) ctx.ui.notify("Minimal output active (grok-build style)", "info");
+		} catch {
+			// notify is best-effort chrome.
+		}
+	});
+	pi.on("before_agent_start", async () => {
+		wrapAllTools();
+	});
+
+	pi.on("tool_result", async (event, _ctx) => {
+		try {
+			if (!enabled) return undefined;
+			const prevDetails = "details" in event ? event.details : undefined;
+			const lead =
+				eventFingerprint(event) === activityLeadFp && activityLabel
+					? { minimalActivityLead: true, minimalActivityLabel: activityLabel }
+					: undefined;
+			const withLead = (details: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+				if (!lead) return details;
+				return { ...(details ?? {}), ...lead };
+			};
+			if (!isCollapseTarget(event)) {
+				if (!lead) return undefined;
+				return { details: withLead(stashFullText(prevDetails, "")) };
+			}
+			const found = textItemOf(event.content);
+			if (!found) {
+				if (!lead) return undefined;
+				return { details: withLead(stashFullText(prevDetails, "")) };
+			}
+			const original = found.item.text as string;
+			const result = collapseToolText(event.toolName, event.input, original);
+			if (!result.changed && !lead) return undefined;
+			let finalText = result.changed ? result.text : original;
+			if (result.changed && result.rule.split(",").includes("truncate")) {
+				const path = await spillToolOutput(event.toolName, original);
+				finalText += `\n[Output truncated: ${original.length}→${result.text.length} chars, rule=${result.rule}. Full output: ${path ?? "spill failed"}]`;
+			}
+			const details = withLead(stashFullText(prevDetails, result.fullText || original));
+			if (!result.changed) return { details };
+			return {
+				content: found.list.map((c) => (c === found.item ? { ...c, text: finalText } : c)),
+				details,
+			};
+		} catch {
+			return undefined;
+		}
+	});
+
+	pi.on("tool_execution_start", async (event, ctx) => {
+		if (!enabled) return;
+		const startedAt = Date.now();
+		const fp = eventFingerprint(event);
+		const toolName = typeof (event as { toolName?: unknown }).toolName === "string"
+			? (event as { toolName: string }).toolName
+			: "tool";
+		const args = (event as { input?: unknown; args?: unknown }).input ?? (event as { args?: unknown }).args;
+		liveRuns.set(event.toolCallId, {
+			label: intentFromEvent(event) ?? activityLabel,
+			startedAt,
+			fp,
+		});
+		if (liveRuns.size === 1) {
+			spinStartedAt = startedAt;
+			activityLeadFp = fp;
+		}
+		activityTotal = "";
+		if (activityRunId === null) {
+			const intent = intentFromEvent(event) ?? summarizeEvent(event);
+			applyIntent(intent, startedAt);
+		} else {
+			activityLive = true;
+		}
+		if (toolName !== "edit") {
+			upsertGroupRow(fp, {
+				body: toolActionLabel(toolName, args),
+				live: true,
+				error: false,
+				right: "",
+				startedAt,
+			});
+			tryWrapTool(toolName);
+		}
+		ensureSpinTimer(ctx);
+		setThoughtWidget(false);
+	});
+
+	pi.on("tool_execution_end", async (event, _ctx) => {
+		if (!enabled) return;
+		const ended = liveRuns.get(event.toolCallId);
+		liveRuns.delete(event.toolCallId);
+		if (ended) markSettling(ended.fp);
+		if (liveRuns.size === 0) {
+			const base = activityStartedAt > 0 ? activityStartedAt : Date.now();
+			const total = Math.max(0, Math.floor((Date.now() - base) / 1000));
+			activityTotal = ` (${total}s)`;
+			if (activityRunId !== null) {
+				rememberSettledTotal(activityRunId, total, activityLabel);
+				markSettling(`act:${activityRunId}`);
+			}
+			spinStartedAt = 0;
+		} else {
+			let earliest = Number.POSITIVE_INFINITY;
+			for (const value of liveRuns.values()) earliest = Math.min(earliest, value.startedAt);
+			spinStartedAt = earliest;
+		}
+	});
+
+	pi.on("message_update", async (event, ctx) => {
+		if (!enabled) return;
+		bindThoughtUi(ctx);
+		const next = intentFromAssistantMessage(event.message);
+		if (next) {
+			applyIntent(next, Date.now());
+			ensureSpinTimer(ctx);
+		}
+		const thinking = extractThinking(event.message);
+		if (thinking.text) thoughtText = thinking.text;
+		if (thinking.live) {
+			thoughtLive = true;
+			if (!activityRunId) applyIntent(activityLabel || "Working", Date.now());
+			syncThought();
+			setThoughtWidget(liveRuns.size === 0);
+			ensureSpinTimer(ctx);
+		} else if (thoughtLive) {
+			thoughtLive = false;
+			syncThought();
+			setThoughtWidget(liveRuns.size === 0 && thoughtSettledLabel !== "");
+		} else if (thoughtWidgetOn) {
+			setThoughtWidget(true);
+		}
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		liveRuns.clear();
+		freezeActivityRun();
+		spinStartedAt = 0;
+		activityStartedAt = 0;
+		activityLabel = "";
+		activityLive = false;
+		activityTotal = "";
+		activityRunId = null;
+		activityLiveSent = false;
+		activityLeadFp = "";
+		resetThought();
+		stopSpinTimerIfIdle(ctx);
+		setWorking(ctx, undefined);
+	});
+
+	pi.on("turn_end", async (_event, ctx) => {
+		liveRuns.clear();
+		freezeActivityRun();
+		spinStartedAt = 0;
+		activityStartedAt = 0;
+		activityLabel = "";
+		activityLive = false;
+		activityTotal = "";
+		activityRunId = null;
+		activityLiveSent = false;
+		activityLeadFp = "";
+		resetThought();
+		stopSpinTimerIfIdle(ctx);
+		setWorking(ctx, undefined);
+	});
+
+	pi.registerCommand("minimal-on", {
+		description: "Enable grok-build-style minimal output",
+		handler: async (_args, ctx) => {
+			enabled = true;
+			activityRunId = null;
+			activityLiveSent = false;
+			ctx.ui.notify("Minimal output enabled", "info");
+		},
+	});
+
+	pi.registerCommand("minimal-off", {
+		description: "Disable grok-build-style minimal output",
+		handler: async (_args, ctx) => {
+			enabled = false;
+			liveRuns.clear();
+			freezeActivityRun();
+			spinStartedAt = 0;
+			activityStartedAt = 0;
+			activityLabel = "";
+			activityLive = false;
+			activityTotal = "";
+			activityRunId = null;
+			activityLiveSent = false;
+			activityLeadFp = "";
+			resetThought();
+			stopSpinTimerIfIdle(ctx);
+			setWorking(ctx, undefined);
+			ctx.ui.notify("Minimal output disabled", "warning");
+		},
+	});
+
+	if (typeof (pi as { registerAssistantThinkingRenderer?: unknown }).registerAssistantThinkingRenderer === "function") {
+		try {
+			(
+				pi as {
+					registerAssistantThinkingRenderer: (fn: (...a: unknown[]) => unknown) => void;
+				}
+			).registerAssistantThinkingRenderer(() => {
+				// Host addChild()s the return value and later calls .render().
+				// `{ component, mode: "replace" }` is not a Component, so Ctrl+T
+				// (unhide thinking) crashed with "t[i].render is not a function".
+				return undefined;
+			});
+		} catch {
+			// Older hosts without this hook keep hideThinkingBlock + the widget path.
+		}
+	}
+
+	pi.registerCommand("minimal-status", {
+		description: "Show minimal-output plugin state",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(`Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled)`, "info");
+		},
+	});
+
+	pi.registerTool({
+		name: "bash",
+		description: "Run a shell command",
+		parameters: pi.zod.object({ command: pi.zod.string() }).passthrough(),
+		mergeCallAndResult: true,
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const c = ctx as unknown as {
+				invokeTool?: (
+					p: Record<string, unknown>,
+					o?: { signal?: AbortSignal; onUpdate?: unknown },
+				) => Promise<unknown>;
+			};
+			if (typeof c?.invokeTool !== "function") {
+				throw new Error("minimal-output: native bash unavailable");
+			}
+			return (await c.invokeTool(params as Record<string, unknown>, {
+				signal: signal as AbortSignal,
+				onUpdate: onUpdate as unknown,
+			})) as never;
+		},
+		renderCall(args, options, theme) {
+			const partial = (options as { isPartial?: boolean })?.isPartial === true;
+			return renderToolVisual(theme, toolFingerprint("bash", args), {
+				body: toolActionLabel("bash", args),
+				live: partial,
+				error: false,
+			});
+		},
+		renderResult(result, options, theme, args) {
+			return renderToolVisual(theme, toolFingerprint("bash", args), {
+				body: toolActionLabel("bash", args),
+				live: false,
+				error: isToolError(result, options),
+				right: durationSuffix(result),
+			});
+		},
+	});
+
+	pi.registerTool({
+		name: "read",
+		description: "Read a file",
+		parameters: pi.zod.object({ path: pi.zod.string() }).passthrough(),
+		mergeCallAndResult: true,
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const c = ctx as unknown as {
+				invokeTool?: (
+					p: Record<string, unknown>,
+					o?: { signal?: AbortSignal; onUpdate?: unknown },
+				) => Promise<unknown>;
+			};
+			if (typeof c?.invokeTool !== "function") {
+				throw new Error("minimal-output: native read unavailable");
+			}
+			return (await c.invokeTool(params as Record<string, unknown>, {
+				signal: signal as AbortSignal,
+				onUpdate: onUpdate as unknown,
+			})) as never;
+		},
+		renderCall(args, options, theme) {
+			const partial = (options as { isPartial?: boolean })?.isPartial === true;
+			return renderToolVisual(theme, toolFingerprint("read", args), {
+				body: toolActionLabel("read", args),
+				live: partial,
+				error: false,
+			});
+		},
+		renderResult(result, options, theme, args) {
+			return renderToolVisual(theme, toolFingerprint("read", args), {
+				body: toolActionLabel("read", args),
+				live: false,
+				error: isToolError(result, options),
+				right: durationSuffix(result),
+			});
+		},
+	});
+	pi.registerTool({
+		name: "grep",
+		description: "Search for a pattern",
+		parameters: pi.zod.object({ pattern: pi.zod.string() }).passthrough(),
+		mergeCallAndResult: true,
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const c = ctx as unknown as {
+				invokeTool?: (
+					p: Record<string, unknown>,
+					o?: { signal?: AbortSignal; onUpdate?: unknown },
+				) => Promise<unknown>;
+			};
+			if (typeof c?.invokeTool !== "function") {
+				throw new Error("minimal-output: native grep unavailable");
+			}
+			return (await c.invokeTool(params as Record<string, unknown>, {
+				signal: signal as AbortSignal,
+				onUpdate: onUpdate as unknown,
+			})) as never;
+		},
+		renderCall(args, options, theme) {
+			const partial = (options as { isPartial?: boolean })?.isPartial === true;
+			return renderToolVisual(theme, toolFingerprint("grep", args), {
+				body: toolActionLabel("grep", args),
+				live: partial,
+				error: false,
+			});
+		},
+		renderResult(result, options, theme, args) {
+			return renderToolVisual(theme, toolFingerprint("grep", args), {
+				body: toolActionLabel("grep", args),
+				live: false,
+				error: isToolError(result, options),
+				right: durationSuffix(result),
+			});
+		},
+	});
+
+	pi.registerTool({
+		name: "glob",
+		description: "Find files by pattern",
+		parameters: pi.zod.object({ path: pi.zod.string() }).passthrough(),
+		mergeCallAndResult: true,
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const c = ctx as unknown as {
+				invokeTool?: (
+					p: Record<string, unknown>,
+					o?: { signal?: AbortSignal; onUpdate?: unknown },
+				) => Promise<unknown>;
+			};
+			if (typeof c?.invokeTool !== "function") {
+				throw new Error("minimal-output: native glob unavailable");
+			}
+			return (await c.invokeTool(params as Record<string, unknown>, {
+				signal: signal as AbortSignal,
+				onUpdate: onUpdate as unknown,
+			})) as never;
+		},
+		renderCall(args, options, theme) {
+			const partial = (options as { isPartial?: boolean })?.isPartial === true;
+			return renderToolVisual(theme, toolFingerprint("glob", args), {
+				body: toolActionLabel("glob", args),
+				live: partial,
+				error: false,
+			});
+		},
+		renderResult(result, options, theme, args) {
+			return renderToolVisual(theme, toolFingerprint("glob", args), {
+				body: toolActionLabel("glob", args),
+				live: false,
+				error: isToolError(result, options),
+				right: durationSuffix(result),
+			});
+		},
+	});
+
+	pi.registerTool({
+		name: "write",
+		description: "Write a file",
+		parameters: pi.zod.object({ path: pi.zod.string() }).passthrough(),
+		mergeCallAndResult: true,
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const c = ctx as unknown as {
+				invokeTool?: (
+					p: Record<string, unknown>,
+					o?: { signal?: AbortSignal; onUpdate?: unknown },
+				) => Promise<unknown>;
+			};
+			if (typeof c?.invokeTool !== "function") {
+				throw new Error("minimal-output: native write unavailable");
+			}
+			return (await c.invokeTool(params as Record<string, unknown>, {
+				signal: signal as AbortSignal,
+				onUpdate: onUpdate as unknown,
+			})) as never;
+		},
+		renderCall(args, options, theme) {
+			const partial = (options as { isPartial?: boolean })?.isPartial === true;
+			return renderToolVisual(theme, toolFingerprint("write", args), {
+				body: toolActionLabel("write", args),
+				live: partial,
+				error: false,
+			});
+		},
+		renderResult(result, options, theme, args) {
+			return renderToolVisual(theme, toolFingerprint("write", args), {
+				body: toolActionLabel("write", args),
+				live: false,
+				error: isToolError(result, options),
+				right: durationSuffix(result),
+			});
+		},
+	});
+}

@@ -1,0 +1,15 @@
+hideThinkingBlock: true
+defaultThinkingLevel: minimal
+display:
+  hideToolActivity: true
+  showTurnTime: true
+  shimmer: disabled
+terminal:
+  showProgress: false
+startup:
+  quiet: true
+  showSplash: false
+tui:
+  tight: true
+statusLine:
+  preset: minimal
