@@ -76,8 +76,52 @@ function textItemOf(content: unknown): { list: TextItem[]; item: TextItem } | un
 	return item?.text !== undefined ? { list, item } : undefined;
 }
 
+function stripFence(text: string): string {
+	const t = text.trim();
+	const m = t.match(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/);
+	return m ? m[1].trim() : t;
+}
+
+// MCP bridges deliver the payload twice: raw JSON plus a fenced
+// {"result": "<raw>"} envelope text item. Collapse the inner payload and
+// drop the envelope so rows stay one collapsed block.
+function unwrapResultEnvelope(text: string): string | null {
+	try {
+		const parsed: unknown = JSON.parse(stripFence(text));
+		if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+			const entries = Object.entries(parsed as Record<string, unknown>);
+			if (entries.length === 1 && entries[0][0] === "result" && typeof entries[0][1] === "string") {
+				const inner = (entries[0][1] as string).trim();
+				if (inner.startsWith("{") || inner.startsWith("[")) {
+					JSON.parse(inner);
+					return entries[0][1] as string;
+				}
+			}
+		}
+	} catch {}
+	return null;
+}
+
+function isMcpEnvelopeDuplicate(text: string, raw: string): boolean {
+	if (!text || !raw) return false;
+	if (text === raw) return true;
+	const t = stripFence(text).trim();
+	const r = raw.trim();
+	if (t === r) return true;
+	const inner = unwrapResultEnvelope(text);
+	if (inner !== null && inner.trim() === r) return true;
+	const head = r.slice(0, 120);
+	if (head.length <= 40) return false;
+	if (t.includes(head)) return true;
+	return inner !== null && inner.includes(head);
+}
+
+function pruneMcpEnvelopes(list: TextItem[], anchor: TextItem, raw: string): TextItem[] {
+	return list.filter((c) => c === anchor || c.type !== "text" || !isMcpEnvelopeDuplicate(typeof c.text === "string" ? c.text : "", raw));
+}
+
 function isCollapseTarget(event: ToolResultEvent): boolean {
-	return event.type === "tool_result" && ["bash", "read", "grep", "glob"].includes(event.toolName);
+	return event.type === "tool_result" && (["read", "bash", "ast_grep", "debug", "eval", "github", "glob", "grep", "lsp", "checkpoint", "rewind", "context_notes", "new_context", "security_scan", "task", "hub", "todo", "web_search", "write", "memory_edit", "retain", "recall", "reflect", "learn", "manage_skill"].includes(event.toolName) || event.toolName.startsWith("mcp__") || event.toolName.includes("/"));
 }
 
 async function spillToolOutput(toolName: string, original: string): Promise<string | null> {
@@ -242,6 +286,26 @@ function stashFullText(prev: unknown, full: string): Record<string, unknown> {
 	}
 	merged.minimalFullText = full;
 	return merged;
+}
+
+// Frozen per-turn group identity. tool_result stashes these into the persisted
+// details while module state is live; renderResult reads them back so rebuilt
+// transcripts (restart/resume) regroup rows under their original parent header
+// instead of scattering _anon groups with no label.
+function frozenGroupKeys(toolName: string): Record<string, unknown> {
+	if (!wrappedTools.has(toolName) || activityRunId === null) return {};
+	return { minimalGroupRun: activityRunId, minimalGroupLabel: activityLabel };
+}
+
+function frozenGroupOf(result: unknown): { gid: string; label: string } | undefined {
+	try {
+		const d = (result as { details?: unknown } | null | undefined)?.details;
+		if (typeof d !== "object" || d === null) return undefined;
+		const gid = (d as Record<string, unknown>)["minimalGroupRun"];
+		const label = (d as Record<string, unknown>)["minimalGroupLabel"];
+		if (typeof gid === "string" && gid && typeof label === "string") return { gid, label };
+	} catch {}
+	return undefined;
 }
 
 function toolResultText(result: unknown): string {
@@ -448,13 +512,6 @@ const SETTLE_MS = 500;
 const TOOL_INDENT = "  ";
 const LINE_WIDTH_RATIO = 0.7;
 const settleAt = new Map<string, number>();
-const TOKEN_FALLBACK: Record<string, [number, number, number]> = {
-	success: [158, 206, 106],
-	error: [247, 118, 142],
-	accent: [122, 162, 247],
-	text: [229, 229, 231],
-	dim: [128, 128, 128],
-};
 
 function parseHexRgb(hex: string): [number, number, number] | undefined {
 	const h = hex.startsWith("#") ? hex.slice(1) : hex;
@@ -489,7 +546,7 @@ function themeTokenRgb(theme: unknown, token: string): [number, number, number] 
 			// Unstyleable.
 		}
 	}
-	return TOKEN_FALLBACK[token];
+	return undefined;
 }
 
 function themeBgRgb(theme: unknown): [number, number, number] {
@@ -612,6 +669,8 @@ function formatRowLine(
 		error?: boolean;
 		right?: string;
 		fadeKey?: string;
+		tree?: "mid" | "last";
+		mark?: string;
 	},
 ): string {
 	const live = opts.live === true;
@@ -619,15 +678,16 @@ function formatRowLine(
 	const spin = live || settling;
 	const op = rowOpacity(live, opts.fadeKey);
 	const markToken = spin ? "accent" : opts.error ? "error" : "success";
-	const mark = spin ? (SPIN_FRAMES[spinFrame % SPIN_FRAMES.length] ?? "◈") : "◆";
-	const pad = opts.indent === true ? TOOL_INDENT : " ";
+	const mark = opts.mark ?? (spin ? (SPIN_FRAMES[spinFrame % SPIN_FRAMES.length] ?? "◈") : "◆");
+	const branch = opts.tree === "mid" ? "├─" : opts.tree === "last" ? "╰─" : "";
+	const pad = branch ? paintAt(theme, branch, opts.error ? "error" : spin ? "accent" : "dim", op) + " " : opts.indent === true ? TOOL_INDENT : " ";
 	const w = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
-	const prefix = `${pad}${paintMark(theme, mark, markToken)} `;
+	const prefix = branch && !spin ? pad : `${pad}${paintMark(theme, mark, markToken)} `;
 	const right = opts.right ?? "";
 	const tail = right ? paintAt(theme, right, "dim", op) : "";
 	const bodyBudget = Math.max(1, w - visibleWidth(prefix) - (tail ? visibleWidth(tail) + 1 : 0));
 	const body = truncatePlain(stripKindSuffix(opts.body), bodyBudget);
-	const left = `${prefix}${paintBold(theme, paintAt(theme, body, "text", op))}`;
+	const left = `${prefix}${paintBold(theme, paintAt(theme, body, opts.error ? "error" : "toolOutput", op))}`;
 	if (!tail) return left;
 	const gap = Math.max(0, w - visibleWidth(left) - visibleWidth(tail));
 	return `${left}${" ".repeat(gap)}${tail}`;
@@ -645,7 +705,7 @@ function thinkingRailLines(theme: unknown, width: number, text: string, indent: 
 	const lines: string[] = [];
 	for (const preview of wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES)) {
 		lines.push(
-			`${paintAt(theme, bar, "accent", TOOL_TEXT_OPACITY)}${paintAt(theme, preview, "text", TOOL_TEXT_OPACITY)}`,
+			`${paintAt(theme, bar, "accent", TOOL_TEXT_OPACITY)}${paintAt(theme, preview, "toolOutput", TOOL_TEXT_OPACITY)}`,
 		);
 	}
 	return lines;
@@ -658,11 +718,12 @@ function paintThinkingVisual(theme: unknown): Container {
 			const live = thoughtLive;
 			const body = live ? "Thinking..." : thoughtSettledLabel || "Thought";
 			const lines: string[] = [
-				formatRowLine(theme, width, {
-					body,
-					live,
-					fadeKey: thoughtFadeKey(),
-				}),
+			formatRowLine(theme, width, {
+				body,
+				live,
+				fadeKey: thoughtFadeKey(),
+				right: live && thoughtStartedAt > 0 ? elapsedSuffix(thoughtStartedAt) : "",
+			}),
 			];
 			if (live) lines.push(...thinkingRailLines(theme, width, thoughtText, false));
 			return lines;
@@ -749,18 +810,23 @@ function emptyBlock(): Container {
 	return c;
 }
 
-function upsertGroupRow(fp: string, row: Omit<GroupRow, "fp">): string {
-	let gid = fpToGroup.get(fp);
+function upsertGroupRow(fp: string, row: Omit<GroupRow, "fp">, frozen?: { gid: string; label: string }): string {
+	let gid = frozen?.gid ?? fpToGroup.get(fp);
 	if (!gid) {
 		gid = activityRunId ?? `_anon:${fp}`;
+		fpToGroup.set(fp, gid);
+	} else if (frozen?.gid) {
 		fpToGroup.set(fp, gid);
 	}
 	let group = toolGroups.get(gid);
 	if (!group) {
-		group = { label: activityLabel, rows: new Map() };
+		group = { label: frozen?.label ?? activityLabel, rows: new Map() };
 		toolGroups.set(gid, group);
+	} else if (frozen?.label) {
+		if (!group.label) group.label = frozen.label;
+	} else if (activityLabel) {
+		group.label = activityLabel;
 	}
-	if (activityLabel) group.label = activityLabel;
 	const prev = group.rows.get(fp);
 	group.rows.set(fp, {
 		fp,
@@ -813,6 +879,7 @@ function paintGroup(theme: unknown, gid: string): Container {
 						live: headerLive,
 						fadeKey: `act:${gid}`,
 						right: headerLive ? elapsedSuffix(activityStartedAt) : "",
+						mark: headerLive ? undefined : "●",
 					}),
 				);
 			}
@@ -839,17 +906,18 @@ function paintGroup(theme: unknown, gid: string): Container {
 					right: row.right,
 				});
 			}
-			for (const row of shown) {
+			for (const [idx, row] of shown.entries()) {
 				const settleKey = row.fps[0] ?? row.body;
 				const isThought = settleKey.startsWith("thought:");
 				lines.push(
 					formatRowLine(theme, width, {
 						body: row.body,
 						indent: true,
+						tree: idx === shown.length - 1 ? "last" : "mid",
 						live: row.live,
 						error: row.error,
 						fadeKey: settleKey,
-						right: isThought ? "" : row.live ? elapsedSuffix(row.startedAt) : row.right,
+						right: row.live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
 					}),
 				);
 				if (isThought && row.live) {
@@ -869,6 +937,7 @@ function renderToolVisual(
 	theme: unknown,
 	fp: string,
 	opts: { body: string; live: boolean; error: boolean; right?: string },
+	frozen?: { gid: string; label: string },
 ): Container {
 	const gid = upsertGroupRow(fp, {
 		body: opts.body,
@@ -876,7 +945,7 @@ function renderToolVisual(
 		error: opts.error,
 		right: opts.right ?? "",
 		startedAt: Date.now(),
-	});
+	}, frozen);
 	if (!isGroupLead(gid, fp)) return emptyBlock();
 	return paintGroup(theme, gid);
 }
@@ -979,12 +1048,76 @@ function pulseTimers(ctx: unknown):
 	};
 }
 
+function skillPromptOf(message: unknown): { name: string; args: string; userInvoked: boolean } {
+	const m = (message ?? {}) as Record<string, unknown>;
+	const details = (m["details"] ?? {}) as Record<string, unknown>;
+	const rawName = details["name"];
+	const rawPath = details["path"];
+	const chip = details["__queueChipText"];
+	let name = typeof rawName === "string" && rawName.trim() ? rawName.trim() : "";
+	let args = "";
+	const rawArgs = details["args"];
+	if (typeof rawArgs === "string" && rawArgs.trim()) args = rawArgs.trim();
+	else if (Array.isArray(rawArgs)) {
+		const parts = rawArgs.map(String).filter((s) => s.trim());
+		if (parts.length > 0) args = parts.join(" ");
+	}
+	if (typeof chip === "string" && chip.trim()) {
+		const one = chip.replace(/\s+/g, " ").trim();
+		const mm = one.match(/^\/skill:([^\s]+)\s*(.*)$/);
+		if (mm) {
+			if (!name) name = mm[1];
+			if (!args && mm[2]) args = mm[2].trim();
+		} else if (!args) args = one;
+	}
+	if (!name && typeof rawPath === "string") {
+		const bits = rawPath.replace(/\\/g, "/").split("/").filter(Boolean);
+		if (bits.length >= 2) name = bits[bits.length - 2];
+		else if (bits.length === 1) name = bits[0].replace(/\.md$/i, "");
+	}
+	if (!name) name = "skill";
+	args = args.replace(/\s+/g, " ").trim();
+	if (args.length > 80) args = `${args.slice(0, 80)}…`;
+	const attribution = m["attribution"];
+	return { name, args, userInvoked: attribution === "user" };
+}
+
+function skillPromptBody(message: unknown): string {
+	const m = (message ?? {}) as Record<string, unknown>;
+	const content = m["content"];
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		const item = (content as Array<Record<string, unknown>>).find(
+			(c) => c?.["type"] === "text" && typeof c["text"] === "string",
+		);
+		if (item) return item["text"] as string;
+	}
+	return "";
+}
+
+function skillPromptRenderer(message: unknown, options: unknown, theme: unknown) {
+	const m = (message ?? {}) as Record<string, unknown>;
+	if (m["display"] === false) return new Container();
+	const opts = (options ?? {}) as Record<string, unknown>;
+	const { name, args, userInvoked } = skillPromptOf(message);
+	if (opts["expanded"] === true) {
+		const body = skillPromptBody(message);
+		if (!body) return new Container();
+		return paintRow(theme, { body });
+	}
+	const oneLiner = userInvoked && args ? `◆ Skill ${name} ${args}` : `◆ Skill ${name}`;
+	return paintRow(theme, { body: oneLiner });
+}
+
 export default function (pi: ExtensionAPI) {
 	let loaded = false;
 	let spinTimer: unknown = undefined;
 	let spinUi: unknown;
 	pi.registerMessageRenderer("minimal-activity", (message, options, theme) =>
 		activityRenderer(message, options, theme),
+	);
+	pi.registerMessageRenderer("skill-prompt", (message, options, theme) =>
+		skillPromptRenderer(message, options, theme),
 	);
 	// Aside-channel records: the only extension path that paints transcript
 	// rows. Non-interrupting by core design (step-boundary pickup, never
@@ -1083,6 +1216,24 @@ export default function (pi: ExtensionAPI) {
 			spinTimer = undefined;
 		}
 	}
+	// Best-effort repaint for hosts where the 120ms pump never starts (no
+// managed timers on ctx): without this, a pending card painted before the
+// label lands stays headerless until the settle repaint. Core coalesces
+// frames, so one extra request per tool start is cheap.
+function requestRepaint(): void {
+		try {
+			const pump = spinUi;
+			if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
+				const paint = pump.requestRender;
+				if (typeof paint === "function") {
+					(paint as () => void)();
+				}
+			}
+		} catch {
+			// Repaint is best-effort; the next event or tick retries.
+		}
+	}
+
 	function extractThinking(message: unknown): { text: string; live: boolean } {
 		try {
 			const content = (message as { content?: unknown })?.content;
@@ -1124,10 +1275,10 @@ export default function (pi: ExtensionAPI) {
 			const sec = Math.max(0, Math.floor((Date.now() - thoughtStartedAt) / 1000));
 			thoughtSettledLabel = sec > 0 ? `Thought for ${sec}s` : "Thought";
 			upsertGroupRow(fp, {
-				body: thoughtSettledLabel,
+				body: "Thought",
 				live: false,
 				error: false,
-				right: "",
+				right: sec > 0 ? ` (${sec}s)` : "",
 				startedAt: thoughtStartedAt,
 			});
 			markSettling(fp);
@@ -1178,7 +1329,7 @@ export default function (pi: ExtensionAPI) {
 						live: false,
 						error: isToolError(result, options),
 						right: durationSuffix(result),
-					});
+					}, frozenGroupOf(result));
 				},
 			});
 		} catch {
@@ -1229,6 +1380,7 @@ export default function (pi: ExtensionAPI) {
 		loaded = true;
 		bindThoughtUi(ctx);
 		wrapAllTools();
+		ensureSpinTimer(ctx);
 		try {
 			if (enabled && ctx.hasUI) ctx.ui.notify("Minimal output active (grok-build style)", "info");
 		} catch {
@@ -1243,6 +1395,11 @@ export default function (pi: ExtensionAPI) {
 		try {
 			if (!enabled) return undefined;
 			const prevDetails = "details" in event ? event.details : undefined;
+			const frozen = frozenGroupKeys(event.toolName);
+			const withFrozen = (details: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+				if (Object.keys(frozen).length === 0) return details;
+				return { ...(details ?? {}), ...frozen };
+			};
 			const lead =
 				eventFingerprint(event) === activityLeadFp && activityLabel
 					? { minimalActivityLead: true, minimalActivityLabel: activityLabel }
@@ -1253,25 +1410,29 @@ export default function (pi: ExtensionAPI) {
 			};
 			if (!isCollapseTarget(event)) {
 				if (!lead) return undefined;
-				return { details: withLead(stashFullText(prevDetails, "")) };
+				return { details: withLead(withFrozen(stashFullText(prevDetails, ""))) };
 			}
 			const found = textItemOf(event.content);
 			if (!found) {
 				if (!lead) return undefined;
-				return { details: withLead(stashFullText(prevDetails, "")) };
+				return { details: withLead(withFrozen(stashFullText(prevDetails, ""))) };
 			}
 			const original = found.item.text as string;
-			const result = collapseToolText(event.toolName, event.input, original);
-			if (!result.changed && !lead) return undefined;
+			const isMcp = event.toolName.startsWith("mcp__") || event.toolName.includes("/");
+			const raw = isMcp ? (unwrapResultEnvelope(original) ?? original) : original;
+			const result = collapseToolText(event.toolName, event.input, raw);
+			const pruned = isMcp ? pruneMcpEnvelopes(found.list, found.item, raw) : found.list;
+			const droppedDupes = pruned.length !== found.list.length;
+			if (!result.changed && !droppedDupes && !lead) return undefined;
 			let finalText = result.changed ? result.text : original;
 			if (result.changed && result.rule.split(",").includes("truncate")) {
-				const path = await spillToolOutput(event.toolName, original);
-				finalText += `\n[Output truncated: ${original.length}→${result.text.length} chars, rule=${result.rule}. Full output: ${path ?? "spill failed"}]`;
+				const path = await spillToolOutput(event.toolName, raw);
+				finalText += `\n[Output truncated: ${raw.length}→${result.text.length} chars, rule=${result.rule}. Full output: ${path ?? "spill failed"}]`;
 			}
-			const details = withLead(stashFullText(prevDetails, result.fullText || original));
-			if (!result.changed) return { details };
+			const details = withLead(withFrozen(stashFullText(prevDetails, result.fullText || raw)));
+			if (!result.changed && !droppedDupes) return { details };
 			return {
-				content: found.list.map((c) => (c === found.item ? { ...c, text: finalText } : c)),
+				content: pruned.map((c) => (c === found.item ? { ...c, text: finalText } : c)),
 				details,
 			};
 		} catch {
@@ -1315,6 +1476,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		ensureSpinTimer(ctx);
 		setThoughtWidget(false);
+		requestRepaint();
 	});
 
 	pi.on("tool_execution_end", async (event, _ctx) => {
@@ -1341,6 +1503,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_update", async (event, ctx) => {
 		if (!enabled) return;
 		bindThoughtUi(ctx);
+		const prevRun = activityRunId;
+		const prevLabel = activityLabel;
 		const next = intentFromAssistantMessage(event.message);
 		if (next) {
 			applyIntent(next, Date.now());
@@ -1361,6 +1525,7 @@ export default function (pi: ExtensionAPI) {
 		} else if (thoughtWidgetOn) {
 			setThoughtWidget(true);
 		}
+		if (activityRunId !== prevRun || activityLabel !== prevLabel) requestRepaint();
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
@@ -1484,7 +1649,7 @@ export default function (pi: ExtensionAPI) {
 				live: false,
 				error: isToolError(result, options),
 				right: durationSuffix(result),
-			});
+			}, frozenGroupOf(result));
 		},
 	});
 
@@ -1522,7 +1687,7 @@ export default function (pi: ExtensionAPI) {
 				live: false,
 				error: isToolError(result, options),
 				right: durationSuffix(result),
-			});
+			}, frozenGroupOf(result));
 		},
 	});
 	pi.registerTool({
@@ -1559,7 +1724,7 @@ export default function (pi: ExtensionAPI) {
 				live: false,
 				error: isToolError(result, options),
 				right: durationSuffix(result),
-			});
+			}, frozenGroupOf(result));
 		},
 	});
 
@@ -1597,7 +1762,7 @@ export default function (pi: ExtensionAPI) {
 				live: false,
 				error: isToolError(result, options),
 				right: durationSuffix(result),
-			});
+			}, frozenGroupOf(result));
 		},
 	});
 
@@ -1635,7 +1800,7 @@ export default function (pi: ExtensionAPI) {
 				live: false,
 				error: isToolError(result, options),
 				right: durationSuffix(result),
-			});
+			}, frozenGroupOf(result));
 		},
 	});
 }

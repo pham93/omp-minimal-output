@@ -21,7 +21,7 @@ flowchart LR
     aside -.-> freeze["agent_end / turn_end\nfreeze settled totals"]
 ```
 
-Six shadows (`bash`, `read`, `grep`, `glob`, `edit`, `write`): same schemas plus `.passthrough()`, `execute` delegates to the native tool, `renderCall` paints the live row, `renderResult` paints the settled `◆` row with dim right-side duration (`durationSuffix`) and error styling (`isToolError`). Only `bash`/`read`/`grep`/`glob` results are collapsed (see below); `edit`/`write` shadows own the minimal row shape and pass results through, with full text stashed for expansion.
+Five shadows (`bash`, `read`, `grep`, `glob`, `write`): same schemas plus `.passthrough()`, `execute` delegates to the native tool, `renderCall` paints the live row, `renderResult` paints the settled row with dim right-side duration (`durationSuffix`) and error styling (`isToolError`). `edit` stays native (diff fidelity). Collapse covers 25 built-ins plus MCP rows (single-line `◇` one-liners, envelope dupes pruned); grouped tools share a `●` parent with `├─`/`╰─` children, full text stashed for expansion.
 
 Thoughts are fully hidden (`registerAssistantThinkingRenderer` is supplemental-only). Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
@@ -74,7 +74,7 @@ Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the
 
 ## Files
 
-- `index.ts` — extension entry: 6 shadows, `minimal-activity` message renderer, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), spin/fade/group painting, `/minimal-on|off|status`.
+- `index.ts` — extension entry: 5 shadows, `minimal-activity` + `skill-prompt` message renderers, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), spin/fade/group painting, `/minimal-on|off|status`.
 - `filters.ts` — pure string filters, zero dependencies (`collapseToolText`, per-class aggregators, `MAX_CHARS`/`MAX_LINES` truncation).
 - `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`.
 - `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`.
