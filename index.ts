@@ -37,6 +37,7 @@ import {
 } from "./results.ts";
 import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
+import { renderEvalCard } from "./eval-card.ts";
 import { installReadGroupSkin } from "./read-group.ts";
 
 // Elapsed base for the live row timer (ms epoch). Maintained by the
@@ -910,8 +911,8 @@ export default function (pi: ExtensionAPI) {
   function tryWrapTool(name: string, source?: unknown): void {
     if (!name || wrapApplied.has(name)) return;
     // One-liners for bash/read/grep/glob/write plus the edit pretty-diff
-    // card. Execution delegates untouched to native; only the card
-    // is custom (compact rows, full text behind Ctrl+O).
+    // card and the eval output card. Execution delegates untouched to
+    // native; only the card is custom (compact rows, full text behind Ctrl+O).
     if (!wrapTool(name)) return;
     const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
     // NEVER register a lossy stub: without the native parameters the shadowed
@@ -945,6 +946,7 @@ export default function (pi: ExtensionAPI) {
         renderCall(args, options, theme) {
           const partial = (options as { isPartial?: boolean })?.isPartial === true;
           if (name === "edit") return renderPrettyEditCard(theme, args, undefined, options, partial);
+          if (name === "eval") return renderEvalCard(theme, args, undefined, options, partial, toolFingerprint(name, args));
           return renderToolVisual(theme, toolFingerprint(name, args), {
             body: toolActionLabel(name, args),
             live: partial,
@@ -953,6 +955,7 @@ export default function (pi: ExtensionAPI) {
         },
         renderResult(result, options, theme, args) {
           if (name === "edit") return renderPrettyEditCard(theme, args, result, options, false);
+          if (name === "eval") return renderEvalCard(theme, args, result, options, false, toolFingerprint(name, args));
           return renderToolVisual(
             theme,
             toolFingerprint(name, args),
@@ -1083,7 +1086,9 @@ export default function (pi: ExtensionAPI) {
         const path = await spillToolOutput(event.toolName, raw);
         finalText += `\n[Output truncated: ${raw.length}→${result.text.length} chars, rule=${result.rule}. Full output: ${path ?? "spill failed"}]`;
       }
-      const details = withLead(withFrozen(stashFullText(prevDetails, result.fullText || raw)));
+      // Stash the raw text (ANSI intact): the eval card reads it back so its
+      // output keeps TTY colors; the collapsed message text stays stripped.
+      const details = withLead(withFrozen(stashFullText(prevDetails, raw)));
       if (!result.changed && !droppedDupes) return { details };
       return {
         content: pruned.map((c) => (c === found.item ? { ...c, text: finalText } : c)),
@@ -1119,7 +1124,7 @@ export default function (pi: ExtensionAPI) {
     } else {
       activityLive = true;
     }
-    if (toolName !== "edit") {
+    if (toolName !== "edit" && toolName !== "eval") {
       upsertGroupRow(fp, {
         body: toolActionLabel(toolName, args),
         live: true,
@@ -1274,6 +1279,7 @@ export default function (pi: ExtensionAPI) {
       if (cfg.nativeGlob) native.push("glob");
       if (cfg.nativeWrite) native.push("write");
       if (cfg.nativeEdit) native.push("edit");
+      if (cfg.nativeEval) native.push("eval");
       ctx.ui.notify(
         `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"}`,
         "info",

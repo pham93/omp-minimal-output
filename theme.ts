@@ -127,6 +127,109 @@ export function paintAt(theme: unknown, text: string, token: string, opacity: nu
   return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
 }
 
+
+// Basic/bright foreground color number → sRGB.
+const BASIC_FG_RGB: Record<number, [number, number, number]> = {
+  30: [0, 0, 0],
+  31: [205, 0, 0],
+  32: [0, 205, 0],
+  33: [205, 205, 0],
+  34: [0, 0, 238],
+  35: [205, 0, 205],
+  36: [0, 205, 205],
+  37: [229, 229, 229],
+  90: [127, 127, 127],
+  91: [255, 0, 0],
+  92: [0, 255, 0],
+  93: [255, 255, 0],
+  94: [92, 92, 255],
+  95: [255, 0, 255],
+  96: [0, 255, 255],
+  97: [255, 255, 255],
+};
+
+function ansi256Rgb(n: number): [number, number, number] {
+  if (n < 16) return BASIC_FG_RGB[n] ?? [255, 255, 255];
+  if (n < 232) {
+    const v = n - 16;
+    const step = (c: number): number => (c === 0 ? 0 : 55 + c * 40);
+    return [step(Math.floor(v / 36)), step(Math.floor((v % 36) / 6)), step(v % 6)];
+  }
+  const g = 8 + (n - 232) * 10;
+  return [g, g, g];
+}
+
+export function stripSgr(text: string): string {
+  return text.replace(/\[[0-9;]*m/g, "");
+}
+
+// Blend every foreground color in SGR-painted text toward the theme bg by
+// opacity, and drop background fills. Syntax-highlighted input and
+// color-emitting program output keep their hues but sit at the same rest
+// opacity as every other row instead of punching through at full brightness.
+// Blend one SGR parameter run: foreground colors mix toward the theme bg,
+// background fills drop, everything else (bold, resets, underline) passes
+// through so combined sequences like `1;31m` keep working.
+function blendSgrParams(params: string, mix: (rgb: [number, number, number]) => string): string {
+  const parts = params.split(";");
+  const out: string[] = [];
+  let i = 0;
+  while (i < parts.length) {
+    const p = parts[i] ?? "";
+    const q = parts[i + 1] ?? "";
+    if (p === "38" && q === "2") {
+      const r = +(parts[i + 2] ?? NaN);
+      const g = +(parts[i + 3] ?? NaN);
+      const b = +(parts[i + 4] ?? NaN);
+      if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+        out.push(mix([r, g, b]));
+        i += 5;
+      } else {
+        out.push(p);
+        i += 1;
+      }
+    } else if (p === "38" && q === "5") {
+      const n = +(parts[i + 2] ?? NaN);
+      if (Number.isFinite(n)) {
+        out.push(mix(ansi256Rgb(n)));
+        i += 3;
+      } else {
+        out.push(p);
+        i += 1;
+      }
+    } else if (p === "48") {
+      // Background fill (extra params for 48;2/48;5): drop the whole run.
+      i += q === "2" ? 5 : q === "5" ? 3 : 1;
+    } else if (/^(4[0-7]|10[0-7])$/.test(p)) {
+      i += 1;
+    } else if (/^(3[0-7]|9[0-7])$/.test(p)) {
+      out.push(mix(BASIC_FG_RGB[+p] ?? [255, 255, 255]));
+      i += 1;
+    } else {
+      out.push(p);
+      i += 1;
+    }
+  }
+  return out.join(";");
+}
+
+// Blend every foreground color in SGR-painted text toward the theme bg by
+// opacity, and drop background fills. Syntax-highlighted input and
+// color-emitting program output keep their hues but sit at the same rest
+// opacity as every other row instead of punching through at full brightness.
+export function dimAnsi(theme: unknown, text: string, opacity: number): string {
+  if (!text) return text;
+  const a = Math.min(1, Math.max(0, opacity));
+  const bg = themeBgRgb(theme);
+  const mix = (rgb: [number, number, number]): string =>
+    `38;2;${Math.round(bg[0] + (rgb[0] - bg[0]) * a)};${Math.round(bg[1] + (rgb[1] - bg[1]) * a)};${Math.round(bg[2] + (rgb[2] - bg[2]) * a)}`;
+  return text.replace(/\[([0-9;]*)m/g, (m: string, params: string) => {
+    if (params === "") return m;
+    const blended = blendSgrParams(params, mix);
+    return blended === "" ? "" : `[${blended}m`;
+  });
+}
+
 export function markSettling(key: string): void {
   settleAt.set(key, Date.now());
 }
@@ -228,4 +331,12 @@ export function formatRowLine(
 
 export function advanceSpinFrame(): void {
   spinFrame = (spinFrame + 1) % Math.max(1, indicatorFrames().length);
+}
+
+// Sync the shared spinner to an external ticker (core passes spinnerFrame in
+// render options on partial-streaming repaints). Our own 120ms pump keeps
+// advancing it otherwise; modulo keeps foreign frame counts in range.
+export function setSpinFrame(n: number): void {
+  const len = Math.max(1, indicatorFrames().length);
+  spinFrame = ((Math.floor(n) % len) + len) % len;
 }

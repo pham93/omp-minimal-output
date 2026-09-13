@@ -74,7 +74,11 @@ export function truncatePlain(text: string, max: number): string {
     if (visibleWidth(text.slice(0, mid)) <= budget) lo = mid;
     else hi = mid - 1;
   }
-  return `${text.slice(0, lo)}…`;
+  // Never cut inside an escape sequence: back off to before its ESC.
+  const head = text.slice(0, lo);
+  const esc = head.lastIndexOf("");
+  const end = esc !== -1 && !head.slice(esc).includes("m") ? esc : lo;
+  return `${text.slice(0, end)}…`;
 }
 
 // Visible whitespace rendering for diff rows: tabs show as → and spaces as ·
@@ -155,9 +159,8 @@ export function toolActionLabel(toolName: string, args: unknown): string {
     const pattern = searchPatternText(args);
     return pattern.trim() ? `Search \`${shortCommandText(pattern)}\`` : "Search";
   }
-  if (name === "glob") {
-    const pattern = searchPatternText(args);
-    return pattern.trim() ? `Glob \`${shortCommandText(pattern)}\`` : "Glob";
+  if (name === "eval") {
+    return evalLabelText(fields);
   }
   const slash = name.lastIndexOf("/");
   if (slash >= 0) {
@@ -173,4 +176,78 @@ export function searchPatternText(args: unknown): string {
   const fields = args as Record<string, unknown>;
   const raw = fields["pattern"] ?? fields["query"] ?? fields["path"] ?? "";
   return typeof raw === "string" ? raw : "";
+}
+
+// Language icons for eval headers. Keys are normalized highlighter ids;
+// unknown languages get no icon rather than a placeholder.
+const EVAL_LANG_ICONS: Record<string, string> = {
+  python: "🐍",
+  javascript: "🟨",
+  jsx: "🟨",
+  typescript: "🔷",
+  tsx: "🔷",
+  shell: "🐚",
+  bash: "🐚",
+  ruby: "💎",
+  go: "🐹",
+  rust: "🦀",
+};
+
+export interface EvalCell {
+  language?: string;
+  code?: string;
+  title?: string;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return undefined;
+}
+
+// Merged eval cell: `cells[0]` wins, top-level args fill the gaps. The tool
+// speaks `py`/`js`; normalize to the highlighter ids `python`/`javascript`
+// (ground truth: core's own eval renderer maps the same way).
+export function evalCell(args: unknown): EvalCell {
+  const fields = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+  const rawCells = fields["cells"];
+  const first =
+    Array.isArray(rawCells) && typeof rawCells[0] === "object" && rawCells[0] !== null
+      ? (rawCells[0] as Record<string, unknown>)
+      : undefined;
+  const rawLang = (firstString(first?.["language"], fields["language"]) ?? "").trim().toLowerCase();
+  const language =
+    rawLang === "py" ? "python" : rawLang === "js" ? "javascript" : rawLang === "" ? undefined : rawLang;
+  return {
+    language,
+    code: firstString(first?.["code"], fields["code"], fields["input"], fields["content"], fields["command"]),
+    title: firstString(first?.["title"], fields["title"])?.trim(),
+  };
+}
+
+// Normalized eval language id (`python`, `javascript`, …), if any.
+export function evalLanguage(args: unknown): string | undefined {
+  return evalCell(args).language;
+}
+
+export function evalLangIcon(args: unknown): string {
+  return EVAL_LANG_ICONS[evalLanguage(args) ?? ""] ?? "";
+}
+
+// Short eval header with the language icon up front: title as-is, else the
+// first code line, else the language. No ◆ prefix — formatRowLine paints the
+// mark. eval-card.ts renders this; filters.ts mirrors the same order.
+export function evalLabelText(args: unknown): string {
+  const cell = evalCell(args);
+  const icon = evalLangIcon(args);
+  const pre = icon ? `${icon} ` : "";
+  if (cell.title) return `${pre}${truncatePlain(cell.title, 80)}`;
+  const first = cell.code
+    ?.split("\n")
+    .map((line) => line.trim())
+    .find((line) => line);
+  if (first) return icon ? `${pre}${truncatePlain(first, 60)}` : `Eval ${truncatePlain(first, 60)}`;
+  if (!cell.language) return "Eval";
+  return icon ? `${pre}${truncatePlain(cell.language, 20)}` : `Eval ${truncatePlain(cell.language, 20)}`;
 }

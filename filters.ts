@@ -576,8 +576,48 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     oneLiner = pattern ? `◆ Glob \`${pattern}\` — ${files.length} files` : `◆ Glob — ${files.length} files`;
     rules.push("glob");
   } else if (toolName === "eval") {
-    const label = strField(fields, "title", "language");
-    oneLiner = label ? `◆ Eval ${singleLine(label, 60)}` : "◆ Eval";
+    // Mirrors text.ts evalCell/labels; filters.ts stays dependency-free.
+    const rawCells = fields["cells"];
+    const firstCell =
+      Array.isArray(rawCells) && typeof rawCells[0] === "object" && rawCells[0] !== null
+        ? (rawCells[0] as Record<string, unknown>)
+        : undefined;
+    const strOf = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
+    const rawLang = (strOf(firstCell?.["language"]) ?? strOf(fields["language"]) ?? "").trim().toLowerCase();
+    const normLang = rawLang === "py" ? "python" : rawLang === "js" ? "javascript" : rawLang;
+    let icon = "";
+    if (normLang === "python") icon = "🐍";
+    else if (normLang === "javascript" || normLang === "jsx") icon = "🟨";
+    else if (normLang === "typescript" || normLang === "tsx") icon = "🔷";
+    else if (normLang === "shell" || normLang === "bash") icon = "🐚";
+    else if (normLang === "ruby") icon = "💎";
+    else if (normLang === "go") icon = "🐹";
+    else if (normLang === "rust") icon = "🦀";
+    const pre = icon ? `${icon} ` : "";
+    const title = (strOf(firstCell?.["title"]) ?? strOf(fields["title"]) ?? "").trim();
+    const code =
+      strOf(firstCell?.["code"]) ??
+      strOf(fields["code"]) ??
+      strOf(fields["input"]) ??
+      strOf(fields["content"]) ??
+      strOf(fields["command"]);
+    let label: string;
+    if (title) {
+      label = `${pre}${singleLine(title, 80)}`;
+    } else {
+      const first = code
+        ?.split("\n")
+        .map((line) => line.trim())
+        .find((line) => line);
+      if (first) {
+        label = icon ? `${pre}${singleLine(first, 60)}` : `Eval ${singleLine(first, 60)}`;
+      } else if (normLang) {
+        label = icon ? `${pre}${singleLine(normLang, 20)}` : `Eval ${singleLine(normLang, 20)}`;
+      } else {
+        label = "Eval";
+      }
+    }
+    oneLiner = `◆ ${label}`;
     rules.push("eval");
   } else if (toolName === "task") {
     const who = strField(fields, "agent", "name");

@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 
 export const PLUGIN_NAME = "@local/omp-minimal-output";
 
-export const WRAP_CANDIDATES = ["bash", "read", "grep", "glob", "write", "edit"] as const;
+export const WRAP_CANDIDATES = ["bash", "read", "grep", "glob", "write", "edit", "eval"] as const;
 export type WrapCandidate = (typeof WRAP_CANDIDATES)[number];
 
 export const NATIVE_KEY = {
@@ -18,6 +18,7 @@ export const NATIVE_KEY = {
   glob: "nativeGlob",
   write: "nativeWrite",
   edit: "nativeEdit",
+  eval: "nativeEval",
 } as const;
 
 export const INDICATOR = {
@@ -37,6 +38,7 @@ export interface PluginConfig {
   nativeGlob: boolean;
   nativeWrite: boolean;
   nativeEdit: boolean;
+  nativeEval: boolean;
   editShowTabs: boolean;
   editShowSpaces: boolean;
 }
@@ -51,6 +53,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   nativeGlob: false,
   nativeWrite: false,
   nativeEdit: false,
+  nativeEval: false,
   editShowTabs: true,
   editShowSpaces: false,
 };
@@ -63,6 +66,7 @@ const BOOLEAN_KEYS = [
   "nativeGlob",
   "nativeWrite",
   "nativeEdit",
+  "nativeEval",
   "editShowTabs",
   "editShowSpaces",
 ] as const;

@@ -21,7 +21,7 @@ flowchart LR
     aside -.-> freeze["agent_end / turn_end\nfreeze settled totals"]
 ```
 
-Six shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`): native `description` + `parameters` copied verbatim (never hand-written — a lossy schema hides fields from the model; this once broke `write` by dropping `content`), `execute` delegates to the native tool via `ctx.invokeTool`, `renderCall` paints the live row, `renderResult` paints the settled row with dim right-side duration (`durationSuffix`) and error styling (`isToolError`). `edit`'s card is a compact gutter diff (line numbers, background bands on `-`/`+` rows, `··· N unchanged lines` separators, visible-tab markers (`→`), ≤10 lines collapsed / ≤60 expanded) and the full diff sits behind `Ctrl+O`. Collapse covers 26 built-ins plus MCP rows (single-line `◇` one-liners, envelope dupes pruned); grouped tools share a `●` parent with `├─`/`╰─` children, full text stashed for expansion.
+Seven shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`): native `description` + `parameters` copied verbatim (never hand-written — a lossy schema hides fields from the model; this once broke `write` by dropping `content`), `execute` delegates to the native tool via `ctx.invokeTool`, `renderCall` paints the live row, `renderResult` paints the settled row with dim right-side duration (`durationSuffix`) and error styling (`isToolError`). `edit`'s card is a compact gutter diff (line numbers, background bands on `-`/`+` rows, `··· N unchanged lines` separators, visible-tab markers (`→`), ≤10 lines collapsed / ≤60 expanded) and the full diff sits behind `Ctrl+O`. `eval`'s card replaces the native boxed `Output` panel: language-icon header (`py`→`🐍`, `js`→`🟨`, plus `🔷`/`🐚`/`💎`/`🐹`/`🦀`; `cells[0]` wins; green/red `●` settled marks) plus a 3-line input preview (core-tokenizer highlighted, dim-blended to row opacity) and ≤5 output lines (ANSI colors kept and blended, bg fills dropped), indented, no border/bg; dim labeled rule (`── output ──`, `── error ──` on failure) with a theme-accent pulse sweeping it while running; while running, partial results stream as a live last-3 tail (`… (N earlier lines)`) under a ticking elapsed header; 60/60/60 expanded, full text behind `Ctrl+O`. Collapse covers 26 built-ins plus MCP rows (single-line `◇` one-liners, envelope dupes pruned); grouped tools share a `●` parent with `├─`/`╰─` children, full text stashed for expansion.
 
 Thoughts are fully hidden (`registerAssistantThinkingRenderer` is supplemental-only). Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
@@ -74,14 +74,14 @@ Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the
 
 ## Files
 
-- `index.ts` — extension entry: 6 shadows, `minimal-activity` + `skill-prompt` message renderers, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), group/activity/thought rows, `/minimal-on|off|status`.
-- `text.ts` — pure label/wrap/truncate string helpers. `theme.ts` — theme colors, render clocks, `formatRowLine`. `results.ts` — result-shape readers and fingerprints. `loaders.ts` — lazy core affordances. `edit-card.ts` — compact edit diff card.
+- `index.ts` — extension entry: 7 shadows, `minimal-activity` + `skill-prompt` message renderers, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), group/activity/thought rows, `/minimal-on|off|status`.
+- `text.ts` — pure label/wrap/truncate string helpers. `theme.ts` — theme colors, render clocks, `formatRowLine`. `results.ts` — result-shape readers and fingerprints. `loaders.ts` — lazy core affordances. `edit-card.ts` — compact edit diff card. `eval-card.ts` — borderless eval output card.
 - `filters.ts` — pure string filters, zero dependencies (`collapseToolText`, per-class aggregators, `MAX_CHARS`/`MAX_LINES` truncation).
 - `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`.
 - `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`.
 
 ## Constraints
 
-- `tryWrapTool` allowlist is `bash/read/grep/glob/edit/write` only. Re-registering any other tool cannot delegate (no original handle; `ctx.invokeTool` is built-in-only), so wrapping e.g. MCP tools (`mcp__*`) breaks them with `minimal-output: native <name> unavailable`. Never widen the allowlist without a working delegation path.
+- `tryWrapTool` allowlist is `bash/read/grep/glob/edit/write/eval` only. Re-registering any other tool cannot delegate (no original handle; `ctx.invokeTool` is built-in-only), so wrapping e.g. MCP tools (`mcp__*`) breaks them with `minimal-output: native <name> unavailable`. Never widen the allowlist without a working delegation path.
 - Shadows are transparent delegates: no behavior change to what tools do, only how rows render.
 - Agent rules (`AGENTS.md`): prefer `read`/`grep`/`glob` over shell pipelines; one verification per change; one short intent line per tool call.

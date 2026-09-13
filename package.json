@@ -32,11 +32,12 @@
       "nativeGlob": { "type": "boolean", "default": false, "description": "Leave glob on the native Ohmypi renderer." },
       "nativeWrite": { "type": "boolean", "default": false, "description": "Leave write on the native Ohmypi renderer." },
       "nativeEdit": { "type": "boolean", "default": false, "description": "Leave edit on the native Ohmypi renderer." },
+      "nativeEval": { "type": "boolean", "default": false, "description": "Leave eval on the native Ohmypi renderer (boxed Output)." },
       "editShowTabs": { "type": "boolean", "default": true, "description": "Show tabs as → in edit diffs." },
       "editShowSpaces": { "type": "boolean", "default": false, "description": "Show spaces as · in edit diffs." }
     }
   },
-  "files": ["index.ts", "filters.ts", "text.ts", "theme.ts", "results.ts", "loaders.ts", "edit-card.ts", "read-group.ts", "config.ts", "minimal-output.yml", "README.md", "LICENSE"],
+  "files": ["index.ts", "filters.ts", "text.ts", "theme.ts", "results.ts", "loaders.ts", "edit-card.ts", "eval-card.ts", "read-group.ts", "config.ts", "minimal-output.yml", "README.md", "LICENSE"],
   "keywords": ["pi", "pi-coding-agent", "pi-package", "extension", "minimal-output"],
   "license": "MIT",
   "peerDependencies": { "@oh-my-pi/pi-coding-agent": "*" }
