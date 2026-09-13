@@ -10,7 +10,7 @@ export type MarkFlush = typeof markFramedBlockComponent;
 // move degrades to today's tinted card instead of breaking this file.
 export let markFlush: MarkFlush | undefined;
 import("@oh-my-pi/pi-coding-agent/tui/output-block")
-	.then((m) => {
-		if (typeof m.markFramedBlockComponent === "function") markFlush = m.markFramedBlockComponent;
-	})
-	.catch(() => {});
+  .then((m) => {
+    if (typeof m.markFramedBlockComponent === "function") markFlush = m.markFramedBlockComponent;
+  })
+  .catch(() => {});
