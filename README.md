@@ -21,7 +21,7 @@ flowchart LR
     aside -.-> freeze["agent_end / turn_end\nfreeze settled totals"]
 ```
 
-Six shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`): native `description` + `parameters` copied verbatim (never hand-written — a lossy schema hides fields from the model; this once broke `write` by dropping `content`), `execute` delegates to the native tool via `ctx.invokeTool`, `renderCall` paints the live row, `renderResult` paints the settled row with dim right-side duration (`durationSuffix`) and error styling (`isToolError`). `edit`'s card is a compact gutter diff (line numbers, background bands on `-`/`+` rows, `··· N unchanged lines` separators, ≤10 lines collapsed / ≤60 expanded) and the full diff sits behind `Ctrl+O`. Collapse covers 26 built-ins plus MCP rows (single-line `◇` one-liners, envelope dupes pruned); grouped tools share a `●` parent with `├─`/`╰─` children, full text stashed for expansion.
+Six shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`): native `description` + `parameters` copied verbatim (never hand-written — a lossy schema hides fields from the model; this once broke `write` by dropping `content`), `execute` delegates to the native tool via `ctx.invokeTool`, `renderCall` paints the live row, `renderResult` paints the settled row with dim right-side duration (`durationSuffix`) and error styling (`isToolError`). `edit`'s card is a compact gutter diff (line numbers, background bands on `-`/`+` rows, `··· N unchanged lines` separators, visible-tab markers (`→`), ≤10 lines collapsed / ≤60 expanded) and the full diff sits behind `Ctrl+O`. Collapse covers 26 built-ins plus MCP rows (single-line `◇` one-liners, envelope dupes pruned); grouped tools share a `●` parent with `├─`/`╰─` children, full text stashed for expansion.
 
 Thoughts are fully hidden (`registerAssistantThinkingRenderer` is supplemental-only). Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
@@ -53,7 +53,7 @@ flowchart TD
 
 Contract: line 1 of every rewritten text is the `◆` settled one-liner (the transcript's collapsed row); filtered details follow from line 2, so ENTER expands a row to details and collapses back to the one-liner. Full pre-collapse text is stashed in result details so `ctrl+o` shows everything.
 
-Search: `grep` input is `{path, pattern}`, `glob` input is `{path}` (probed live). Shadow schemas are the native ones verbatim, so every native option (`write` `content`, `grep` `case`/`gitignore`/`skip`, `bash` `cwd`/`timeout`/`env`, `glob` `limit`/`hidden`) stays visible to the model. `glob` collapses to `` ◆ glob `<pattern>` — <N> files ``; `grep` keeps its `file:line:col` grouping when the output matches, else the generic one-liner (native grep emits `# file` / `*line:` sections, which take the generic path).
+Search: `grep` input is `{path, pattern}`, `glob` input is `{path}` (probed live). Shadow schemas are the native ones verbatim, so every native option (`write` `content`, `grep` `case`/`gitignore`/`skip`, `bash` `cwd`/`timeout`/`env`, `glob` `limit`/`hidden`) stays visible to the model. `glob` collapses to ``◆ glob `<pattern>` — <N> files``; `grep` keeps its `file:line:col` grouping when the output matches, else the generic one-liner (native grep emits `# file` / `*line:` sections, which take the generic path).
 
 ## Row lifecycle
 

@@ -77,6 +77,16 @@ export function truncatePlain(text: string, max: number): string {
   return `${text.slice(0, lo)}…`;
 }
 
+// Visible-tab rendering for diff rows: tabs show as a single-width marker so
+// tab-vs-space indent survives. Spaces stay literal (a `·` on every space is
+// visual noise). Applied after syntax highlighting (SGR carries no tabs, so
+// the replacement cannot corrupt escapes); markers inherit the row color,
+// keeping contrast with the band.
+export function showWhitespace(text: string): string {
+  if (!text) return text;
+  return text.replace(/\t/g, "→");
+}
+
 export function shortPathText(p: string): string {
   const one = String(p ?? "")
     .replace(/\s+/g, " ")
