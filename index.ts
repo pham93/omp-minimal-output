@@ -2,13 +2,13 @@ import type { ExtensionAPI, ToolResultEvent } from "@oh-my-pi/pi-coding-agent";
 import type { markFramedBlockComponent } from "@oh-my-pi/pi-coding-agent/tui/output-block";
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import { tmpdir } from "node:os";
+import { statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { collapseToolText } from "./filters.ts";
 import { toolActionLabel, wrapLatestLines } from "./text.ts";
 import {
   LINE_WIDTH_RATIO,
   TOOL_INDENT,
-  TOOL_TEXT_OPACITY,
   advanceSpinFrame,
   anySettling,
   elapsedSuffix,
@@ -17,6 +17,13 @@ import {
   paintAt,
   textFades,
 } from "./theme.ts";
+import {
+  getPluginConfig,
+  lockfilePath,
+  projectOverridePaths,
+  reloadPluginConfig,
+  wrapTool,
+} from "./config.ts";
 import {
   argsFingerprint,
   durationSuffix,
@@ -64,11 +71,39 @@ let thoughtUi:
   | undefined;
 const THOUGHT_PREVIEW_LINES = 3;
 const THOUGHT_WIDGET_KEY = "minimal-thinking";
-// Row-grouping membership (display only, never gates tool registration).
-const groupTools = new Set<string>(["bash", "read", "grep", "glob", "write", "edit"]);
-// Tools already re-registered with a custom card. Separate from groupTools:
-// a display set must never decide whether a tool gets shadowed.
+// Tools already re-registered with a custom card. wrapTool() from config.ts
+// decides membership (WRAP_CANDIDATES minus native* opt-outs).
 const wrapApplied = new Set<string>();
+let lastConfigMtimes = "";
+
+function configMtimeKey(): string {
+  const paths = [lockfilePath(), ...projectOverridePaths()];
+  return paths
+    .map((p) => {
+      try {
+        return String(statSync(p).mtimeMs);
+      } catch {
+        return "0";
+      }
+    })
+    .join("|");
+}
+
+function maybeReloadConfig(): void {
+  try {
+    const key = configMtimeKey();
+    if (lastConfigMtimes === "") {
+      lastConfigMtimes = key;
+      return;
+    }
+    if (key !== lastConfigMtimes) {
+      lastConfigMtimes = key;
+      reloadPluginConfig();
+    }
+  } catch {
+    // Config reload is best-effort; paint with the cached config.
+  }
+}
 
 interface GroupRow {
   fp: string;
@@ -259,7 +294,7 @@ function setWorking(ctx: unknown, message: string | undefined): void {
 // transcripts (restart/resume) regroup rows under their original parent header
 // instead of scattering _anon groups with no label.
 function frozenGroupKeys(toolName: string): Record<string, unknown> {
-  if (!groupTools.has(toolName) || activityRunId === null) return {};
+  if (!wrapTool(toolName) || activityRunId === null) return {};
   return { minimalGroupRun: activityRunId, minimalGroupLabel: activityLabel };
 }
 
@@ -298,10 +333,9 @@ function thinkingRailLines(theme: unknown, width: number, text: string, indent: 
   const bar = `${pad}│ `;
   const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
   const lines: string[] = [];
+  const op = getPluginConfig().opacity;
   for (const preview of wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES)) {
-    lines.push(
-      `${paintAt(theme, bar, "accent", TOOL_TEXT_OPACITY)}${paintAt(theme, preview, "toolOutput", TOOL_TEXT_OPACITY)}`,
-    );
+    lines.push(`${paintAt(theme, bar, "accent", op)}${paintAt(theme, preview, "toolOutput", op)}`);
   }
   return lines;
 }
@@ -699,7 +733,7 @@ export default function (pi: ExtensionAPI) {
   // grouping repaint through formatRowLine. Before any pi.on registration:
   // a rebuild can add the group before session_start fires.
   installReadGroupSkin(Container, {
-    enabled: () => enabled,
+    enabled: () => enabled && wrapTool("read"),
     theme: () => readGroupTheme,
   });
   let loaded = false;
@@ -785,6 +819,7 @@ export default function (pi: ExtensionAPI) {
     try {
       spinTimer = timers.setInterval(() => {
         advanceSpinFrame();
+        maybeReloadConfig();
         const pump = spinUi;
         if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
           const paint = pump.requestRender;
@@ -877,7 +912,7 @@ export default function (pi: ExtensionAPI) {
     // One-liners for bash/read/grep/glob/write plus the edit pretty-diff
     // card. Execution delegates untouched to native; only the card
     // is custom (compact rows, full text behind Ctrl+O).
-    if (!groupTools.has(name)) return;
+    if (!wrapTool(name)) return;
     const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
     // NEVER register a lossy stub: without the native parameters the shadowed
     // schema hides fields from the model (write lost `content`, grep lost `path`).
@@ -980,6 +1015,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (loaded) return;
     loaded = true;
+    reloadPluginConfig();
+    try {
+      lastConfigMtimes = configMtimeKey();
+    } catch {
+      // Missing lockfile; timer establishes the baseline.
+    }
     bindThoughtUi(ctx);
     try {
       const maybeTheme = (ctx as unknown as { ui?: { theme?: unknown } })?.ui?.theme;
@@ -988,7 +1029,6 @@ export default function (pi: ExtensionAPI) {
       // formatRowLine degrades to unstyled without a theme.
     }
     wrapAllTools();
-    ensureSpinTimer(ctx);
     try {
       if (enabled && ctx.hasUI) ctx.ui.notify("Minimal output active (grok-build style)", "info");
     } catch {
@@ -996,6 +1036,12 @@ export default function (pi: ExtensionAPI) {
     }
   });
   pi.on("before_agent_start", async () => {
+    reloadPluginConfig();
+    try {
+      lastConfigMtimes = configMtimeKey();
+    } catch {
+      // Missing lockfile; timer establishes the baseline.
+    }
     wrapAllTools();
   });
 
@@ -1220,7 +1266,18 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("minimal-status", {
     description: "Show minimal-output plugin state",
     handler: async (_args, ctx) => {
-      ctx.ui.notify(`Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled)`, "info");
+      const cfg = getPluginConfig();
+      const native: string[] = [];
+      if (cfg.nativeBash) native.push("bash");
+      if (cfg.nativeRead) native.push("read");
+      if (cfg.nativeGrep) native.push("grep");
+      if (cfg.nativeGlob) native.push("glob");
+      if (cfg.nativeWrite) native.push("write");
+      if (cfg.nativeEdit) native.push("edit");
+      ctx.ui.notify(
+        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"}`,
+        "info",
+      );
     },
   });
 }

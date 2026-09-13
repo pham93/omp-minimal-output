@@ -1,9 +1,10 @@
 // Theme-derived color, animation-frame, and row-styling primitives.
 // Owns the shared mutable render clocks (spin frame, fades, settle marks) so
-// every painter reads one identity. Imports text utils; nothing else.
+// every painter reads one identity. Imports text utils and plugin config.
 
 import { visibleWidth } from "@oh-my-pi/pi-tui";
 import { stripKindSuffix, truncatePlain } from "./text.ts";
+import { getPluginConfig, indicatorFrames, indicatorSettled } from "./config.ts";
 
 // Initialized at import so tool_result works before session_start fires.
 // Shared row-animation frame, read at render time by pending rows.
@@ -20,8 +21,6 @@ export function isMinimalTheme(value: unknown): value is MinimalTheme {
   if (!("fg" in value)) return false;
   return typeof (value as { fg: unknown }).fg === "function";
 }
-
-export const TOOL_TEXT_OPACITY = 0.5;
 
 export const TEXT_FADE_MS = 1600;
 
@@ -162,14 +161,15 @@ export function pruneFades(now: number): void {
 // Start a fade only for a row that is appearing now. A missing key on a
 // settled/historical row means rest opacity — never treat it as a new fade.
 export function rowOpacity(live: boolean, fadeKey: string | undefined): number {
-  if (!fadeKey) return TOOL_TEXT_OPACITY;
+  const rest = getPluginConfig().opacity;
+  if (!fadeKey) return rest;
   const existing = textFades.get(fadeKey);
-  if (existing !== undefined) return fadeOpacity(TOOL_TEXT_OPACITY, existing);
-  if (!live) return TOOL_TEXT_OPACITY;
+  if (existing !== undefined) return fadeOpacity(rest, existing);
+  if (!live) return rest;
   const now = Date.now();
   textFades.set(fadeKey, now);
   pruneFades(now);
-  return fadeOpacity(TOOL_TEXT_OPACITY, now);
+  return fadeOpacity(rest, now);
 }
 
 export function elapsedSuffix(startedAt: number): string {
@@ -200,7 +200,16 @@ export function formatRowLine(
   const spin = live || settling;
   const op = rowOpacity(live, opts.fadeKey);
   const markToken = spin ? "accent" : opts.error ? "error" : "success";
-  const mark = opts.mark ?? (spin ? (SPIN_FRAMES[spinFrame % SPIN_FRAMES.length] ?? "◈") : "◆");
+  const cfg = getPluginConfig();
+  const frames = indicatorFrames(cfg);
+  const settled = indicatorSettled(cfg);
+  const mark =
+    opts.mark ??
+    (spin
+      ? cfg.indicatorAnimation
+        ? (frames[spinFrame % frames.length] ?? "◈")
+        : (frames[0] ?? "◈")
+      : (settled ?? "◆"));
   const branch = opts.tree === "mid" ? "├─" : opts.tree === "last" ? "╰─" : "";
   const branchPaint = branch ? `${paintAt(theme, branch, opts.error ? "error" : spin ? "accent" : "dim", op)} ` : "";
   const indentPrefix = branch || opts.indent === true ? TOOL_INDENT : " ";
@@ -217,8 +226,6 @@ export function formatRowLine(
   return `${left}${" ".repeat(gap)}${tail}`;
 }
 
-export const SPIN_FRAMES = ["◈", "◉", "◎", "○"] as const;
-
 export function advanceSpinFrame(): void {
-  spinFrame = (spinFrame + 1) % SPIN_FRAMES.length;
+  spinFrame = (spinFrame + 1) % Math.max(1, indicatorFrames().length);
 }

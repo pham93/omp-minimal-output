@@ -8,6 +8,7 @@ import { markFlush } from "./loaders.ts";
 import { durationSuffix, isToolError, toolResultText } from "./results.ts";
 import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "./theme.ts";
 import { shortPathText, showWhitespace, truncatePlain } from "./text.ts";
+import { getPluginConfig } from "./config.ts";
 
 import("@oh-my-pi/pi-coding-agent/modes/theme/theme")
   .then((m) => {
@@ -217,7 +218,14 @@ export function collectPrettyEdit(
       removed: stat.removed,
       rows,
       lang,
-      cells: rows.map((row) => (row.kind === "|" ? row.text : showWhitespace(highlightCell(row.text, lang)))),
+      cells: rows.map((row) =>
+        row.kind === "|"
+          ? row.text
+          : showWhitespace(highlightCell(row.text, lang), {
+              tabs: getPluginConfig().editShowTabs,
+              spaces: getPluginConfig().editShowSpaces,
+            }),
+      ),
     });
   }
   const multi = entries.length > 1 || editPaths.length > 1;
