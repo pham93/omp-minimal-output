@@ -4,13 +4,13 @@ import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import { tmpdir } from "node:os";
 import { writeFile } from "node:fs/promises";
 import { collapseToolText } from "./filters.ts";
+import {toolActionLabel, wrapLatestLines} from "./text.ts";
+import {LINE_WIDTH_RATIO, TOOL_INDENT, TOOL_TEXT_OPACITY, advanceSpinFrame, anySettling, elapsedSuffix, formatRowLine, markSettling, paintAt, textFades} from "./theme.ts";
+import { argsFingerprint, durationSuffix, eventFingerprint, fpsByBase, isToolError, stashFullText, toolFingerprint, toolFpBase, toolResultText } from "./results.ts";
+import { type MarkFlush, markFlush } from "./loaders.ts";
+import { renderPrettyEditCard } from "./edit-card.ts";
+import { installReadGroupSkin } from "./read-group.ts";
 
-// Initialized at import so tool_result works before session_start fires.
-// Shared row-animation frame, read at render time by pending rows.
-let spinFrame = 0;
-// Fade start (ms epoch) for rows that are appearing now. Missing keys are
-// rest opacity — never start a fade on a rebuild of existing transcript rows.
-const textFades = new Map<string, number>();
 // Elapsed base for the live row timer (ms epoch). Maintained by the
 // tool handlers below; renderers only read it.
 let spinStartedAt = 0;
@@ -38,7 +38,11 @@ let thoughtWidgetOn = false;
 let thoughtUi: { setWidget?: (key: string, content: unknown, options?: { placement?: string }) => void; requestRender?: () => void } | undefined;
 const THOUGHT_PREVIEW_LINES = 3;
 const THOUGHT_WIDGET_KEY = "minimal-thinking";
-const wrappedTools = new Set<string>(["bash", "read", "grep", "glob", "write"]);
+// Row-grouping membership (display only, never gates tool registration).
+const groupTools = new Set<string>(["bash", "read", "grep", "glob", "write", "edit"]);
+// Tools already re-registered with a custom card. Separate from groupTools:
+// a display set must never decide whether a tool gets shadowed.
+const wrapApplied = new Set<string>();
 
 interface GroupRow {
 	fp: string;
@@ -55,17 +59,6 @@ interface ToolGroup {
 const toolGroups = new Map<string, ToolGroup>();
 const fpToGroup = new Map<string, string>();
 
-type MarkFlush = typeof markFramedBlockComponent;
-// Core drops its outer wrapper (state tint + 1-col padding) only for
-// framed-marked components. The mark is off the extension surface, but the
-// package export map exposes the module — load it lazily so a future core
-// move degrades to today's tinted card instead of breaking this file.
-let markFlush: MarkFlush | undefined;
-import("@oh-my-pi/pi-coding-agent/tui/output-block")
-	.then((m) => {
-		if (typeof m.markFramedBlockComponent === "function") markFlush = m.markFramedBlockComponent;
-	})
-	.catch(() => {});
 
 type TextItem = { type: string; text?: string };
 
@@ -121,7 +114,7 @@ function pruneMcpEnvelopes(list: TextItem[], anchor: TextItem, raw: string): Tex
 }
 
 function isCollapseTarget(event: ToolResultEvent): boolean {
-	return event.type === "tool_result" && (["read", "bash", "ast_grep", "debug", "eval", "github", "glob", "grep", "lsp", "checkpoint", "rewind", "context_notes", "new_context", "security_scan", "task", "hub", "todo", "web_search", "write", "memory_edit", "retain", "recall", "reflect", "learn", "manage_skill"].includes(event.toolName) || event.toolName.startsWith("mcp__") || event.toolName.includes("/"));
+	return event.type === "tool_result" && (["edit", "read", "bash", "ast_grep", "debug", "eval", "github", "glob", "grep", "lsp", "checkpoint", "rewind", "context_notes", "new_context", "security_scan", "task", "hub", "todo", "web_search", "write", "memory_edit", "retain", "recall", "reflect", "learn", "manage_skill"].includes(event.toolName) || event.toolName.startsWith("mcp__") || event.toolName.includes("/"));
 }
 
 async function spillToolOutput(toolName: string, original: string): Promise<string | null> {
@@ -198,102 +191,17 @@ function setWorking(ctx: unknown, message: string | undefined): void {
 
 // ── v2 shared renderer helpers (same file, no new modules) ──
 
-function shortCommandText(cmd: string): string {
-	const oneLine = cmd.replace(/\s+/g, " ").trim();
-	return oneLine || "bash";
-}
-
-function wrapToWidth(text: string, width: number): string[] {
-	const max = Math.max(8, Math.floor(width));
-	const out: string[] = [];
-	for (const para of text.split(/\n+/)) {
-		const words = para.trim().split(/\s+/).filter(Boolean);
-		if (words.length === 0) continue;
-		let line = "";
-		for (const word of words) {
-			const next = line ? `${line} ${word}` : word;
-			if (visibleWidth(next) <= max) {
-				line = next;
-				continue;
-			}
-			if (line) out.push(line);
-			if (visibleWidth(word) <= max) {
-				line = word;
-				continue;
-			}
-			let rest = word;
-			while (visibleWidth(rest) > max) {
-				let lo = 1;
-				let hi = rest.length;
-				while (lo < hi) {
-					const mid = Math.ceil((lo + hi) / 2);
-					if (visibleWidth(rest.slice(0, mid)) <= max) lo = mid;
-					else hi = mid - 1;
-				}
-				out.push(rest.slice(0, lo));
-				rest = rest.slice(lo);
-			}
-			line = rest;
-		}
-		if (line) out.push(line);
-	}
-	return out;
-}
-
-function wrapLatestLines(text: string, width: number, maxLines: number): string[] {
-	if (!text.trim() || maxLines <= 0) return [];
-	return wrapToWidth(text.trim(), width).slice(-maxLines);
-}
-
-function truncatePlain(text: string, max: number): string {
-	if (max <= 0) return "";
-	if (visibleWidth(text) <= max) return text;
-	const budget = Math.max(1, max - 1);
-	let lo = 0;
-	let hi = text.length;
-	while (lo < hi) {
-		const mid = Math.ceil((lo + hi) / 2);
-		if (visibleWidth(text.slice(0, mid)) <= budget) lo = mid;
-		else hi = mid - 1;
-	}
-	return `${text.slice(0, lo)}…`;
-}
-
-function shortPathText(p: string): string {
-	const one = String(p ?? "").replace(/\s+/g, " ").trim();
-	if (!one) return "file";
-	return one.length > 80 ? `${one.slice(0, 80)}…` : one;
-}
 
 // Full pre-collapse text stashed by the tool_result handler. Expanded rows
 // read it so ctrl+o shows everything; collapsed rows keep the one-liner.
-function expandedStash(result: unknown): string | undefined {
-	if (typeof result !== "object" || result === null) return undefined;
-	if (!("details" in result)) return undefined;
-	const details = result.details;
-	if (typeof details !== "object" || details === null) return undefined;
-	if (!("minimalFullText" in details)) return undefined;
-	const full = details.minimalFullText;
-	return typeof full === "string" && full ? full : undefined;
-}
 
-// Merge the stashed full text into existing result details without dropping
-// tool-owned keys (async state, per-file results, …).
-function stashFullText(prev: unknown, full: string): Record<string, unknown> {
-	const merged: Record<string, unknown> = {};
-	if (typeof prev === "object" && prev !== null && !Array.isArray(prev)) {
-		for (const [key, value] of Object.entries(prev)) merged[key] = value;
-	}
-	merged.minimalFullText = full;
-	return merged;
-}
 
 // Frozen per-turn group identity. tool_result stashes these into the persisted
 // details while module state is live; renderResult reads them back so rebuilt
 // transcripts (restart/resume) regroup rows under their original parent header
 // instead of scattering _anon groups with no label.
 function frozenGroupKeys(toolName: string): Record<string, unknown> {
-	if (!wrappedTools.has(toolName) || activityRunId === null) return {};
+	if (!groupTools.has(toolName) || activityRunId === null) return {};
 	return { minimalGroupRun: activityRunId, minimalGroupLabel: activityLabel };
 }
 
@@ -308,166 +216,6 @@ function frozenGroupOf(result: unknown): { gid: string; label: string } | undefi
 	return undefined;
 }
 
-function toolResultText(result: unknown): string {
-	try {
-		const r = result as { content?: unknown };
-		if (typeof result === "string") return result;
-		if (Array.isArray(r?.content)) {
-			const item = (r.content as Array<{ type?: string; text?: unknown }>).find(
-				(c) => c?.type === "text" && typeof c.text === "string",
-			);
-			if (item && typeof item.text === "string") return item.text as string;
-		}
-		return "";
-	} catch {
-		return "";
-	}
-}
-// Label for grep/glob rows. Native grep sends {path, pattern}; native glob
-// sends {path} (live-probed 2026-09-11) — the chain degrades to an unlabeled
-// one-liner rather than crashing when a key is absent.
-function argsFingerprint(args: unknown): string {
-	if (typeof args !== "object" || args === null) return "";
-	const fields = args as Record<string, unknown>;
-	const primary =
-		fields["command"] ??
-		fields["path"] ??
-		fields["file_path"] ??
-		fields["pattern"] ??
-		fields["query"] ??
-		fields["code"];
-	if (typeof primary === "string" && primary) return primary;
-	if (typeof primary === "number" && Number.isFinite(primary)) return String(primary);
-	const skip = new Set(["i", "__partialJson"]);
-	const parts: string[] = [];
-	for (const key of Object.keys(fields).sort()) {
-		if (skip.has(key)) continue;
-		const v = fields[key];
-		if (v === undefined || v === null || v === "") continue;
-		if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-			const s = String(v);
-			parts.push(`${key}=${s.length > 160 ? `${s.slice(0, 160)}#${s.length}` : s}`);
-		}
-	}
-	return parts.join(";");
-}
-
-const fpsByBase = new Map<string, string>();
-
-function toolFpBase(toolName: string, args: unknown): string {
-	return `${toolName}:${argsFingerprint(args)}`;
-}
-
-function toolFingerprint(toolName: string, args: unknown): string {
-	const base = toolFpBase(toolName, args);
-	return fpsByBase.get(base) ?? base;
-}
-
-function eventFingerprint(event: unknown): string {
-	const e = event as { toolName?: unknown; toolCallId?: unknown; input?: unknown; args?: unknown };
-	const name = typeof e.toolName === "string" ? e.toolName : "";
-	const args = e.input ?? e.args;
-	const base = toolFpBase(name, args);
-	const id = typeof e.toolCallId === "string" && e.toolCallId ? e.toolCallId : "";
-	const fp = id ? `${base}#${id}` : base;
-	fpsByBase.set(base, fp);
-	if (fpsByBase.size > 200) {
-		const oldest = fpsByBase.keys().next();
-		if (!oldest.done) fpsByBase.delete(oldest.value);
-	}
-	return fp;
-}
-
-function titleCaseWords(raw: string): string {
-	return raw
-		.replace(/[/_-]+/g, " ")
-		.replace(/([a-z])([A-Z])/g, "$1 $2")
-		.split(/\s+/)
-		.filter(Boolean)
-		.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-		.join(" ");
-}
-
-function stripKindSuffix(text: string): string {
-	return text.replace(/\s*\((?:Edit|Write|Create|Delete|Read|Search|Glob|Bash)\)\s*$/i, "").trimEnd();
-}
-
-function fileNameFromArgs(args: unknown): string {
-	const fields = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
-	const raw =
-		(typeof fields["path"] === "string" && fields["path"]) ||
-		(typeof fields["file_path"] === "string" && fields["file_path"]) ||
-		(typeof fields["file"] === "string" && fields["file"]) ||
-		"";
-	if (raw.trim()) {
-		const one = raw.replace(/\s+/g, " ").trim();
-		return one.split("/").pop() || one;
-	}
-	const blob =
-		(typeof fields["input"] === "string" && fields["input"]) ||
-		(typeof fields["patch"] === "string" && fields["patch"]) ||
-		"";
-	const marked = /(?:Update File|Add File|Delete File):\s*(\S+)/.exec(blob);
-	if (marked?.[1]) {
-		const p = marked[1].trim();
-		return p.split("/").pop() || p;
-	}
-	return "file";
-}
-
-function toolActionLabel(toolName: string, args: unknown): string {
-	const fields = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
-	const name = toolName.trim();
-	if (name === "read") {
-		const path = typeof fields["path"] === "string" ? fields["path"] : "file";
-		const base = path.split("/").pop() || path;
-		return `Read ${base}`;
-	}
-	if (name === "write") {
-		return `Write ${fileNameFromArgs(args)}`;
-	}
-	if (name === "bash" || name === "shell") {
-		const cmd = typeof fields["command"] === "string" ? fields["command"] : "";
-		return shortCommandText(cmd) || "Bash";
-	}
-	if (name === "grep") {
-		const pattern = searchPatternText(args);
-		return pattern.trim() ? `Search \`${shortCommandText(pattern)}\`` : "Search";
-	}
-	if (name === "glob") {
-		const pattern = searchPatternText(args);
-		return pattern.trim() ? `Glob \`${shortCommandText(pattern)}\`` : "Glob";
-	}
-	const slash = name.lastIndexOf("/");
-	if (slash >= 0) {
-		const ns = titleCaseWords(name.slice(0, slash).replace(/^mcp[_-]?/i, ""));
-		const action = titleCaseWords(name.slice(slash + 1));
-		return `${ns} ${action}`.trim();
-	}
-	return titleCaseWords(name) || name;
-}
-
-function searchPatternText(args: unknown): string {
-	if (typeof args !== "object" || args === null) return "";
-	const fields = args as Record<string, unknown>;
-	const raw = fields["pattern"] ?? fields["query"] ?? fields["path"] ?? "";
-	return typeof raw === "string" ? raw : "";
-}
-
-function isToolError(result: unknown, options?: unknown): boolean {
-	if (typeof options === "object" && options !== null && "isError" in options) {
-		if ((options as { isError: unknown }).isError === true) return true;
-	}
-	if (typeof result !== "object" || result === null) return false;
-	const r = result as { isError?: unknown; details?: unknown };
-	if (r.isError === true) return true;
-	const d = r.details;
-	if (typeof d !== "object" || d === null) return false;
-	const fields = d as Record<string, unknown>;
-	const raw = fields["exitCode"] ?? fields["exit_code"] ?? fields["code"];
-	if (typeof raw === "number" && Number.isFinite(raw) && raw !== 0) return true;
-	return false;
-}
 
 function stripLead(line: string): string {
 	return line.replace(/^\s*◆\s*/, "").replace(/^\$\s+/, "").trim();
@@ -480,218 +228,6 @@ function displayToolBody(line: string): string {
 	return s;
 }
 
-function durationSuffix(result: unknown): string {
-	try {
-		const r = result as { details?: unknown };
-		const d = r?.details as Record<string, unknown> | undefined;
-		if (!d || typeof d !== "object") return "";
-		for (const [k, v] of Object.entries(d)) {
-			if (typeof v === "number" && Number.isFinite(v) && /ms|milli|duration|wall|elapsed/i.test(k)) {
-				if (/sec/i.test(k) && !/ms/i.test(k)) return ` (${v.toFixed(1)}s)`;
-				return ` (${(v / 1000).toFixed(1)}s)`;
-			}
-		}
-		return "";
-	} catch {
-		return "";
-	}
-}
-
-type MinimalTheme = { fg: (kind: string, text: string) => string };
-
-function isMinimalTheme(value: unknown): value is MinimalTheme {
-	if (typeof value !== "object" || value === null) return false;
-	if (!("fg" in value)) return false;
-	return typeof (value as { fg: unknown }).fg === "function";
-}
-
-const TOOL_TEXT_OPACITY = 0.5;
-const TEXT_FADE_MS = 1600;
-const MARK_OPACITY = 1;
-const SETTLE_MS = 500;
-const TOOL_INDENT = "  ";
-const LINE_WIDTH_RATIO = 0.7;
-const settleAt = new Map<string, number>();
-
-function parseHexRgb(hex: string): [number, number, number] | undefined {
-	const h = hex.startsWith("#") ? hex.slice(1) : hex;
-	if (!/^[0-9a-fA-F]{6}$/.test(h)) return undefined;
-	const n = Number.parseInt(h, 16);
-	return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function themeTokenRgb(theme: unknown, token: string): [number, number, number] | undefined {
-	if (typeof theme === "object" && theme !== null && "getColorHex" in theme) {
-		const fn = (theme as { getColorHex: unknown }).getColorHex;
-		if (typeof fn === "function") {
-			try {
-				const hex = (fn as (k: string) => unknown).call(theme, token);
-				if (typeof hex === "string") {
-					const rgb = parseHexRgb(hex);
-					if (rgb) return rgb;
-				}
-			} catch {
-				// Token missing or theme without a hex map.
-			}
-		}
-	}
-	if (isMinimalTheme(theme)) {
-		try {
-			const sample = theme.fg(token, " ");
-			const m = /38;2;(\d+);(\d+);(\d+)/.exec(sample);
-			if (m?.[1] !== undefined && m[2] !== undefined && m[3] !== undefined) {
-				return [Number(m[1]), Number(m[2]), Number(m[3])];
-			}
-		} catch {
-			// Unstyleable.
-		}
-	}
-	return undefined;
-}
-
-function themeBgRgb(theme: unknown): [number, number, number] {
-	if (typeof theme === "object" && theme !== null && "isLight" in theme) {
-		if ((theme as { isLight: unknown }).isLight === true) return [255, 255, 255];
-	}
-	return [0, 0, 0];
-}
-
-function paintBold(theme: unknown, text: string): string {
-	if (!text) return text;
-	if (typeof theme === "object" && theme !== null && "bold" in theme) {
-		const fn = (theme as { bold: unknown }).bold;
-		if (typeof fn === "function") {
-			try {
-				return (fn as (s: string) => string).call(theme, text);
-			} catch {
-				// Fall through to SGR bold.
-			}
-		}
-	}
-	return `\x1b[1m${text}\x1b[22m`;
-}
-
-function paintMark(theme: unknown, mark: string, token: string): string {
-	let colored = mark;
-	if (isMinimalTheme(theme)) {
-		try {
-			colored = theme.fg(token, mark);
-		} catch {
-			colored = paintAt(theme, mark, token, MARK_OPACITY);
-		}
-	} else {
-		colored = paintAt(theme, mark, token, MARK_OPACITY);
-	}
-	return paintBold(theme, colored);
-}
-
-function paintAt(theme: unknown, text: string, token: string, opacity: number): string {
-	if (!text) return text;
-	const a = Math.min(1, Math.max(0, opacity));
-	const fg = themeTokenRgb(theme, token);
-	if (!fg) {
-		if (isMinimalTheme(theme)) {
-			try {
-				return theme.fg(token, text);
-			} catch {
-				return text;
-			}
-		}
-		return text;
-	}
-	const bg = themeBgRgb(theme);
-	const r = Math.round(bg[0] + (fg[0] - bg[0]) * a);
-	const g = Math.round(bg[1] + (fg[1] - bg[1]) * a);
-	const b = Math.round(bg[2] + (fg[2] - bg[2]) * a);
-	return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
-}
-
-function markSettling(key: string): void {
-	settleAt.set(key, Date.now());
-}
-
-function isSettling(key: string): boolean {
-	const started = settleAt.get(key);
-	return started !== undefined && Date.now() - started < SETTLE_MS;
-}
-
-function anySettling(): boolean {
-	const now = Date.now();
-	for (const started of settleAt.values()) {
-		if (now - started < SETTLE_MS) return true;
-	}
-	return false;
-}
-
-function fadeOpacity(target: number, startedAt: number): number {
-	if (!(startedAt > 0)) return target;
-	const t = Math.min(1, Math.max(0, (Date.now() - startedAt) / TEXT_FADE_MS));
-	const eased = 1 - (1 - t) ** 3;
-	return eased * target;
-}
-
-function pruneFades(now: number): void {
-	if (textFades.size <= 80) return;
-	for (const [key, started] of textFades) {
-		if (now - started >= TEXT_FADE_MS) textFades.delete(key);
-	}
-}
-
-// Start a fade only for a row that is appearing now. A missing key on a
-// settled/historical row means rest opacity — never treat it as a new fade.
-function rowOpacity(live: boolean, fadeKey: string | undefined): number {
-	if (!fadeKey) return TOOL_TEXT_OPACITY;
-	const existing = textFades.get(fadeKey);
-	if (existing !== undefined) return fadeOpacity(TOOL_TEXT_OPACITY, existing);
-	if (!live) return TOOL_TEXT_OPACITY;
-	const now = Date.now();
-	textFades.set(fadeKey, now);
-	pruneFades(now);
-	return fadeOpacity(TOOL_TEXT_OPACITY, now);
-}
-
-function elapsedSuffix(startedAt: number): string {
-	if (!(startedAt > 0)) return " (0s)";
-	return ` (${Math.max(0, Math.floor((Date.now() - startedAt) / 1000))}s)`;
-}
-
-// Pending rows animate: core repaints (not re-invokes) renderers, so the row
-// must read the shared spin frame and fade progress at render time instead of
-// snapshotting them. Only the appearing live row fades in; settled rows stay
-// at rest opacity. Indicator is full-color (live accent / settled green / error red).
-function formatRowLine(
-	theme: unknown,
-	width: number,
-	opts: {
-		body: string;
-		indent?: boolean;
-		live?: boolean;
-		error?: boolean;
-		right?: string;
-		fadeKey?: string;
-		tree?: "mid" | "last";
-		mark?: string;
-	},
-): string {
-	const live = opts.live === true;
-	const settling = !live && opts.fadeKey !== undefined && isSettling(opts.fadeKey);
-	const spin = live || settling;
-	const op = rowOpacity(live, opts.fadeKey);
-	const markToken = spin ? "accent" : opts.error ? "error" : "success";
-	const mark = opts.mark ?? (spin ? (SPIN_FRAMES[spinFrame % SPIN_FRAMES.length] ?? "◈") : "◆");
-	const branch = opts.tree === "mid" ? "├─" : opts.tree === "last" ? "╰─" : "";
-	const pad = branch ? paintAt(theme, branch, opts.error ? "error" : spin ? "accent" : "dim", op) + " " : opts.indent === true ? TOOL_INDENT : " ";
-	const w = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
-	const prefix = branch && !spin ? pad : `${pad}${paintMark(theme, mark, markToken)} `;
-	const right = opts.right ?? "";
-	const tail = right ? paintAt(theme, right, "dim", op) : "";
-	const bodyBudget = Math.max(1, w - visibleWidth(prefix) - (tail ? visibleWidth(tail) + 1 : 0));
-	const body = truncatePlain(stripKindSuffix(opts.body), bodyBudget);
-	const left = `${prefix}${paintBold(theme, paintAt(theme, body, opts.error ? "error" : "toolOutput", op))}`;
-	if (!tail) return left;
-	const gap = Math.max(0, w - visibleWidth(left) - visibleWidth(tail));
-	return `${left}${" ".repeat(gap)}${tail}`;
-}
 
 function thoughtFadeKey(): string {
 	return activityRunId ? `thought:${activityRunId}` : "thought:live";
@@ -699,7 +235,7 @@ function thoughtFadeKey(): string {
 
 function thinkingRailLines(theme: unknown, width: number, text: string, indent: boolean): string[] {
 	if (!text.trim()) return [];
-	const pad = indent ? TOOL_INDENT : " ";
+	const pad = indent ? TOOL_INDENT : "  ";
 	const bar = `${pad}│ `;
 	const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
 	const lines: string[] = [];
@@ -872,10 +408,17 @@ function paintGroup(theme: unknown, gid: string): Container {
 			const anyLive = [...group.rows.values()].some((row) => rowIsLive(row.fp));
 			const headerLive = anyLive && activityLive;
 			const header = activityRunId === gid && activityLabel ? activityLabel : group.label;
-			if (header.trim()) {
+			const rows = [...group.rows.values()].sort((a, b) => a.startedAt - b.startedAt);
+			// Multi-read groups keep one row per file under a count header
+			// (`● Read 3 files` + tree children); the count lives in the header
+			// so no child is merged away.
+			const bodies = rows.filter((row) => !row.fp.startsWith("thought:"));
+			const readCount = bodies.filter((row) => row.fp.startsWith("read:")).length;
+			const headerBody = bodies.length > 1 && readCount === bodies.length ? `Read ${readCount} files` : header;
+			if (headerBody.trim()) {
 				lines.push(
 					formatRowLine(theme, width, {
-						body: header,
+						body: headerBody,
 						live: headerLive,
 						fadeKey: `act:${gid}`,
 						right: headerLive ? elapsedSuffix(activityStartedAt) : "",
@@ -883,41 +426,18 @@ function paintGroup(theme: unknown, gid: string): Container {
 					}),
 				);
 			}
-			const rows = [...group.rows.values()].sort((a, b) => a.startedAt - b.startedAt);
-			const shown: Array<{ body: string; fps: string[]; live: boolean; error: boolean; startedAt: number; right: string }> =
-				[];
-			for (const row of rows) {
+			for (const [idx, row] of rows.entries()) {
 				const live = rowIsLive(row.fp);
-				const isRead = row.fp.startsWith("read:");
-				const last = shown[shown.length - 1];
-				if (isRead && last && last.fps[0]?.startsWith("read:")) {
-					last.fps.push(row.fp);
-					last.body = `Read ${last.fps.length} files`;
-					last.live = last.live || live;
-					last.error = last.error || row.error;
-					continue;
-				}
-				shown.push({
-					body: row.body,
-					fps: [row.fp],
-					live,
-					error: row.error,
-					startedAt: row.startedAt,
-					right: row.right,
-				});
-			}
-			for (const [idx, row] of shown.entries()) {
-				const settleKey = row.fps[0] ?? row.body;
-				const isThought = settleKey.startsWith("thought:");
+				const isThought = row.fp.startsWith("thought:");
 				lines.push(
 					formatRowLine(theme, width, {
 						body: row.body,
 						indent: true,
-						tree: idx === shown.length - 1 ? "last" : "mid",
-						live: row.live,
+						tree: idx === rows.length - 1 ? "last" : "mid",
+						live,
 						error: row.error,
-						fadeKey: settleKey,
-						right: row.live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
+						fadeKey: row.fp,
+						right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
 					}),
 				);
 				if (isThought && row.live) {
@@ -949,7 +469,6 @@ function renderToolVisual(
 	if (!isGroupLead(gid, fp)) return emptyBlock();
 	return paintGroup(theme, gid);
 }
-const SPIN_FRAMES = ["◈", "◉", "◎", "○"] as const;
 
 type ActivityDetails = { kind?: unknown; label?: unknown; startedAt?: unknown; total?: unknown; runId?: unknown };
 
@@ -1110,6 +629,15 @@ function skillPromptRenderer(message: unknown, options: unknown, theme: unknown)
 }
 
 export default function (pi: ExtensionAPI) {
+	let readGroupTheme: unknown;
+	// Native grouped reads (ReadToolGroupComponent) bypass the wrapped-read
+	// renderers; skin them at addChild time so transcript rebuilds and live
+	// grouping repaint through formatRowLine. Before any pi.on registration:
+	// a rebuild can add the group before session_start fires.
+	installReadGroupSkin(Container, {
+		enabled: () => enabled,
+		theme: () => readGroupTheme,
+	});
 	let loaded = false;
 	let spinTimer: unknown = undefined;
 	let spinUi: unknown;
@@ -1198,7 +726,7 @@ export default function (pi: ExtensionAPI) {
 		if (!timers) return;
 		try {
 			spinTimer = timers.setInterval(() => {
-				spinFrame = (spinFrame + 1) % SPIN_FRAMES.length;
+				advanceSpinFrame();
 				const pump = spinUi;
 				if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
 					const paint = pump.requestRender;
@@ -1285,15 +813,22 @@ function requestRepaint(): void {
 			thoughtStartedAt = 0;
 		}
 	}
+
+
 	function tryWrapTool(name: string, source?: unknown): void {
-		if (!name || wrappedTools.has(name) || name === "edit") return;
-		// One-liners for bash/read/grep/glob/write. Leave native `edit` (diff card)
-		// alone — wrapping it collapsed the hunks to a single line.
-		if (name !== "bash" && name !== "read" && name !== "grep" && name !== "glob" && name !== "write") return;
-		wrappedTools.add(name);
+		if (!name || wrapApplied.has(name)) return;
+		// One-liners for bash/read/grep/glob/write plus the edit pretty-diff
+		// card. Execution delegates untouched to native; only the card
+		// is custom (compact rows, full text behind Ctrl+O).
+		if (!groupTools.has(name)) return;
 		const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
+		// NEVER register a lossy stub: without the native parameters the shadowed
+		// schema hides fields from the model (write lost `content`, grep lost `path`).
+		// Skip instead — native rendering is the safe degradation.
+		if (src["parameters"] == null) return;
+		wrapApplied.add(name);
 		const description = typeof src["description"] === "string" ? src["description"] : name;
-		const parameters = src["parameters"] ?? pi.zod.object({}).passthrough();
+		const parameters = src["parameters"];
 		try {
 			pi.registerTool({
 				name,
@@ -1317,6 +852,7 @@ function requestRepaint(): void {
 				},
 				renderCall(args, options, theme) {
 					const partial = (options as { isPartial?: boolean })?.isPartial === true;
+					if (name === "edit") return renderPrettyEditCard(theme, args, undefined, options, partial);
 					return renderToolVisual(theme, toolFingerprint(name, args), {
 						body: toolActionLabel(name, args),
 						live: partial,
@@ -1324,6 +860,7 @@ function requestRepaint(): void {
 					});
 				},
 				renderResult(result, options, theme, args) {
+					if (name === "edit") return renderPrettyEditCard(theme, args, result, options, false);
 					return renderToolVisual(theme, toolFingerprint(name, args), {
 						body: toolActionLabel(name, args),
 						live: false,
@@ -1379,6 +916,12 @@ function requestRepaint(): void {
 		if (loaded) return;
 		loaded = true;
 		bindThoughtUi(ctx);
+		try {
+			const maybeTheme = (ctx as unknown as { ui?: { theme?: unknown } })?.ui?.theme;
+			if (maybeTheme !== undefined) readGroupTheme = maybeTheme;
+		} catch {
+			// formatRowLine degrades to unstyled without a theme.
+		}
 		wrapAllTools();
 		ensureSpinTimer(ctx);
 		try {
@@ -1472,8 +1015,8 @@ function requestRepaint(): void {
 				right: "",
 				startedAt,
 			});
-			tryWrapTool(toolName);
 		}
+		tryWrapTool(toolName);
 		ensureSpinTimer(ctx);
 		setThoughtWidget(false);
 		requestRepaint();
@@ -1615,192 +1158,4 @@ function requestRepaint(): void {
 		},
 	});
 
-	pi.registerTool({
-		name: "bash",
-		description: "Run a shell command",
-		parameters: pi.zod.object({ command: pi.zod.string() }).passthrough(),
-		mergeCallAndResult: true,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const c = ctx as unknown as {
-				invokeTool?: (
-					p: Record<string, unknown>,
-					o?: { signal?: AbortSignal; onUpdate?: unknown },
-				) => Promise<unknown>;
-			};
-			if (typeof c?.invokeTool !== "function") {
-				throw new Error("minimal-output: native bash unavailable");
-			}
-			return (await c.invokeTool(params as Record<string, unknown>, {
-				signal: signal as AbortSignal,
-				onUpdate: onUpdate as unknown,
-			})) as never;
-		},
-		renderCall(args, options, theme) {
-			const partial = (options as { isPartial?: boolean })?.isPartial === true;
-			return renderToolVisual(theme, toolFingerprint("bash", args), {
-				body: toolActionLabel("bash", args),
-				live: partial,
-				error: false,
-			});
-		},
-		renderResult(result, options, theme, args) {
-			return renderToolVisual(theme, toolFingerprint("bash", args), {
-				body: toolActionLabel("bash", args),
-				live: false,
-				error: isToolError(result, options),
-				right: durationSuffix(result),
-			}, frozenGroupOf(result));
-		},
-	});
-
-	pi.registerTool({
-		name: "read",
-		description: "Read a file",
-		parameters: pi.zod.object({ path: pi.zod.string() }).passthrough(),
-		mergeCallAndResult: true,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const c = ctx as unknown as {
-				invokeTool?: (
-					p: Record<string, unknown>,
-					o?: { signal?: AbortSignal; onUpdate?: unknown },
-				) => Promise<unknown>;
-			};
-			if (typeof c?.invokeTool !== "function") {
-				throw new Error("minimal-output: native read unavailable");
-			}
-			return (await c.invokeTool(params as Record<string, unknown>, {
-				signal: signal as AbortSignal,
-				onUpdate: onUpdate as unknown,
-			})) as never;
-		},
-		renderCall(args, options, theme) {
-			const partial = (options as { isPartial?: boolean })?.isPartial === true;
-			return renderToolVisual(theme, toolFingerprint("read", args), {
-				body: toolActionLabel("read", args),
-				live: partial,
-				error: false,
-			});
-		},
-		renderResult(result, options, theme, args) {
-			return renderToolVisual(theme, toolFingerprint("read", args), {
-				body: toolActionLabel("read", args),
-				live: false,
-				error: isToolError(result, options),
-				right: durationSuffix(result),
-			}, frozenGroupOf(result));
-		},
-	});
-	pi.registerTool({
-		name: "grep",
-		description: "Search for a pattern",
-		parameters: pi.zod.object({ pattern: pi.zod.string() }).passthrough(),
-		mergeCallAndResult: true,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const c = ctx as unknown as {
-				invokeTool?: (
-					p: Record<string, unknown>,
-					o?: { signal?: AbortSignal; onUpdate?: unknown },
-				) => Promise<unknown>;
-			};
-			if (typeof c?.invokeTool !== "function") {
-				throw new Error("minimal-output: native grep unavailable");
-			}
-			return (await c.invokeTool(params as Record<string, unknown>, {
-				signal: signal as AbortSignal,
-				onUpdate: onUpdate as unknown,
-			})) as never;
-		},
-		renderCall(args, options, theme) {
-			const partial = (options as { isPartial?: boolean })?.isPartial === true;
-			return renderToolVisual(theme, toolFingerprint("grep", args), {
-				body: toolActionLabel("grep", args),
-				live: partial,
-				error: false,
-			});
-		},
-		renderResult(result, options, theme, args) {
-			return renderToolVisual(theme, toolFingerprint("grep", args), {
-				body: toolActionLabel("grep", args),
-				live: false,
-				error: isToolError(result, options),
-				right: durationSuffix(result),
-			}, frozenGroupOf(result));
-		},
-	});
-
-	pi.registerTool({
-		name: "glob",
-		description: "Find files by pattern",
-		parameters: pi.zod.object({ path: pi.zod.string() }).passthrough(),
-		mergeCallAndResult: true,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const c = ctx as unknown as {
-				invokeTool?: (
-					p: Record<string, unknown>,
-					o?: { signal?: AbortSignal; onUpdate?: unknown },
-				) => Promise<unknown>;
-			};
-			if (typeof c?.invokeTool !== "function") {
-				throw new Error("minimal-output: native glob unavailable");
-			}
-			return (await c.invokeTool(params as Record<string, unknown>, {
-				signal: signal as AbortSignal,
-				onUpdate: onUpdate as unknown,
-			})) as never;
-		},
-		renderCall(args, options, theme) {
-			const partial = (options as { isPartial?: boolean })?.isPartial === true;
-			return renderToolVisual(theme, toolFingerprint("glob", args), {
-				body: toolActionLabel("glob", args),
-				live: partial,
-				error: false,
-			});
-		},
-		renderResult(result, options, theme, args) {
-			return renderToolVisual(theme, toolFingerprint("glob", args), {
-				body: toolActionLabel("glob", args),
-				live: false,
-				error: isToolError(result, options),
-				right: durationSuffix(result),
-			}, frozenGroupOf(result));
-		},
-	});
-
-	pi.registerTool({
-		name: "write",
-		description: "Write a file",
-		parameters: pi.zod.object({ path: pi.zod.string() }).passthrough(),
-		mergeCallAndResult: true,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const c = ctx as unknown as {
-				invokeTool?: (
-					p: Record<string, unknown>,
-					o?: { signal?: AbortSignal; onUpdate?: unknown },
-				) => Promise<unknown>;
-			};
-			if (typeof c?.invokeTool !== "function") {
-				throw new Error("minimal-output: native write unavailable");
-			}
-			return (await c.invokeTool(params as Record<string, unknown>, {
-				signal: signal as AbortSignal,
-				onUpdate: onUpdate as unknown,
-			})) as never;
-		},
-		renderCall(args, options, theme) {
-			const partial = (options as { isPartial?: boolean })?.isPartial === true;
-			return renderToolVisual(theme, toolFingerprint("write", args), {
-				body: toolActionLabel("write", args),
-				live: partial,
-				error: false,
-			});
-		},
-		renderResult(result, options, theme, args) {
-			return renderToolVisual(theme, toolFingerprint("write", args), {
-				body: toolActionLabel("write", args),
-				live: false,
-				error: isToolError(result, options),
-				right: durationSuffix(result),
-			}, frozenGroupOf(result));
-		},
-	});
 }

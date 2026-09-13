@@ -240,6 +240,202 @@ function collapseMcpText(toolName: string, stripped: string): { oneLiner: string
 	}
 	return { oneLiner: `◇ ${title}`, details: stripped };
 }
+export interface DiffStat {
+	added: number;
+	removed: number;
+}
+
+export function diffStat(text: string): DiffStat {
+	let added = 0;
+	let removed = 0;
+	try {
+		for (const line of text.split("\n")) {
+			if (line.startsWith("+") && !line.startsWith("+++")) added++;
+			else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+		}
+	} catch {
+		return { added: 0, removed: 0 };
+	}
+	return { added, removed };
+}
+
+export interface ParsedDiffLine {
+	kind: " " | "-" | "+" | "\\";
+	text: string;
+	oldNo?: number;
+	newNo?: number;
+}
+
+export interface ParsedDiffHunk {
+	header: { oldStart: number; oldCount: number; newStart: number; newCount: number } | null;
+	lines: ParsedDiffLine[];
+}
+
+const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+export function parseUnifiedDiff(text: string): ParsedDiffHunk[] {
+	try {
+		const hunks: ParsedDiffHunk[] = [];
+		let current: ParsedDiffHunk | null = null;
+		let oldNo = 0;
+		let newNo = 0;
+		for (const raw of text.split("\n")) {
+			const line = raw.replace(/\r$/, "");
+			const hm = HUNK_RE.exec(line);
+			if (hm) {
+				const oldStart = Number(hm[1]);
+				const newStart = Number(hm[3]);
+				if (!Number.isFinite(oldStart) || !Number.isFinite(newStart)) continue;
+				current = {
+					header: {
+						oldStart,
+						oldCount: hm[2] === undefined ? 1 : Number(hm[2]),
+						newStart,
+						newCount: hm[4] === undefined ? 1 : Number(hm[4]),
+					},
+					lines: [],
+				};
+				if (!Number.isFinite(current.header.oldCount)) current.header.oldCount = 0;
+				if (!Number.isFinite(current.header.newCount)) current.header.newCount = 0;
+				hunks.push(current);
+				oldNo = oldStart;
+				newNo = newStart;
+				continue;
+			}
+			if (line.startsWith("diff --git") || line.startsWith("+++") || line.startsWith("---")) continue;
+			if (!current) continue;
+			const first = line.charAt(0);
+			if (first === " " || first === "\t") {
+				current.lines.push({ kind: " ", text: line.slice(1), oldNo: oldNo++, newNo: newNo++ });
+			} else if (first === "") {
+				current.lines.push({ kind: " ", text: "", oldNo: oldNo++, newNo: newNo++ });
+			} else if (first === "-") {
+				current.lines.push({ kind: "-", text: line.slice(1), oldNo: oldNo++ });
+			} else if (first === "+") {
+				current.lines.push({ kind: "+", text: line.slice(1), newNo: newNo++ });
+			} else if (first === "\\") {
+				current.lines.push({ kind: "\\", text: line });
+			}
+		}
+		return hunks;
+	} catch {
+		return [];
+	}
+}
+
+const PIPE_RE = /^([ +-])(\d+)\|(.*)$/;
+
+// Native edit-result diffs (` 1|one`, `-2|two`, `+2|two (fresh)`): one
+// full-file section, no `@@` hunks. All-or-nothing: a single non-blank
+// line outside the pipe shape means this is not a pipe diff — fall back
+// to the unified path instead of rendering half a card.
+export function parsePipeDiff(text: string): ParsedDiffHunk[] {
+	try {
+		const lines: ParsedDiffLine[] = [];
+		for (const raw of text.split("\n")) {
+			const line = raw.replace(/\r$/, "");
+			if (!line.trim()) continue;
+			const m = PIPE_RE.exec(line);
+			if (!m) return [];
+			const mark = m[1];
+			const no = Number(m[2]);
+			const body = m[3] ?? "";
+			if (!Number.isFinite(no)) return [];
+			if (mark === "-") lines.push({ kind: "-", text: body, oldNo: no });
+			else if (mark === "+") lines.push({ kind: "+", text: body, newNo: no });
+			else lines.push({ kind: " ", text: body, oldNo: no, newNo: no });
+		}
+		if (lines.length === 0) return [];
+		return [{ header: null, lines }];
+	} catch {
+		return [];
+	}
+}
+
+export interface PrettyRow {
+	kind: " " | "-" | "+" | "|";
+	num: number | null;
+	text: string;
+}
+
+export function selectPrettyRows(hunks: ParsedDiffHunk[], opts: { expanded?: boolean }): PrettyRow[] {
+	try {
+		if (!Array.isArray(hunks) || hunks.length === 0) return [];
+		const cap = opts?.expanded === true ? 60 : 10;
+		const sections: PrettyRow[][] = [];
+		const headers: ({ oldStart: number; oldCount: number } | null)[] = [];
+		for (const hunk of hunks) {
+			if (!hunk || !Array.isArray(hunk.lines)) continue;
+			const keep: boolean[] = new Array(hunk.lines.length).fill(false);
+			for (let i = 0; i < hunk.lines.length; i++) {
+				const kind = hunk.lines[i]?.kind;
+				if (kind === "-" || kind === "+") {
+					keep[i] = true;
+					if (i - 1 >= 0 && hunk.lines[i - 1]?.kind === " ") keep[i - 1] = true;
+					if (i + 1 < hunk.lines.length && hunk.lines[i + 1]?.kind === " ") keep[i + 1] = true;
+				} else if (kind === "\\" && i - 1 >= 0 && keep[i - 1] === true) {
+					keep[i] = true;
+				}
+			}
+			const rows: PrettyRow[] = [];
+			for (let i = 0; i < hunk.lines.length; i++) {
+				if (keep[i] !== true) continue;
+				const line = hunk.lines[i];
+				if (!line) continue;
+				if (line.kind === "\\") {
+					rows.push({ kind: "|", num: null, text: line.text });
+				} else if (line.kind === "-") {
+					rows.push({ kind: "-", num: typeof line.oldNo === "number" ? line.oldNo : null, text: line.text });
+				} else if (line.kind === "+") {
+					rows.push({ kind: "+", num: typeof line.newNo === "number" ? line.newNo : null, text: line.text });
+				} else {
+					const num = typeof line.newNo === "number" ? line.newNo : typeof line.oldNo === "number" ? line.oldNo : null;
+					rows.push({ kind: " ", num, text: line.text });
+				}
+			}
+			if (rows.length > 0) {
+				sections.push(rows);
+				headers.push(hunk.header ?? null);
+			}
+		}
+		const out: PrettyRow[] = [];
+		for (let s = 0; s < sections.length; s++) {
+			if (s > 0) {
+				const prev = headers[s - 1];
+				const next = headers[s];
+				let sep = "···";
+				if (prev && next) {
+					const gap = next.oldStart - (prev.oldStart + prev.oldCount);
+					if (gap > 0) sep = `··· ${gap} unchanged lines`;
+				}
+				out.push({ kind: "|", num: null, text: sep });
+			}
+			const rows = sections[s];
+			if (rows) for (const row of rows) out.push(row);
+		}
+		let content = 0;
+		for (const row of out) if (row.kind !== "|") content++;
+		if (content <= cap) return out;
+		const kept: PrettyRow[] = [];
+		let seen = 0;
+		let rest = 0;
+		let cut = false;
+		for (const row of out) {
+			if (!cut && row.kind !== "|" && seen >= cap) cut = true;
+			if (cut) {
+				if (row.kind !== "|") rest++;
+				continue;
+			}
+			if (row.kind !== "|") seen++;
+			kept.push(row);
+		}
+		while (kept.length > 0 && kept[kept.length - 1]?.kind === "|") kept.pop();
+		if (rest > 0) kept.push({ kind: "|", num: null, text: `… (${rest} more lines)` });
+		return kept;
+	} catch {
+		return [];
+	}
+}
 
 export function collapseToolText(
 	toolName: string,
@@ -247,7 +443,43 @@ export function collapseToolText(
 	text: string,
 ): CollapseResult {
 	if (!text) return { text, changed: false, rule: "", fullText: text };
-	if (toolName === "edit" || toolName === "ast_edit") return { text, changed: false, rule: "", fullText: text };
+	if (toolName === "ast_edit") return { text, changed: false, rule: "", fullText: text };
+	if (toolName === "edit") {
+		const fields = (input ?? {}) as Record<string, unknown>;
+		const strippedEdit = text.replace(ANSI_RE, "");
+		const rulesEdit: string[] = [];
+		if (strippedEdit !== text) rulesEdit.push("ansi");
+		let editPath = strField(fields, "path", "file_path", "file");
+		let editOp = strField(fields, "op");
+		let editMove = strField(fields, "move", "moveTo", "rename", "newPath", "target");
+		try {
+			const edits = (fields as Record<string, unknown>)["edits"];
+			if (Array.isArray(edits) && edits.length > 0) {
+				const first = edits[0] as Record<string, unknown>;
+				if (!editPath && first && typeof first["path"] === "string") editPath = first["path"] as string;
+				if (!editOp && first && typeof first["op"] === "string") editOp = first["op"] as string;
+				if (!editMove && first && typeof (first["rename"] ?? first["move"] ?? first["moveTo"]) === "string") {
+					editMove = String(first["rename"] ?? first["move"] ?? first["moveTo"]);
+				}
+			}
+		} catch {
+			// Input shape varies by edit mode; fall back to top-level fields.
+		}
+		const one = editPath.replace(/\s+/g, " ").trim();
+		const short = one.length > 80 ? `${one.slice(0, 80)}…` : one || "file";
+		const verb = editOp === "create" ? "Create" : editOp === "delete" ? "Delete" : "Edit";
+		const moveOne = editMove.replace(/\s+/g, " ").trim();
+		const moveSuffix = moveOne ? ` → ${moveOne.length > 80 ? `${moveOne.slice(0, 80)}…` : moveOne}` : "";
+		const stat = diffStat(strippedEdit);
+		const statSuffix = stat.added === 0 && stat.removed === 0 ? "" : ` — +${stat.added}/−${stat.removed}`;
+		const oneLiner = `◆ ${verb} ${short}${moveSuffix}${statSuffix}`;
+		rulesEdit.push("edit");
+		const capped = truncateDetails(strippedEdit);
+		if (capped.truncated) rulesEdit.push("truncate");
+		const finalText = capped.details ? `${oneLiner}\n${capped.details}` : oneLiner;
+		if (finalText === text) return { text, changed: false, rule: "", fullText: text };
+		return { text: finalText, changed: true, rule: rulesEdit.join(",") || "collapse", fullText: strippedEdit };
+	}
 	const fields = (input ?? {}) as Record<string, unknown>;
 	const stripped = text.replace(ANSI_RE, "");
 	const rules: string[] = [];

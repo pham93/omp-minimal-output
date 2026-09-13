@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.ts",
   "pi": { "extensions": ["./index.ts"] },
-  "files": ["index.ts", "filters.ts", "minimal-output.yml", "README.md", "LICENSE"],
+  "files": ["index.ts", "filters.ts", "text.ts", "theme.ts", "results.ts", "loaders.ts", "edit-card.ts", "read-group.ts", "minimal-output.yml", "README.md", "LICENSE"],
   "keywords": ["pi", "pi-coding-agent", "pi-package", "extension", "minimal-output"],
   "license": "MIT",
   "peerDependencies": { "@oh-my-pi/pi-coding-agent": "*" }
