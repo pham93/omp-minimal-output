@@ -8,19 +8,32 @@ import { readFileSync } from "node:fs";
 
 export const PLUGIN_NAME = "@local/omp-minimal-output";
 
-export const WRAP_CANDIDATES = ["bash", "read", "grep", "glob", "write", "edit", "eval", "web_search"] as const;
-export type WrapCandidate = (typeof WRAP_CANDIDATES)[number];
-
-export const NATIVE_KEY = {
-  bash: "nativeBash",
-  read: "nativeRead",
-  grep: "nativeGrep",
-  glob: "nativeGlob",
-  write: "nativeWrite",
-  edit: "nativeEdit",
-  eval: "nativeEval",
-  web_search: "nativeWebSearch",
+export const STATIC_TOOL_APPROVAL = {
+  read: "read",
+  write: "write",
+  exec: "exec",
 } as const;
+export type StaticToolApproval = (typeof STATIC_TOOL_APPROVAL)[keyof typeof STATIC_TOOL_APPROVAL];
+
+export interface WrappedToolDefinition {
+  nativeKey: string;
+  approval?: StaticToolApproval;
+}
+
+export const WRAPPED_TOOL_REGISTRY = {
+  bash: { nativeKey: "nativeBash" },
+  read: { nativeKey: "nativeRead" },
+  grep: { nativeKey: "nativeGrep" },
+  glob: { nativeKey: "nativeGlob", approval: STATIC_TOOL_APPROVAL.read },
+  write: { nativeKey: "nativeWrite" },
+  edit: { nativeKey: "nativeEdit" },
+  eval: { nativeKey: "nativeEval", approval: STATIC_TOOL_APPROVAL.exec },
+  web_search: { nativeKey: "nativeWebSearch", approval: STATIC_TOOL_APPROVAL.read },
+} as const satisfies Record<string, WrappedToolDefinition>;
+
+export type WrappedTool = keyof typeof WRAPPED_TOOL_REGISTRY;
+export type WrappedToolConfigKey = (typeof WRAPPED_TOOL_REGISTRY)[WrappedTool]["nativeKey"];
+type WrappedToolSettings = Record<WrappedToolConfigKey, boolean>;
 
 export const INDICATOR = {
   diamond: { frames: ["◈", "◉", "◎", "○"], settled: "◆" },
@@ -29,18 +42,10 @@ export const INDICATOR = {
 } as const;
 export type IndicatorId = keyof typeof INDICATOR;
 
-export interface PluginConfig {
+export interface PluginConfig extends WrappedToolSettings {
   opacity: number;
   indicator: IndicatorId;
   indicatorAnimation: boolean;
-  nativeBash: boolean;
-  nativeRead: boolean;
-  nativeGrep: boolean;
-  nativeGlob: boolean;
-  nativeWrite: boolean;
-  nativeEdit: boolean;
-  nativeEval: boolean;
-  nativeWebSearch: boolean;
   webSearchMaxResults: number;
   todosHeader: boolean;
   todoHud: boolean;
@@ -69,23 +74,17 @@ export const DEFAULT_CONFIG: PluginConfig = {
   editShowSpaces: false,
 };
 
-const BOOLEAN_KEYS = [
-  "indicatorAnimation",
-  "nativeBash",
-  "nativeRead",
-  "nativeGrep",
-  "nativeGlob",
-  "nativeWrite",
-  "nativeEdit",
-  "nativeEval",
-  "nativeWebSearch",
-  "todosHeader",
-  "todoHud",
-  "todoReminderOneLine",
-  "editShowTabs",
-  "editShowSpaces",
-] as const;
-type BooleanKey = (typeof BOOLEAN_KEYS)[number];
+const BOOLEAN_KEYS: Record<string, true> = {
+  indicatorAnimation: true,
+  todosHeader: true,
+  todoHud: true,
+  todoReminderOneLine: true,
+  editShowTabs: true,
+  editShowSpaces: true,
+};
+for (const definition of Object.values(WRAPPED_TOOL_REGISTRY)) {
+  BOOLEAN_KEYS[definition.nativeKey] = true;
+}
 
 export function lockfilePath(): string {
   return join(homedir(), ".omp", "plugins", "omp-plugins.lock.json");
@@ -139,10 +138,10 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         }
         continue;
       }
-      if ((BOOLEAN_KEYS as readonly string[]).includes(key)) {
+      if (BOOLEAN_KEYS[key] === true) {
         const v = src[key];
         if (typeof v === "boolean") {
-          (next as unknown as Record<BooleanKey, boolean>)[key as BooleanKey] = v;
+          (next as unknown as Record<string, unknown>)[key] = v;
         }
         continue;
       }
@@ -183,10 +182,13 @@ export function reloadPluginConfig(): PluginConfig {
   return loadPluginConfig();
 }
 
+export function isWrappedTool(name: string): name is WrappedTool {
+  return Object.prototype.hasOwnProperty.call(WRAPPED_TOOL_REGISTRY, name);
+}
+
 export function wrapTool(name: string, cfg: PluginConfig = getPluginConfig()): boolean {
-  if (!(WRAP_CANDIDATES as readonly string[]).includes(name)) return false;
-  const key = NATIVE_KEY[name as WrapCandidate];
-  return cfg[key] !== true;
+  if (!isWrappedTool(name)) return false;
+  return cfg[WRAPPED_TOOL_REGISTRY[name].nativeKey] !== true;
 }
 
 export function indicatorFrames(cfg: PluginConfig = getPluginConfig()): readonly string[] {

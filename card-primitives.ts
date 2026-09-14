@@ -1,0 +1,132 @@
+// Small shared mechanics for card renderers. Tool-specific parsing stays local.
+import { getPluginConfig } from "./config.ts";
+import { isToolError, toolResultText } from "./results.ts";
+import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, isSettling, paintAt } from "./theme.ts";
+import { truncatePlain } from "./text.ts";
+
+export const CARD_LIFECYCLE_STATE = {
+  running: "running",
+  success: "success",
+  error: "error",
+} as const;
+
+export type CardLifecycleState = (typeof CARD_LIFECYCLE_STATE)[keyof typeof CARD_LIFECYCLE_STATE];
+
+export interface CardLifecycleInput {
+  error?: boolean;
+}
+
+export interface CardLifecycle {
+  state: CardLifecycleState;
+  partial: boolean;
+  expanded: boolean;
+  running: boolean;
+  settled: boolean;
+  error: boolean;
+}
+
+export interface CardHeaderOptions {
+  body: string;
+  lifecycle: CardLifecycle;
+  right?: string;
+  fingerprint?: string;
+  settledMark?: string;
+}
+
+export interface ConciseErrorOptions {
+  fallback: string;
+  max?: number;
+  skipPattern?: RegExp;
+}
+
+export interface CardItemLimit<T> {
+  visible: readonly T[];
+  hidden: number;
+}
+
+export function resultDetails(result: unknown): Record<string, unknown> | undefined {
+  if (typeof result !== "object" || result === null || Array.isArray(result) || !("details" in result)) {
+    return undefined;
+  }
+  const details = result.details;
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
+  const fields = details as Record<string, unknown>;
+  return fields;
+}
+
+export function stashedResultText(result: unknown): string {
+  const stashed = resultDetails(result)?.["minimalFullText"];
+  return typeof stashed === "string" ? stashed : "";
+}
+
+export function stashedOrResultText(result: unknown): string {
+  return stashedResultText(result) || toolResultText(result);
+}
+
+export function compactCardText(value: unknown, max: number): string {
+  if (typeof value !== "string") return "";
+  const one = value.replace(/\s+/g, " ").trim();
+  if (!one) return "";
+  return one.length > max ? `${one.slice(0, Math.max(1, max - 1))}…` : one;
+}
+
+export function conciseErrorText(result: unknown, options: ConciseErrorOptions): string {
+  const max = options.max ?? 120;
+  const nativeError = compactCardText(resultDetails(result)?.["error"], max);
+  if (nativeError) return nativeError;
+  for (const line of stashedOrResultText(result).split("\n")) {
+    const one = compactCardText(line.replace(/^\s*(?:error|failed?)\s*:?\s*/i, ""), max);
+    if (one && !options.skipPattern?.test(one)) return one;
+  }
+  return options.fallback;
+}
+
+export function cardIsPartial(options: unknown): boolean {
+  return typeof options === "object" && options !== null && "isPartial" in options && options.isPartial === true;
+}
+
+export function cardIsExpanded(options: unknown): boolean {
+  return typeof options === "object" && options !== null && "expanded" in options && options.expanded === true;
+}
+
+export function cardLifecycle(result: unknown, options: unknown, input?: CardLifecycleInput): CardLifecycle {
+  const partial = result !== undefined && cardIsPartial(options);
+  const running = result === undefined || partial;
+  const settled = !running;
+  const error = settled && (input?.error === true || isToolError(result, options));
+  const state = running
+    ? CARD_LIFECYCLE_STATE.running
+    : error
+      ? CARD_LIFECYCLE_STATE.error
+      : CARD_LIFECYCLE_STATE.success;
+  return { state, partial, expanded: cardIsExpanded(options), running, settled, error };
+}
+
+export function cardHeaderLine(theme: unknown, width: number, options: CardHeaderOptions): string {
+  const settling = options.fingerprint !== undefined && isSettling(options.fingerprint);
+  return formatRowLine(theme, width, {
+    body: options.body,
+    live: options.lifecycle.running,
+    error: options.lifecycle.error,
+    right: options.right,
+    fadeKey: options.fingerprint,
+    mark: options.lifecycle.running || settling ? undefined : options.settledMark,
+  });
+}
+
+export function cardTitleLine(theme: unknown, width: number, title: string, error = false): string {
+  return formatRowLine(theme, width, { body: title, indent: true, tree: "last", error });
+}
+
+export function cardDetailLine(theme: unknown, width: number, text: string): string {
+  const cfg = getPluginConfig();
+  const prefix = `${TOOL_INDENT}   `;
+  const rowWidth = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
+  const budget = Math.max(1, rowWidth - prefix.length);
+  return `${prefix}${paintAt(theme, truncatePlain(text, budget), "dim", cfg.opacity)}`;
+}
+
+export function limitCardItems<T>(items: readonly T[], max: number): CardItemLimit<T> {
+  const visible = items.slice(0, Math.max(0, Math.floor(max)));
+  return { visible, hidden: items.length - visible.length };
+}

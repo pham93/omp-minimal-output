@@ -17,7 +17,16 @@ import {
   paintAt,
   textFades,
 } from "./theme.ts";
-import { getPluginConfig, lockfilePath, projectOverridePaths, reloadPluginConfig, wrapTool } from "./config.ts";
+import {
+  getPluginConfig,
+  isWrappedTool,
+  lockfilePath,
+  projectOverridePaths,
+  reloadPluginConfig,
+  type WrappedTool,
+  WRAPPED_TOOL_REGISTRY,
+  wrapTool,
+} from "./config.ts";
 import {
   argsFingerprint,
   durationSuffix,
@@ -33,6 +42,7 @@ import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
+import { cardIsPartial } from "./card-primitives.ts";
 import { installReadGroupSkin } from "./read-group.ts";
 import { alertSkinActive, installWarningSkin, invalidateLiveAlerts } from "./warning-skin.ts";
 import { installTodoChrome } from "./todo-hud.ts";
@@ -45,6 +55,38 @@ import {
   todoNeedsPump,
   type TodoHeaderState,
 } from "./todos-header.ts";
+
+interface ToolCardRenderer {
+  renderCall(theme: unknown, args: unknown, options: unknown, fingerprint: string): Container;
+  renderResult(theme: unknown, args: unknown, result: unknown, options: unknown, fingerprint: string): Container;
+}
+
+const CARD_RENDERERS = {
+  edit: {
+    renderCall(theme, args, options) {
+      return renderPrettyEditCard(theme, args, undefined, options, cardIsPartial(options));
+    },
+    renderResult(theme, args, result, options) {
+      return renderPrettyEditCard(theme, args, result, options, false);
+    },
+  },
+  eval: {
+    renderCall(theme, args, options, fingerprint) {
+      return renderEvalCard(theme, args, undefined, options, cardIsPartial(options), fingerprint);
+    },
+    renderResult(theme, args, result, options, fingerprint) {
+      return renderEvalCard(theme, args, result, options, false, fingerprint);
+    },
+  },
+  web_search: {
+    renderCall(theme, args, options, fingerprint) {
+      return renderWebSearchCard(theme, args, undefined, options, fingerprint);
+    },
+    renderResult(theme, args, result, options, fingerprint) {
+      return renderWebSearchCard(theme, args, result, options, fingerprint);
+    },
+  },
+} satisfies Partial<Record<WrappedTool, ToolCardRenderer>>;
 
 // Elapsed base for the live row timer (ms epoch). Maintained by the
 // tool handlers below; renderers only read it.
@@ -92,8 +134,8 @@ let todosWidgetOn = false;
 const TODOS_WIDGET_KEY = "minimal-todos";
 const THOUGHT_PREVIEW_LINES = 3;
 const THOUGHT_WIDGET_KEY = "minimal-thinking";
-// Tools already re-registered with a custom card. wrapTool() from config.ts
-// decides membership (WRAP_CANDIDATES minus native* opt-outs).
+// Tools already re-registered custom card. wrapTool() config.ts decides
+// membership from WRAPPED_TOOL_REGISTRY minus native opt-outs.
 const wrapApplied = new Set<string>();
 let lastConfigMtimes = "";
 
@@ -1188,15 +1230,22 @@ export default function (pi: ExtensionAPI) {
 
   function tryWrapTool(name: string, source?: unknown): void {
     if (!name || wrapApplied.has(name)) return;
-    // One-liners for bash/read/grep/glob/write plus dedicated edit, eval,
-    // and web-search cards. Execution delegates untouched to the native tool;
-    // only transcript presentation changes.
-    if (!wrapTool(name)) return;
+    // One-liners bash/read/grep/glob/write plus dedicated edit, eval, and
+    // web-search cards. Execution delegates untouched native tool; only
+    // transcript presentation changes.
+    if (!isWrappedTool(name) || !wrapTool(name)) return;
     const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
-    // NEVER register a lossy stub: without the native parameters the shadowed
-    // schema hides fields from the model (write lost `content`, grep lost `path`).
-    // Skip instead — native rendering is the safe degradation.
+    // NEVER register lossy stub: without native parameters shadowed schema hides
+    // fields from the model (write lost `content`, grep lost `path`). Skip
+    // instead — native rendering is safe degradation.
     if (src["parameters"] == null) return;
+    const definition = WRAPPED_TOOL_REGISTRY[name];
+    // getAllTools() does not expose native approval functions. Forward only
+    // exact static fallbacks recorded in the registry; dynamic-policy tools
+    // remain conservative at the extension default and cannot safely be added
+    // merely by extending this registry.
+    const approval = "approval" in definition ? definition.approval : undefined;
+    const renderer = CARD_RENDERERS[name];
     wrapApplied.add(name);
     const description = typeof src["description"] === "string" ? src["description"] : name;
     const parameters = src["parameters"];
@@ -1205,7 +1254,7 @@ export default function (pi: ExtensionAPI) {
         name,
         description,
         parameters: parameters as never,
-        ...(name === "web_search" ? { approval: "read" as const } : {}),
+        ...(approval !== undefined ? { approval: approval as never } : {}),
         mergeCallAndResult: true,
         async execute(_toolCallId, params, signal, onUpdate, ctx) {
           const c = ctx as unknown as {
@@ -1223,26 +1272,20 @@ export default function (pi: ExtensionAPI) {
           })) as never;
         },
         renderCall(args, options, theme) {
-          const partial = (options as { isPartial?: boolean })?.isPartial === true;
-          if (name === "edit") return renderPrettyEditCard(theme, args, undefined, options, partial);
-          if (name === "eval")
-            return renderEvalCard(theme, args, undefined, options, partial, toolFingerprint(name, args));
-          if (name === "web_search")
-            return renderWebSearchCard(theme, args, undefined, options, toolFingerprint(name, args));
-          return renderToolVisual(theme, toolFingerprint(name, args), {
+          const fingerprint = toolFingerprint(name, args);
+          if (renderer) return renderer.renderCall(theme, args, options, fingerprint);
+          return renderToolVisual(theme, fingerprint, {
             body: toolActionLabel(name, args),
-            live: partial,
+            live: cardIsPartial(options),
             error: false,
           });
         },
         renderResult(result, options, theme, args) {
-          if (name === "edit") return renderPrettyEditCard(theme, args, result, options, false);
-          if (name === "eval") return renderEvalCard(theme, args, result, options, false, toolFingerprint(name, args));
-          if (name === "web_search")
-            return renderWebSearchCard(theme, args, result, options, toolFingerprint(name, args));
+          const fingerprint = toolFingerprint(name, args);
+          if (renderer) return renderer.renderResult(theme, args, result, options, fingerprint);
           return renderToolVisual(
             theme,
-            toolFingerprint(name, args),
+            fingerprint,
             {
               body: toolActionLabel(name, args),
               live: false,

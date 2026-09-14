@@ -117,6 +117,8 @@
     "edit-card.ts",
     "eval-card.ts",
     "web-search-card.ts",
+    "card-primitives.ts",
+    "card-gallery.ts",
     "read-group.ts",
     "todos-header.ts",
     "todo-hud.ts",
