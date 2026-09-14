@@ -17,13 +17,7 @@ import {
   paintAt,
   textFades,
 } from "./theme.ts";
-import {
-  getPluginConfig,
-  lockfilePath,
-  projectOverridePaths,
-  reloadPluginConfig,
-  wrapTool,
-} from "./config.ts";
+import { getPluginConfig, lockfilePath, projectOverridePaths, reloadPluginConfig, wrapTool } from "./config.ts";
 import {
   argsFingerprint,
   durationSuffix,
@@ -39,6 +33,17 @@ import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { installReadGroupSkin } from "./read-group.ts";
+import { alertSkinActive, installWarningSkin, invalidateLiveAlerts } from "./warning-skin.ts";
+import { installTodoChrome } from "./todo-hud.ts";
+import {
+  latestTodoDetailsFromEntries,
+  parseTodoPhases,
+  parseTodoResult,
+  renderTodoHeader,
+  todoItemKey,
+  todoNeedsPump,
+  type TodoHeaderState,
+} from "./todos-header.ts";
 
 // Elapsed base for the live row timer (ms epoch). Maintained by the
 // tool handlers below; renderers only read it.
@@ -70,6 +75,20 @@ let thoughtUi:
       requestRender?: () => void;
     }
   | undefined;
+let todosCollapsed = false;
+let todoHeaderState: TodoHeaderState | null = null;
+const todoCompletingAt = new Map<string, number>();
+const todoSeen = new Map<string, string>();
+let agentRunning = false;
+let kickTodoPump = (): void => {};
+let todosUi:
+  | {
+      setWidget?: (key: string, content: unknown, options?: { placement?: string }) => void;
+      requestRender?: () => void;
+    }
+  | undefined;
+let todosWidgetOn = false;
+const TODOS_WIDGET_KEY = "minimal-todos";
 const THOUGHT_PREVIEW_LINES = 3;
 const THOUGHT_WIDGET_KEY = "minimal-thinking";
 // Tools already re-registered with a custom card. wrapTool() from config.ts
@@ -129,7 +148,6 @@ function textItemOf(content: unknown): { list: TextItem[]; item: TextItem } | un
   const item = list.find((c) => c?.type === "text" && typeof c.text === "string");
   return item?.text !== undefined ? { list, item } : undefined;
 }
-
 function stripFence(text: string): string {
   const t = text.trim();
   const m = t.match(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/);
@@ -154,6 +172,16 @@ function unwrapResultEnvelope(text: string): string | null {
     }
   } catch {}
   return null;
+}
+
+function todoRawText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const c of content as { type?: unknown; text?: unknown }[]) {
+    if (c && typeof c === "object" && c.type === "text" && typeof c.text === "string") parts.push(c.text);
+  }
+  return parts.join("\n");
 }
 
 function isMcpEnvelopeDuplicate(text: string, raw: string): boolean {
@@ -197,7 +225,6 @@ function isCollapseTarget(event: ToolResultEvent): boolean {
       "security_scan",
       "task",
       "hub",
-      "todo",
       "web_search",
       "write",
       "memory_edit",
@@ -387,6 +414,196 @@ function setThoughtWidget(show: boolean): void {
     thoughtWidgetOn = true;
   } catch {
     thoughtWidgetOn = false;
+  }
+}
+
+function bindTodosUi(ctx: unknown): void {
+  if (typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
+  const ui = (ctx as { ui?: typeof todosUi }).ui;
+  if (ui) todosUi = ui;
+}
+
+function paintTodosWidget(theme: unknown): Container {
+  const c = new Container();
+  c.addChild({
+    render: (width: number): readonly string[] => {
+      let show = true;
+      try {
+        show = getPluginConfig().todosHeader !== false;
+      } catch {
+        // Config read is best-effort; paint with the cached state.
+      }
+      const state = peekTodoState();
+      if (!show || !state || state.items.length === 0) return [];
+      return renderTodoHeader(theme, width, state, todosCollapsed, todoAnim());
+    },
+  });
+  return c;
+}
+
+function setTodosWidget(show: boolean): void {
+  const ui = todosUi;
+  if (!ui || typeof ui.setWidget !== "function") return;
+  try {
+    if (!show) {
+      if (todosWidgetOn) ui.setWidget(TODOS_WIDGET_KEY, undefined);
+      todosWidgetOn = false;
+      return;
+    }
+    if (todosWidgetOn) {
+      if (typeof ui.requestRender === "function") ui.requestRender();
+      return;
+    }
+    ui.setWidget(TODOS_WIDGET_KEY, (_tui: unknown, theme: unknown) => paintTodosWidget(theme), {
+      placement: "aboveEditor",
+    });
+    todosWidgetOn = true;
+  } catch {
+    todosWidgetOn = false;
+  }
+}
+
+function installTodosWidget(): void {
+  let show = true;
+  try {
+    show = getPluginConfig().todosHeader !== false;
+  } catch {
+    // Config reload is best-effort; install with the cached state.
+  }
+  setTodosWidget(show && !!todoHeaderState && todoHeaderState.items.length > 0);
+}
+
+function refreshTodosWidget(): void {
+  if (!todosWidgetOn) installTodosWidget();
+  else setTodosWidget(true);
+}
+let todoHeaderSig = "";
+let todoSource: (() => { phases: unknown } | undefined) | undefined;
+let todoSessionVisible = false;
+let todoSessionBaselineSig = "";
+
+function todoSourceSignature(): string {
+  try {
+    const raw = todoSource?.();
+    return raw ? JSON.stringify(raw.phases) : "";
+  } catch {
+    return "";
+  }
+}
+
+function captureTodoSessionBaseline(): void {
+  todoSessionBaselineSig = todoSourceSignature();
+}
+
+function resetTodoSessionState(): void {
+  todoSource = undefined;
+  todoSessionVisible = false;
+  todoSessionBaselineSig = "";
+  todoHeaderSig = "";
+  todoHeaderState = null;
+  todoSeen.clear();
+  todoCompletingAt.clear();
+  setTodosWidget(false);
+}
+
+
+function bindTodoSource(ctx: unknown): void {
+  if (typeof ctx !== "object" || ctx === null) return;
+  const rec = ctx as {
+    session?: { getTodoPhases?: () => unknown };
+    sessionManager?: { getBranch?: () => unknown; getEntries?: () => unknown };
+  };
+  const session = rec.session;
+  const sm = rec.sessionManager;
+  if (!session && !sm) return;
+  todoSource = () => {
+    try {
+      const phases = session?.getTodoPhases?.();
+      if (Array.isArray(phases)) return { phases };
+    } catch {
+      // Session getter is best-effort.
+    }
+    try {
+      const entries = typeof sm?.getBranch === "function" ? sm.getBranch() : sm?.getEntries?.();
+      return latestTodoDetailsFromEntries(entries);
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+function todoAnim(): { now: number; completingAt: Map<string, number>; running: boolean } {
+  return { now: Date.now(), completingAt: todoCompletingAt, running: agentRunning };
+}
+
+function noteTodoTransitions(next: TodoHeaderState): void {
+  const live = new Set<string>();
+  for (const item of next.items) {
+    const key = todoItemKey(item);
+    live.add(key);
+    const prev = todoSeen.get(key);
+    if (item.status === "done" && prev !== undefined && prev !== "done" && !todoCompletingAt.has(key)) {
+      todoCompletingAt.set(key, Date.now());
+    }
+    todoSeen.set(key, item.status);
+  }
+  for (const key of [...todoSeen.keys()]) {
+    if (!live.has(key)) {
+      todoSeen.delete(key);
+      todoCompletingAt.delete(key);
+    }
+  }
+}
+
+function applyTodoState(next: TodoHeaderState): void {
+  noteTodoTransitions(next);
+  const sig = JSON.stringify(next.items);
+  const hide = next.items.length === 0;
+  if (sig === todoHeaderSig && hide === (todoHeaderState === null)) {
+    kickTodoPump();
+    return;
+  }
+  todoHeaderSig = sig;
+  todoHeaderState = hide ? null : next;
+  installTodosWidget();
+  refreshTodosWidget();
+  kickTodoPump();
+}
+
+function peekTodoState(): TodoHeaderState | null {
+  if (!todoSessionVisible) return null;
+  try {
+    const raw = todoSource?.();
+    if (raw) {
+      const next = parseTodoPhases(raw);
+      if (next) {
+        noteTodoTransitions(next);
+        todoHeaderSig = JSON.stringify(next.items);
+        todoHeaderState = next.items.length > 0 ? next : null;
+      }
+    }
+  } catch {
+    // Keep last cache.
+  }
+  kickTodoPump();
+  return todoHeaderState;
+}
+
+// /todo and foreign writers never emit tool_result. Bind session getters
+// when ctx is present; paint-time peek plus HUD addChild keep the widget live.
+function syncTodoHeaderFromSession(ctx?: unknown): void {
+  if (ctx) bindTodoSource(ctx);
+  try {
+    const raw = todoSource?.();
+    const sig = raw ? JSON.stringify(raw.phases) : "";
+    if (!todoSessionVisible) {
+      if (sig === todoSessionBaselineSig) return;
+      todoSessionVisible = true;
+    }
+    const next = raw ? parseTodoPhases(raw) : null;
+    if (next) applyTodoState(next);
+  } catch {
+    // History scan is best-effort; the tool_result path still feeds the header.
   }
 }
 
@@ -737,9 +954,56 @@ export default function (pi: ExtensionAPI) {
     enabled: () => enabled && wrapTool("read"),
     theme: () => readGroupTheme,
   });
+  // Host warning/error panes (todo reminder, TTSR, showWarning/showError,
+  // pinned ErrorBanner) -> one ⚠/✗ line. Pump slot is filled after
+  // ensureSpinTimer exists; addChild-time skinning kicks it so fade/breathe
+  // run even when no tool is live.
+  let kickAlertPump = (): void => {};
+  installWarningSkin(Container, {
+    enabled: () => enabled && getPluginConfig().todoReminderOneLine !== false,
+    theme: () => readGroupTheme,
+    pump: () => kickAlertPump(),
+  });
+  installTodoChrome(Container, {
+    hideHud: () => enabled && getPluginConfig().todoHud === false,
+    skinCard: () => enabled,
+    paintCard: (width, expanded) => {
+      const state = peekTodoState();
+      if (!state || state.items.length === 0) return [];
+      return renderTodoHeader(readGroupTheme, width, state, !expanded, todoAnim());
+    },
+    onHud: () => syncTodoHeaderFromSession(),
+    onTodoDetails: (details) => {
+      if (!todoSessionVisible) return;
+      const next = parseTodoPhases(details);
+      if (next) applyTodoState(next);
+    },
+  });
   let loaded = false;
   let spinTimer: unknown = undefined;
   let spinUi: unknown;
+  let spinCtx: unknown;
+  const PUMP_WIDGET_KEY = "minimal-pump";
+  function grabTui(ctx: unknown): void {
+    bindThoughtUi(ctx);
+    bindTodosUi(ctx);
+    bindTodoSource(ctx);
+    const ui = todosUi ?? thoughtUi;
+    if (!ui || typeof ui.setWidget !== "function") return;
+    try {
+      ui.setWidget(PUMP_WIDGET_KEY, (tui: unknown, theme: unknown) => {
+        if (theme !== undefined) readGroupTheme = theme;
+        if (typeof tui === "object" && tui !== null && "requestRender" in tui) spinUi = tui;
+        const c = new Container();
+        c.addChild({ render: (): readonly string[] => [] });
+        return c;
+      });
+      ui.setWidget(PUMP_WIDGET_KEY, undefined);
+    } catch {
+      // Capture is best-effort; pump no-ops without TUI.
+    }
+  }
+
   pi.registerMessageRenderer("minimal-activity", (message, options, theme) =>
     activityRenderer(message, options, theme),
   );
@@ -807,6 +1071,7 @@ export default function (pi: ExtensionAPI) {
   // the working line. Row components read the frame at render time, so
   // every repaint cycles them without re-invoking renderers.
   function ensureSpinTimer(ctx: unknown): void {
+    spinCtx = ctx;
     bindThoughtUi(ctx);
     if (typeof ctx === "object" && ctx !== null && "ui" in ctx) {
       const ui = ctx.ui;
@@ -815,29 +1080,40 @@ export default function (pi: ExtensionAPI) {
       }
     }
     if (spinTimer !== undefined) return;
-    const timers = pulseTimers(ctx);
-    if (!timers) return;
-    try {
-      spinTimer = timers.setInterval(() => {
-        advanceSpinFrame();
-        maybeReloadConfig();
-        const pump = spinUi;
-        if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
-          const paint = pump.requestRender;
-          // Reason: narrowed to a callable via typeof; signature cast only.
-          if (typeof paint === "function") {
-            try {
-              (paint as () => void)();
-            } catch {
-              // Repaint is best-effort; the next tick retries.
-            }
+    const tick = (): void => {
+      advanceSpinFrame();
+      maybeReloadConfig();
+      if (alertSkinActive()) invalidateLiveAlerts();
+      const pump = spinUi;
+      if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
+        const paint = pump.requestRender;
+        if (typeof paint === "function") {
+          try {
+            (paint as () => void)();
+          } catch {
+            // Repaint is best-effort; the next tick retries.
           }
         }
-      }, 120);
+      }
+      if (spinCtx !== undefined) stopSpinTimerIfIdle(spinCtx);
+    };
+    const timers = pulseTimers(ctx);
+    try {
+      if (timers) {
+        spinTimer = timers.setInterval(tick, 120);
+        return;
+      }
+      spinTimer = setInterval(tick, 120);
     } catch {
       spinTimer = undefined;
     }
   }
+  kickAlertPump = () => {
+    if (spinCtx !== undefined) ensureSpinTimer(spinCtx);
+  };
+  kickTodoPump = () => {
+    if (spinCtx !== undefined && todoNeedsPump(todoHeaderState, todoCompletingAt, agentRunning)) ensureSpinTimer(spinCtx);
+  };
   // Best-effort repaint for hosts where the 120ms pump never starts (no
   // managed timers on ctx): without this, a pending card painted before the
   // label lands stays headerless until the settle repaint. Core coalesces
@@ -946,7 +1222,8 @@ export default function (pi: ExtensionAPI) {
         renderCall(args, options, theme) {
           const partial = (options as { isPartial?: boolean })?.isPartial === true;
           if (name === "edit") return renderPrettyEditCard(theme, args, undefined, options, partial);
-          if (name === "eval") return renderEvalCard(theme, args, undefined, options, partial, toolFingerprint(name, args));
+          if (name === "eval")
+            return renderEvalCard(theme, args, undefined, options, partial, toolFingerprint(name, args));
           return renderToolVisual(theme, toolFingerprint(name, args), {
             body: toolActionLabel(name, args),
             live: partial,
@@ -996,11 +1273,25 @@ export default function (pi: ExtensionAPI) {
     }
   }
   function stopSpinTimerIfIdle(ctx: unknown): void {
-    if (activityLive || thoughtLive || liveRuns.size !== 0 || anySettling() || spinTimer === undefined) return;
+    if (
+      activityLive ||
+      thoughtLive ||
+      liveRuns.size !== 0 ||
+      alertSkinActive() ||
+      anySettling() ||
+      todoNeedsPump(todoHeaderState, todoCompletingAt, agentRunning) ||
+      spinTimer === undefined
+    )
+      return;
     try {
       pulseTimers(ctx)?.clearTimer(spinTimer);
     } catch {
-      // Clear is best-effort; the managed timer dies with the session regardless.
+      // Managed clear is best-effort.
+    }
+    try {
+      clearInterval(spinTimer as ReturnType<typeof setInterval>);
+    } catch {
+      // Native interval fallback; ignore if this handle wasn't one.
     }
     spinTimer = undefined;
     const pump = spinUi;
@@ -1018,6 +1309,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (loaded) return;
     loaded = true;
+    resetTodoSessionState();
     reloadPluginConfig();
     try {
       lastConfigMtimes = configMtimeKey();
@@ -1025,6 +1317,9 @@ export default function (pi: ExtensionAPI) {
       // Missing lockfile; timer establishes the baseline.
     }
     bindThoughtUi(ctx);
+    bindTodosUi(ctx);
+    bindTodoSource(ctx);
+    captureTodoSessionBaseline();
     try {
       const maybeTheme = (ctx as unknown as { ui?: { theme?: unknown } })?.ui?.theme;
       if (maybeTheme !== undefined) readGroupTheme = maybeTheme;
@@ -1032,13 +1327,32 @@ export default function (pi: ExtensionAPI) {
       // formatRowLine degrades to unstyled without a theme.
     }
     wrapAllTools();
+    grabTui(ctx);
+    ensureSpinTimer(ctx);
     try {
       if (enabled && ctx.hasUI) ctx.ui.notify("Minimal output active (grok-build style)", "info");
     } catch {
       // notify is best-effort chrome.
     }
   });
-  pi.on("before_agent_start", async () => {
+  pi.on("session_switch", async (event, ctx) => {
+    agentRunning = false;
+    resetTodoSessionState();
+    bindTodosUi(ctx);
+    bindTodoSource(ctx);
+    if (event.reason === "new") {
+      captureTodoSessionBaseline();
+    } else {
+      todoSessionVisible = true;
+      syncTodoHeaderFromSession(ctx);
+    }
+    stopSpinTimerIfIdle(ctx);
+  });
+
+  pi.on("before_agent_start", async (_event, ctx) => {
+    agentRunning = true;
+    ensureSpinTimer(ctx);
+    if (todoHeaderState) refreshTodosWidget();
     reloadPluginConfig();
     try {
       lastConfigMtimes = configMtimeKey();
@@ -1048,10 +1362,25 @@ export default function (pi: ExtensionAPI) {
     wrapAllTools();
   });
 
-  pi.on("tool_result", async (event, _ctx) => {
+  pi.on("tool_result", async (event, ctx) => {
     try {
       if (!enabled) return undefined;
+      bindTodoSource(ctx);
       const prevDetails = "details" in event ? event.details : undefined;
+      // Todos cache first: runs before the collapse-eligibility guards so a
+      // native todo card (no text item for textItemOf) still feeds the widget.
+      if (typeof event.toolName === "string" && event.toolName.toLowerCase().includes("todo")) {
+        todoSessionVisible = true;
+        try {
+          const next =
+            parseTodoPhases("details" in event ? event.details : undefined) ??
+            parseTodoResult(todoRawText(event.content));
+          if (next) applyTodoState(next);
+          else syncTodoHeaderFromSession(ctx);
+        } catch {
+          // Stale cache stays; the collapse path below is unaffected.
+        }
+      }
       const frozen = frozenGroupKeys(event.toolName);
       const withFrozen = (details: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
         if (Object.keys(frozen).length === 0) return details;
@@ -1139,8 +1468,11 @@ export default function (pi: ExtensionAPI) {
     requestRepaint();
   });
 
-  pi.on("tool_execution_end", async (event, _ctx) => {
+  pi.on("tool_execution_end", async (event, ctx) => {
     if (!enabled) return;
+    if (typeof event.toolName === "string" && event.toolName.toLowerCase().includes("todo")) {
+      syncTodoHeaderFromSession(ctx);
+    }
     const ended = liveRuns.get(event.toolCallId);
     liveRuns.delete(event.toolCallId);
     if (ended) markSettling(ended.fp);
@@ -1190,6 +1522,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_end", async (_event, ctx) => {
     liveRuns.clear();
+    agentRunning = false;
     freezeActivityRun();
     spinStartedAt = 0;
     activityStartedAt = 0;
@@ -1200,12 +1533,14 @@ export default function (pi: ExtensionAPI) {
     activityLiveSent = false;
     activityLeadFp = "";
     resetThought();
+    refreshTodosWidget();
     stopSpinTimerIfIdle(ctx);
     setWorking(ctx, undefined);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
     liveRuns.clear();
+    agentRunning = false;
     freezeActivityRun();
     spinStartedAt = 0;
     activityStartedAt = 0;
@@ -1216,8 +1551,10 @@ export default function (pi: ExtensionAPI) {
     activityLiveSent = false;
     activityLeadFp = "";
     resetThought();
+    refreshTodosWidget();
     stopSpinTimerIfIdle(ctx);
     setWorking(ctx, undefined);
+    syncTodoHeaderFromSession(ctx);
   });
 
   pi.registerCommand("minimal-on", {
@@ -1226,6 +1563,7 @@ export default function (pi: ExtensionAPI) {
       enabled = true;
       activityRunId = null;
       activityLiveSent = false;
+      installTodosWidget();
       ctx.ui.notify("Minimal output enabled", "info");
     },
   });
@@ -1235,6 +1573,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       enabled = false;
       liveRuns.clear();
+      agentRunning = false;
       freezeActivityRun();
       spinStartedAt = 0;
       activityStartedAt = 0;
@@ -1244,10 +1583,43 @@ export default function (pi: ExtensionAPI) {
       activityRunId = null;
       activityLiveSent = false;
       activityLeadFp = "";
+      setTodosWidget(false);
       resetThought();
       stopSpinTimerIfIdle(ctx);
       setWorking(ctx, undefined);
       ctx.ui.notify("Minimal output disabled", "warning");
+    },
+  });
+
+  pi.on("session_shutdown", async () => {
+    setTodosWidget(false);
+  });
+  pi.registerCommand("todos-show", {
+    description: "Show the current session todo card",
+    handler: async (_args, ctx) => {
+      todoSessionVisible = true;
+      syncTodoHeaderFromSession(ctx);
+      installTodosWidget();
+      const hasTodos = !!todoHeaderState && todoHeaderState.items.length > 0;
+      ctx.ui.notify(todosWidgetOn ? "Todos shown" : hasTodos ? "Todos header is disabled" : "No todos in this session", "info");
+    },
+  });
+
+
+  pi.registerCommand("todos", {
+    description: "Toggle todos widget expand/collapse",
+    handler: async (_args, ctx) => {
+      todosCollapsed = !todosCollapsed;
+      refreshTodosWidget();
+      ctx.ui.notify(todosCollapsed ? "Todos collapsed" : "Todos expanded", "info");
+    },
+  });
+
+  pi.registerShortcut("ctrl+alt+t", {
+    description: "Toggle todos widget expand/collapse",
+    handler: async () => {
+      todosCollapsed = !todosCollapsed;
+      refreshTodosWidget();
     },
   });
 
@@ -1281,7 +1653,7 @@ export default function (pi: ExtensionAPI) {
       if (cfg.nativeEdit) native.push("edit");
       if (cfg.nativeEval) native.push("eval");
       ctx.ui.notify(
-        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"}`,
+        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine !== false ? "on" : "off"}`,
         "info",
       );
     },

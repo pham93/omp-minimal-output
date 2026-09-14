@@ -284,6 +284,12 @@ export function elapsedSuffix(startedAt: number): string {
 // must read the shared spin frame and fade progress at render time instead of
 // snapshotting them. Only the appearing live row fades in; settled rows stay
 // at rest opacity. Indicator is full-color (live accent / settled green / error red).
+export function currentIndicatorFrame(cfg = getPluginConfig()): string {
+  const frames = indicatorFrames(cfg);
+  if (!cfg.indicatorAnimation) return frames[0] ?? "◈";
+  return frames[spinFrame % frames.length] ?? "◈";
+}
+
 export function formatRowLine(
   theme: unknown,
   width: number,
@@ -304,15 +310,8 @@ export function formatRowLine(
   const op = rowOpacity(live, opts.fadeKey);
   const markToken = spin ? "accent" : opts.error ? "error" : "success";
   const cfg = getPluginConfig();
-  const frames = indicatorFrames(cfg);
   const settled = indicatorSettled(cfg);
-  const mark =
-    opts.mark ??
-    (spin
-      ? cfg.indicatorAnimation
-        ? (frames[spinFrame % frames.length] ?? "◈")
-        : (frames[0] ?? "◈")
-      : (settled ?? "◆"));
+  const mark = opts.mark ?? (spin ? currentIndicatorFrame(cfg) : (settled ?? "◆"));
   const branch = opts.tree === "mid" ? "├─" : opts.tree === "last" ? "╰─" : "";
   const branchPaint = branch ? `${paintAt(theme, branch, opts.error ? "error" : spin ? "accent" : "dim", op)} ` : "";
   const indentPrefix = branch || opts.indent === true ? TOOL_INDENT : " ";

@@ -629,15 +629,6 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     const tail = tailField(fields, "to", "name", "ids");
     oneLiner = `◆ Hub${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || "◆ Hub";
     rules.push("hub");
-  } else if (toolName === "todo") {
-    const op = strField(fields, "op", "action");
-    const tail = singleLine(strField(fields, "task", "phase", "text"), 60);
-    let counts = "";
-    const open = (stripped.match(/\[ \]/g) || []).length;
-    const done = (stripped.match(/\[x\]/gi) || []).length;
-    if (open + done > 0) counts = ` — ${open} open, ${done} done`;
-    oneLiner = `◆ Todo${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}${counts}`.trim() || "◆ Todo";
-    rules.push("todo");
   } else if (toolName === "debug") {
     const action = strField(fields, "action", "op");
     const target = singleLine(strField(fields, "target", "file", "path", "command", "program", "expression"), 60);

@@ -75,6 +75,7 @@ Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the
 ## Files
 
 - `index.ts` — extension entry: 7 shadows, `minimal-activity` + `skill-prompt` message renderers, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), group/activity/thought rows, `/minimal-on|off|status`.
+- `todos-header.ts` — parse/paint live todos for the sticky widget. `todo-hud.ts` — hide the native TODO HUD (`todoHud`, default off) and paint the transcript todo card from the same live snapshot.
 - `text.ts` — pure label/wrap/truncate string helpers. `theme.ts` — theme colors, render clocks, `formatRowLine`. `results.ts` — result-shape readers and fingerprints. `loaders.ts` — lazy core affordances. `edit-card.ts` — compact edit diff card. `eval-card.ts` — borderless eval output card.
 - `filters.ts` — pure string filters, zero dependencies (`collapseToolText`, per-class aggregators, `MAX_CHARS`/`MAX_LINES` truncation).
 - `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`.

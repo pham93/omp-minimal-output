@@ -39,6 +39,9 @@ export interface PluginConfig {
   nativeWrite: boolean;
   nativeEdit: boolean;
   nativeEval: boolean;
+  todosHeader: boolean;
+  todoHud: boolean;
+  todoReminderOneLine: boolean;
   editShowTabs: boolean;
   editShowSpaces: boolean;
 }
@@ -54,6 +57,9 @@ export const DEFAULT_CONFIG: PluginConfig = {
   nativeWrite: false,
   nativeEdit: false,
   nativeEval: false,
+  todosHeader: true,
+  todoHud: false,
+  todoReminderOneLine: true,
   editShowTabs: true,
   editShowSpaces: false,
 };
@@ -67,6 +73,9 @@ const BOOLEAN_KEYS = [
   "nativeWrite",
   "nativeEdit",
   "nativeEval",
+  "todosHeader",
+  "todoHud",
+  "todoReminderOneLine",
   "editShowTabs",
   "editShowSpaces",
 ] as const;
