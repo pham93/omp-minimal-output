@@ -32,6 +32,7 @@ import {
 import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
+import { renderWebSearchCard } from "./web-search-card.ts";
 import { installReadGroupSkin } from "./read-group.ts";
 import { alertSkinActive, installWarningSkin, invalidateLiveAlerts } from "./warning-skin.ts";
 import { installTodoChrome } from "./todo-hud.ts";
@@ -205,6 +206,7 @@ function pruneMcpEnvelopes(list: TextItem[], anchor: TextItem, raw: string): Tex
 }
 
 function isCollapseTarget(event: ToolResultEvent): boolean {
+  if (event.toolName === "web_search" && !wrapTool("web_search")) return false;
   return (
     event.type === "tool_result" &&
     ([
@@ -505,7 +507,6 @@ function resetTodoSessionState(): void {
   todoCompletingAt.clear();
   setTodosWidget(false);
 }
-
 
 function bindTodoSource(ctx: unknown): void {
   if (typeof ctx !== "object" || ctx === null) return;
@@ -1112,7 +1113,8 @@ export default function (pi: ExtensionAPI) {
     if (spinCtx !== undefined) ensureSpinTimer(spinCtx);
   };
   kickTodoPump = () => {
-    if (spinCtx !== undefined && todoNeedsPump(todoHeaderState, todoCompletingAt, agentRunning)) ensureSpinTimer(spinCtx);
+    if (spinCtx !== undefined && todoNeedsPump(todoHeaderState, todoCompletingAt, agentRunning))
+      ensureSpinTimer(spinCtx);
   };
   // Best-effort repaint for hosts where the 120ms pump never starts (no
   // managed timers on ctx): without this, a pending card painted before the
@@ -1186,9 +1188,9 @@ export default function (pi: ExtensionAPI) {
 
   function tryWrapTool(name: string, source?: unknown): void {
     if (!name || wrapApplied.has(name)) return;
-    // One-liners for bash/read/grep/glob/write plus the edit pretty-diff
-    // card and the eval output card. Execution delegates untouched to
-    // native; only the card is custom (compact rows, full text behind Ctrl+O).
+    // One-liners for bash/read/grep/glob/write plus dedicated edit, eval,
+    // and web-search cards. Execution delegates untouched to the native tool;
+    // only transcript presentation changes.
     if (!wrapTool(name)) return;
     const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
     // NEVER register a lossy stub: without the native parameters the shadowed
@@ -1203,6 +1205,7 @@ export default function (pi: ExtensionAPI) {
         name,
         description,
         parameters: parameters as never,
+        ...(name === "web_search" ? { approval: "read" as const } : {}),
         mergeCallAndResult: true,
         async execute(_toolCallId, params, signal, onUpdate, ctx) {
           const c = ctx as unknown as {
@@ -1224,6 +1227,8 @@ export default function (pi: ExtensionAPI) {
           if (name === "edit") return renderPrettyEditCard(theme, args, undefined, options, partial);
           if (name === "eval")
             return renderEvalCard(theme, args, undefined, options, partial, toolFingerprint(name, args));
+          if (name === "web_search")
+            return renderWebSearchCard(theme, args, undefined, options, toolFingerprint(name, args));
           return renderToolVisual(theme, toolFingerprint(name, args), {
             body: toolActionLabel(name, args),
             live: partial,
@@ -1233,6 +1238,8 @@ export default function (pi: ExtensionAPI) {
         renderResult(result, options, theme, args) {
           if (name === "edit") return renderPrettyEditCard(theme, args, result, options, false);
           if (name === "eval") return renderEvalCard(theme, args, result, options, false, toolFingerprint(name, args));
+          if (name === "web_search")
+            return renderWebSearchCard(theme, args, result, options, toolFingerprint(name, args));
           return renderToolVisual(
             theme,
             toolFingerprint(name, args),
@@ -1453,7 +1460,7 @@ export default function (pi: ExtensionAPI) {
     } else {
       activityLive = true;
     }
-    if (toolName !== "edit" && toolName !== "eval") {
+    if (toolName !== "edit" && toolName !== "eval" && toolName !== "web_search") {
       upsertGroupRow(fp, {
         body: toolActionLabel(toolName, args),
         live: true,
@@ -1601,10 +1608,12 @@ export default function (pi: ExtensionAPI) {
       syncTodoHeaderFromSession(ctx);
       installTodosWidget();
       const hasTodos = !!todoHeaderState && todoHeaderState.items.length > 0;
-      ctx.ui.notify(todosWidgetOn ? "Todos shown" : hasTodos ? "Todos header is disabled" : "No todos in this session", "info");
+      ctx.ui.notify(
+        todosWidgetOn ? "Todos shown" : hasTodos ? "Todos header is disabled" : "No todos in this session",
+        "info",
+      );
     },
   });
-
 
   pi.registerCommand("todos", {
     description: "Toggle todos widget expand/collapse",
@@ -1652,8 +1661,9 @@ export default function (pi: ExtensionAPI) {
       if (cfg.nativeWrite) native.push("write");
       if (cfg.nativeEdit) native.push("edit");
       if (cfg.nativeEval) native.push("eval");
+      if (cfg.nativeWebSearch) native.push("web_search");
       ctx.ui.notify(
-        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine !== false ? "on" : "off"}`,
+        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] searchMax=${cfg.webSearchMaxResults} tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine !== false ? "on" : "off"}`,
         "info",
       );
     },

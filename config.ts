@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 
 export const PLUGIN_NAME = "@local/omp-minimal-output";
 
-export const WRAP_CANDIDATES = ["bash", "read", "grep", "glob", "write", "edit", "eval"] as const;
+export const WRAP_CANDIDATES = ["bash", "read", "grep", "glob", "write", "edit", "eval", "web_search"] as const;
 export type WrapCandidate = (typeof WRAP_CANDIDATES)[number];
 
 export const NATIVE_KEY = {
@@ -19,6 +19,7 @@ export const NATIVE_KEY = {
   write: "nativeWrite",
   edit: "nativeEdit",
   eval: "nativeEval",
+  web_search: "nativeWebSearch",
 } as const;
 
 export const INDICATOR = {
@@ -39,6 +40,8 @@ export interface PluginConfig {
   nativeWrite: boolean;
   nativeEdit: boolean;
   nativeEval: boolean;
+  nativeWebSearch: boolean;
+  webSearchMaxResults: number;
   todosHeader: boolean;
   todoHud: boolean;
   todoReminderOneLine: boolean;
@@ -57,6 +60,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
   nativeWrite: false,
   nativeEdit: false,
   nativeEval: false,
+  nativeWebSearch: false,
+  webSearchMaxResults: 5,
   todosHeader: true,
   todoHud: false,
   todoReminderOneLine: true,
@@ -73,6 +78,7 @@ const BOOLEAN_KEYS = [
   "nativeWrite",
   "nativeEdit",
   "nativeEval",
+  "nativeWebSearch",
   "todosHeader",
   "todoHud",
   "todoReminderOneLine",
@@ -123,6 +129,13 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         const v = src[key];
         if (typeof v === "string" && v in INDICATOR) {
           next.indicator = v as IndicatorId;
+        }
+        continue;
+      }
+      if (key === "webSearchMaxResults") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.webSearchMaxResults = Math.min(10, Math.max(1, Math.floor(v)));
         }
         continue;
       }

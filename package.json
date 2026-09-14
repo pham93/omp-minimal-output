@@ -67,6 +67,19 @@
         "default": false,
         "description": "Leave eval on the native Ohmypi renderer (boxed Output)."
       },
+      "nativeWebSearch": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave web_search on the native Ohmypi renderer."
+      },
+      "webSearchMaxResults": {
+        "type": "number",
+        "default": 5,
+        "min": 1,
+        "max": 10,
+        "step": 1,
+        "description": "Maximum sources shown in the expanded minimal web-search card."
+      },
       "todosHeader": {
         "type": "boolean",
         "default": true,
@@ -103,6 +116,7 @@
     "loaders.ts",
     "edit-card.ts",
     "eval-card.ts",
+    "web-search-card.ts",
     "read-group.ts",
     "todos-header.ts",
     "todo-hud.ts",

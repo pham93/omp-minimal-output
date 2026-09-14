@@ -1,8 +1,8 @@
 # omp-minimal-output
 
-Grok-build-style minimal console output for omp. Collapsed `◆` rows with no background fill (plain terminal background); `ctrl+o` (`app.tools.expand`) toggles expansion globally. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
+Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
 
-Single row per tool: shadows set `mergeCallAndResult: true` (same as native single-row tools), so a settled tool shows only its `◆` result row — the pending `◈` call row is replaced, never stacked below it.
+Single row per tool: shadows set `mergeCallAndResult: true` (same as native single-row tools), so a settled tool replaces its pending call row instead of stacking below it. Web search settles to `●`; other rows retain their configured settled indicator.
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
@@ -16,16 +16,16 @@ flowchart LR
     rc --> exec["shadow execute\nctx.invokeTool → native"]
     exec --> tend["tool_execution_end"]
     tend --> tr["tool_result → collapseToolText"]
-    tr --> rr["shadow renderResult\n◆ settled + duration"]
+    tr --> rr["shadow renderResult\nconfigured mark; web search ●"]
     intent["assistant intent / tool args"] -.-> aside["aside minimal-activity record\nlive working line"]
     aside -.-> freeze["agent_end / turn_end\nfreeze settled totals"]
 ```
 
-Seven shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`): native `description` + `parameters` copied verbatim (never hand-written — a lossy schema hides fields from the model; this once broke `write` by dropping `content`), `execute` delegates to the native tool via `ctx.invokeTool`, `renderCall` paints the live row, `renderResult` paints the settled row with dim right-side duration (`durationSuffix`) and error styling (`isToolError`). `edit`'s card is a compact gutter diff (line numbers, background bands on `-`/`+` rows, `··· N unchanged lines` separators, visible-tab markers (`→`), ≤10 lines collapsed / ≤60 expanded) and the full diff sits behind `Ctrl+O`. `eval`'s card replaces the native boxed `Output` panel: language-icon header (`py`→`🐍`, `js`→`🟨`, plus `🔷`/`🐚`/`💎`/`🐹`/`🦀`; `cells[0]` wins; green/red `●` settled marks) plus a 3-line input preview (core-tokenizer highlighted, dim-blended to row opacity) and ≤5 output lines (ANSI colors kept and blended, bg fills dropped), indented, no border/bg; dim labeled rule (`── output ──`, `── error ──` on failure) with a theme-accent pulse sweeping it while running; while running, partial results stream as a live last-3 tail (`… (N earlier lines)`) under a ticking elapsed header; 60/60/60 expanded, full text behind `Ctrl+O`. Collapse covers 26 built-ins plus MCP rows (single-line `◇` one-liners, envelope dupes pruned); grouped tools share a `●` parent with `├─`/`╰─` children, full text stashed for expansion.
+Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`): native `description` + `parameters` copied verbatim (never hand-written — a lossy schema hides fields from the model; this once broke `write` by dropping `content`), `execute` delegates to the native tool via `ctx.invokeTool`, and custom renderers only change presentation. `web_search` renders an animated query row that settles to `●`, shows source count and provider, and expands to bold `╰─` titles with dim URLs; snippets remain in the stashed raw result. `edit` renders a compact gutter diff and `eval` replaces the native boxed output panel.
 
 Thoughts are fully hidden (`registerAssistantThinkingRenderer` is supplemental-only). Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
-Pulse: the working line cycles `◈ → ◉ → ◎ → ○` at 120 ms via managed `ctx.setInterval` while a tool runs, then settles to `◆`; `/minimal-off` mid-run stops it immediately. `minimal-output.yml` (`shimmer: disabled`, `showProgress: false`) is untouched.
+Pulse: working rows cycle `◈ → ◉ → ◎ → ○` at 120 ms via managed `ctx.setInterval` while a tool runs. General rows settle to the configured indicator; web search settles to `●` and uses the error token on failure. `/minimal-off` mid-run stops the pump immediately. `minimal-output.yml` (`shimmer: disabled`, `showProgress: false`) is untouched.
 
 Background: `Container` is a passthrough and `Text` paints no fill unless given a custom bg fn (never called here); core also clears the wrapper bg (`setBgFn(undefined)`) for custom `renderCall`/`renderResult`. The only filled rows were native `grep`/`glob` ones (`toolSuccessBg` via the native renderer) — both are now shadowed to the same single-`Container` shape as `bash`/`read`.
 
@@ -51,9 +51,9 @@ flowchart TD
     trunc -->|no| out["line 1: ◆ one-liner\nline 2+: details"]
 ```
 
-Contract: line 1 of every rewritten text is the `◆` settled one-liner (the transcript's collapsed row); filtered details follow from line 2, so ENTER expands a row to details and collapses back to the one-liner. Full pre-collapse text is stashed in result details so `ctrl+o` shows everything.
+Contract: ordinary rewritten results keep a settled one-liner on line 1 and filtered details below it. Dedicated cards (`edit`, `eval`, `web_search`) read the stashed pre-collapse result from `details.minimalFullText` and decide their own collapsed/expanded presentation.
 
-Search: `grep` input is `{path, pattern}`, `glob` input is `{path}` (probed live). Shadow schemas are the native ones verbatim, so every native option (`write` `content`, `grep` `case`/`gitignore`/`skip`, `bash` `cwd`/`timeout`/`env`, `glob` `limit`/`hidden`) stays visible to the model. `glob` collapses to ``◆ glob `<pattern>` — <N> files``; `grep` keeps its `file:line:col` grouping when the output matches, else the generic one-liner (native grep emits `# file` / `*line:` sections, which take the generic path).
+Search: `grep` input is `{path, pattern}`, `glob` input is `{path}` (probed live). `web_search` reads structured `details.response.provider` and `details.response.sources`, shows at most `webSearchMaxResults` sources, and retains the complete result in `minimalFullText`; `nativeWebSearch` restores the native renderer. Shadow schemas are the native ones verbatim, so every native option remains visible to the model.
 
 ## Row lifecycle
 
@@ -74,15 +74,15 @@ Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the
 
 ## Files
 
-- `index.ts` — extension entry: 7 shadows, `minimal-activity` + `skill-prompt` message renderers, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), group/activity/thought rows, `/minimal-on|off|status`.
+- `index.ts` — extension entry: 8 shadows, `minimal-activity` + `skill-prompt` message renderers, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), group/activity/thought rows, `/minimal-on|off|status`.
 - `todos-header.ts` — parse/paint live todos for the sticky widget. `todo-hud.ts` — hide the native TODO HUD (`todoHud`, default off) and paint the transcript todo card from the same live snapshot.
-- `text.ts` — pure label/wrap/truncate string helpers. `theme.ts` — theme colors, render clocks, `formatRowLine`. `results.ts` — result-shape readers and fingerprints. `loaders.ts` — lazy core affordances. `edit-card.ts` — compact edit diff card. `eval-card.ts` — borderless eval output card.
+- `text.ts` — pure label/wrap/truncate string helpers. `theme.ts` — theme colors, render clocks, `formatRowLine`. `results.ts` — result-shape readers and fingerprints. `loaders.ts` — lazy core affordances. `edit-card.ts` — compact edit diff card. `eval-card.ts` — borderless eval output card. `web-search-card.ts` — provider-aware source card.
 - `filters.ts` — pure string filters, zero dependencies (`collapseToolText`, per-class aggregators, `MAX_CHARS`/`MAX_LINES` truncation).
 - `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`.
 - `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`.
 
 ## Constraints
 
-- `tryWrapTool` allowlist is `bash/read/grep/glob/edit/write/eval` only. Re-registering any other tool cannot delegate (no original handle; `ctx.invokeTool` is built-in-only), so wrapping e.g. MCP tools (`mcp__*`) breaks them with `minimal-output: native <name> unavailable`. Never widen the allowlist without a working delegation path.
+- `tryWrapTool` allowlist is `bash/read/grep/glob/edit/write/eval/web_search`. Each entry has a verified `ctx.invokeTool` delegation path; never add another tool without proving delegation first, because registering an unsupported shadow replaces the working native tool.
 - Shadows are transparent delegates: no behavior change to what tools do, only how rows render.
 - Agent rules (`AGENTS.md`): prefer `read`/`grep`/`glob` over shell pipelines; one verification per change; one short intent line per tool call.
