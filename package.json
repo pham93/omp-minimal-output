@@ -135,6 +135,7 @@
   },
   "files": [
     "index.ts",
+    "runtime-owner.ts",
     "filters.ts",
     "text.ts",
     "theme.ts",

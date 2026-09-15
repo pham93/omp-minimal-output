@@ -51,6 +51,7 @@ import {
 } from "./native-tool-card-skin.ts";
 import { alertSkinActive, installWarningSkin, invalidateLiveAlerts } from "./warning-skin.ts";
 import { installTodoChrome } from "./todo-hud.ts";
+import { acquireRuntimeOwner } from "./runtime-owner.ts";
 import {
   latestTodoDetailsFromEntries,
   parseTodoPhases,
@@ -112,6 +113,7 @@ const activitySettledTotals = new Map<string, { total: number; label: string }>(
 const liveRuns = new Map<string, { label: string; startedAt: number; fp: string }>();
 let activityLeadFp = "";
 let enabled = true;
+let runtimeIsActive = (): boolean => true;
 let thoughtLive = false;
 let thoughtStartedAt = 0;
 let thoughtText = "";
@@ -430,6 +432,7 @@ function paintThinkingVisual(theme: unknown): Container {
   const c = new Container();
   c.addChild({
     render: (width: number): readonly string[] => {
+      if (!runtimeIsActive()) return [];
       const live = thoughtLive;
       const body = live ? "Thinking..." : thoughtSettledLabel || "Thought";
       const lines: string[] = [
@@ -448,7 +451,7 @@ function paintThinkingVisual(theme: unknown): Container {
 }
 
 function bindThoughtUi(ctx: unknown): void {
-  if (typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
+  if (!runtimeIsActive() || typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
   const ui = (ctx as { ui?: typeof thoughtUi }).ui;
   if (ui) thoughtUi = ui;
 }
@@ -458,10 +461,11 @@ function setThoughtWidget(show: boolean): void {
   if (!ui || typeof ui.setWidget !== "function") return;
   try {
     if (!show) {
-      if (thoughtWidgetOn) ui.setWidget(THOUGHT_WIDGET_KEY, undefined);
+      ui.setWidget(THOUGHT_WIDGET_KEY, undefined);
       thoughtWidgetOn = false;
       return;
     }
+    if (!runtimeIsActive()) return;
     if (thoughtWidgetOn) {
       if (typeof ui.requestRender === "function") ui.requestRender();
       return;
@@ -476,7 +480,7 @@ function setThoughtWidget(show: boolean): void {
 }
 
 function bindTodosUi(ctx: unknown): void {
-  if (typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
+  if (!runtimeIsActive() || typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
   const ui = (ctx as { ui?: typeof todosUi }).ui;
   if (ui) todosUi = ui;
 }
@@ -485,11 +489,12 @@ function paintTodosWidget(theme: unknown): Container {
   const c = new Container();
   c.addChild({
     render: (width: number): readonly string[] => {
+      if (!runtimeIsActive()) return [];
       let show = true;
       try {
         show = getPluginConfig().todosHeader !== false;
       } catch {
-        // Config read is best-effort; paint with the cached state.
+        // Config read is best-effort; paint with cached state.
       }
       const state = peekTodoState();
       if (!show || !state || state.items.length === 0) return [];
@@ -504,10 +509,11 @@ function setTodosWidget(show: boolean): void {
   if (!ui || typeof ui.setWidget !== "function") return;
   try {
     if (!show) {
-      if (todosWidgetOn) ui.setWidget(TODOS_WIDGET_KEY, undefined);
+      ui.setWidget(TODOS_WIDGET_KEY, undefined);
       todosWidgetOn = false;
       return;
     }
+    if (!runtimeIsActive()) return;
     if (todosWidgetOn) {
       if (typeof ui.requestRender === "function") ui.requestRender();
       return;
@@ -884,6 +890,7 @@ function activityStaleTail(startedAt: number): string {
 // module state (animated frame + latest label + burst elapsed on the 120ms
 // pump repaints); anything retired freezes via the settled-totals map.
 function activityRenderer(_message: unknown, _options: unknown, theme: unknown) {
+  if (!runtimeIsActive()) return new Container();
   const d = activityDetailsOf(_message);
   if (!d) return new Container();
   if (d.kind === "settled") {
@@ -988,6 +995,7 @@ function skillPromptBody(message: unknown): string {
 }
 
 function skillPromptRenderer(message: unknown, options: unknown, theme: unknown) {
+  if (!runtimeIsActive()) return new Container();
   const m = (message ?? {}) as Record<string, unknown>;
   if (m["display"] === false) return new Container();
   const opts = (options ?? {}) as Record<string, unknown>;
@@ -1002,33 +1010,40 @@ function skillPromptRenderer(message: unknown, options: unknown, theme: unknown)
 }
 
 export default function (pi: ExtensionAPI) {
+  const runtimeOwner = acquireRuntimeOwner();
+  runtimeIsActive = runtimeOwner.owns;
+  enabled = true;
   let readGroupTheme: unknown;
   // Native grouped reads (ReadToolGroupComponent) bypass the wrapped-read
   // renderers; skin them at addChild time so transcript rebuilds and live
   // grouping repaint through formatRowLine. Before any pi.on registration:
   // a rebuild can add the group before session_start fires.
-  installReadGroupSkin(Container, {
-    enabled: () => enabled && wrapTool("read"),
+  const disposeReadGroupSkin = installReadGroupSkin(Container, {
+    enabled: () => runtimeOwner.owns() && enabled && wrapTool("read"),
     theme: () => readGroupTheme,
+    active: runtimeOwner.owns,
   });
   // Host warning/error panes (todo reminder, TTSR, showWarning/showError,
   // pinned ErrorBanner) -> one ⚠/✗ line. Pump slot is filled after
   // ensureSpinTimer exists; addChild-time skinning kicks it so fade/breathe
   // run even when no tool is live.
   let kickAlertPump = (): void => {};
-  installNativeToolCardSkin(Container, {
-    enabled: nativeToolCardSkinActive,
+  const disposeNativeToolCardSkin = installNativeToolCardSkin(Container, {
+    enabled: () => runtimeOwner.owns() && nativeToolCardSkinActive(),
     theme: () => readGroupTheme,
     pump: () => kickAlertPump(),
+    active: runtimeOwner.owns,
   });
-  installWarningSkin(Container, {
-    enabled: () => enabled && getPluginConfig().todoReminderOneLine !== false,
+  const disposeWarningSkin = installWarningSkin(Container, {
+    enabled: () => runtimeOwner.owns() && enabled && getPluginConfig().todoReminderOneLine !== false,
     theme: () => readGroupTheme,
     pump: () => kickAlertPump(),
+    active: runtimeOwner.owns,
   });
-  installTodoChrome(Container, {
-    hideHud: () => enabled && getPluginConfig().todoHud === false,
-    skinCard: () => enabled,
+  const disposeTodoChrome = installTodoChrome(Container, {
+    hideHud: () => runtimeOwner.owns() && enabled && getPluginConfig().todoHud === false,
+    skinCard: () => runtimeOwner.owns() && enabled,
+    active: runtimeOwner.owns,
     paintCard: (width, expanded) => {
       const state = peekTodoState();
       if (!state || state.items.length === 0) return [];
@@ -1076,7 +1091,7 @@ export default function (pi: ExtensionAPI) {
   // queue UI. Async failures surface once through core's error toast;
   // a missing API (older host) disables sends silently — rows still work.
   const sendActivityRecord = (details: Record<string, unknown>): void => {
-    if (!enabled || activityApiDead) return;
+    if (!runtimeOwner.owns() || !enabled || activityApiDead) return;
     try {
       pi.sendMessage(
         { customType: "minimal-activity", content: "", display: true, details },
@@ -1133,6 +1148,7 @@ export default function (pi: ExtensionAPI) {
   // the working line. Row components read the frame at render time, so
   // every repaint cycles them without re-invoking renderers.
   function ensureSpinTimer(ctx: unknown): void {
+    if (!runtimeOwner.owns()) return;
     spinCtx = ctx;
     bindThoughtUi(ctx);
     if (typeof ctx === "object" && ctx !== null && "ui" in ctx) {
@@ -1143,6 +1159,10 @@ export default function (pi: ExtensionAPI) {
     }
     if (spinTimer !== undefined) return;
     const tick = (): void => {
+      if (!runtimeOwner.owns()) {
+        clearSpinTimer(ctx);
+        return;
+      }
       advanceSpinFrame();
       maybeReloadConfig();
       if (alertSkinActive()) invalidateLiveAlerts();
@@ -1153,7 +1173,7 @@ export default function (pi: ExtensionAPI) {
           try {
             (paint as () => void)();
           } catch {
-            // Repaint is best-effort; the next tick retries.
+            // Repaint is best-effort; next tick retries.
           }
         }
       }
@@ -1182,16 +1202,15 @@ export default function (pi: ExtensionAPI) {
   // label lands stays headerless until the settle repaint. Core coalesces
   // frames, so one extra request per tool start is cheap.
   function requestRepaint(): void {
+    if (!runtimeOwner.owns()) return;
     try {
       const pump = spinUi;
       if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
         const paint = pump.requestRender;
-        if (typeof paint === "function") {
-          (paint as () => void)();
-        }
+        if (typeof paint === "function") (paint as () => void)();
       }
     } catch {
-      // Repaint is best-effort; the next event or tick retries.
+      // Repaint is best-effort.
     }
   }
 
@@ -1341,6 +1360,33 @@ export default function (pi: ExtensionAPI) {
       // Registry not ready.
     }
   }
+  function clearSpinTimer(ctx: unknown = spinCtx): void {
+    const timer = spinTimer;
+    if (timer === undefined) return;
+    try {
+      pulseTimers(ctx)?.clearTimer(timer);
+    } catch {
+      // Managed clear is best-effort.
+    }
+    try {
+      clearInterval(timer as ReturnType<typeof setInterval>);
+    } catch {
+      // Native interval fallback; ignore if this handle was managed.
+    }
+    spinTimer = undefined;
+    const pump = spinUi;
+    if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
+      const paint = pump.requestRender;
+      if (typeof paint === "function") {
+        try {
+          (paint as () => void)();
+        } catch {
+          // Repaint is best-effort; settled rows paint on the next render.
+        }
+      }
+    }
+  }
+
   function stopSpinTimerIfIdle(ctx: unknown): void {
     if (
       activityLive ||
@@ -1353,30 +1399,44 @@ export default function (pi: ExtensionAPI) {
       spinTimer === undefined
     )
       return;
-    try {
-      pulseTimers(ctx)?.clearTimer(spinTimer);
-    } catch {
-      // Managed clear is best-effort.
-    }
-    try {
-      clearInterval(spinTimer as ReturnType<typeof setInterval>);
-    } catch {
-      // Native interval fallback; ignore if this handle wasn't one.
-    }
-    spinTimer = undefined;
-    const pump = spinUi;
-    if (typeof pump === "object" && pump !== null && "requestRender" in pump) {
-      const paint = pump.requestRender;
-      if (typeof paint === "function") {
-        try {
-          (paint as () => void)();
-        } catch {
-          // Repaint is best-effort; the settled line paints on the next render.
-        }
-      }
-    }
+    clearSpinTimer(ctx);
   }
+  runtimeOwner.setCleanup(() => {
+    enabled = false;
+    loaded = false;
+    activityApiDead = false;
+    activityLive = false;
+    thoughtLive = false;
+    agentRunning = false;
+    liveRuns.clear();
+    activitySettledTotals.clear();
+    activityRunId = null;
+    activityLiveSent = false;
+    activityLeadFp = "";
+    thoughtText = "";
+    thoughtSettledLabel = "";
+    kickAlertPump = () => {};
+    kickTodoPump = () => {};
+    setThoughtWidget(false);
+    setTodosWidget(false);
+    try {
+      thoughtUi?.setWidget?.(PUMP_WIDGET_KEY, undefined);
+    } catch {
+      // Widget cleanup is best-effort during ownership transfer.
+    }
+    clearSpinTimer();
+    disposeTodoChrome();
+    disposeWarningSkin();
+    disposeNativeToolCardSkin();
+    disposeReadGroupSkin();
+    spinUi = undefined;
+    spinCtx = undefined;
+    thoughtUi = undefined;
+    todosUi = undefined;
+  });
+
   pi.on("session_start", async (_event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     resetNativeToolCardPump();
     if (loaded) return;
     loaded = true;
@@ -1407,6 +1467,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
   pi.on("session_switch", async (event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     agentRunning = false;
     resetTodoSessionState();
     bindTodosUi(ctx);
@@ -1421,6 +1482,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     agentRunning = true;
     ensureSpinTimer(ctx);
     if (todoHeaderState) refreshTodosWidget();
@@ -1434,6 +1496,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", async (event, ctx) => {
+    if (!runtimeOwner.owns()) return undefined;
     try {
       if (!enabled) return undefined;
       bindTodoSource(ctx);
@@ -1500,6 +1563,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_start", async (event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     if (!enabled) return;
     const startedAt = Date.now();
     const fp = eventFingerprint(event);
@@ -1546,6 +1610,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_end", async (event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     if (!enabled) return;
     if (typeof event.toolName === "string" && event.toolName.toLowerCase().includes("todo")) {
       syncTodoHeaderFromSession(ctx);
@@ -1570,6 +1635,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("message_update", async (event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     if (!enabled) return;
     bindThoughtUi(ctx);
     const prevRun = activityRunId;
@@ -1598,6 +1664,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     liveRuns.clear();
     agentRunning = false;
     freezeActivityRun();
@@ -1616,6 +1683,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("turn_end", async (_event, ctx) => {
+    if (!runtimeOwner.owns()) return;
     liveRuns.clear();
     agentRunning = false;
     freezeActivityRun();
@@ -1637,6 +1705,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("minimal-on", {
     description: "Enable grok-build-style minimal output",
     handler: async (_args, ctx) => {
+      if (!runtimeOwner.owns()) return;
       enabled = true;
       activityRunId = null;
       activityLiveSent = false;
@@ -1648,6 +1717,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("minimal-off", {
     description: "Disable grok-build-style minimal output",
     handler: async (_args, ctx) => {
+      if (!runtimeOwner.owns()) return;
       enabled = false;
       resetNativeToolCardPump();
       liveRuns.clear();
@@ -1670,12 +1740,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
-    resetNativeToolCardPump();
-    setTodosWidget(false);
+    if (!runtimeOwner.owns()) return;
+    runtimeOwner.release();
   });
   pi.registerCommand("todos-show", {
     description: "Show the current session todo card",
     handler: async (_args, ctx) => {
+      if (!runtimeOwner.owns()) return;
       todoSessionVisible = true;
       syncTodoHeaderFromSession(ctx);
       installTodosWidget();
@@ -1690,6 +1761,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("todos", {
     description: "Toggle todos widget expand/collapse",
     handler: async (_args, ctx) => {
+      if (!runtimeOwner.owns()) return;
       todosCollapsed = !todosCollapsed;
       refreshTodosWidget();
       ctx.ui.notify(todosCollapsed ? "Todos collapsed" : "Todos expanded", "info");
@@ -1699,6 +1771,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerShortcut("ctrl+alt+t", {
     description: "Toggle todos widget expand/collapse",
     handler: async () => {
+      if (!runtimeOwner.owns()) return;
       todosCollapsed = !todosCollapsed;
       refreshTodosWidget();
     },
@@ -1724,6 +1797,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("minimal-status", {
     description: "Show minimal-output plugin state",
     handler: async (_args, ctx) => {
+      if (!runtimeOwner.owns()) return;
       const cfg = getPluginConfig();
       const native: string[] = [];
       if (cfg.nativeBash) native.push("bash");

@@ -72,9 +72,10 @@ export interface TodoChromeDeps {
   paintCard: (width: number, expanded: boolean) => readonly string[];
   onHud?: () => void;
   onTodoDetails?: (details: unknown) => void;
+  active?: () => boolean;
 }
 
-const skinned = new WeakSet<object>();
+let skinned = new WeakSet<object>();
 let installed = false;
 
 function skinEmpty(child: object): void {
@@ -84,7 +85,7 @@ function skinEmpty(child: object): void {
   c.render = function (width: number): readonly string[] {
     try {
       // Re-check at paint so /minimal-off and todoHud:true restore the HUD.
-      if (!depsRef?.hideHud()) return orig(width);
+      if (depsRef?.active?.() === false || !depsRef?.hideHud()) return orig(width);
     } catch {
       return orig(width);
     }
@@ -108,7 +109,7 @@ function skinTodoCard(child: object, deps: TodoChromeDeps): void {
   let expanded = false;
   c.updateResult = function (result: unknown, ...rest: unknown[]) {
     try {
-      if (detailsHavePhases(result)) {
+      if (deps.active?.() !== false && detailsHavePhases(result)) {
         isTodo = true;
         const details = (result as { details: unknown }).details;
         deps.onTodoDetails?.(details);
@@ -123,7 +124,7 @@ function skinTodoCard(child: object, deps: TodoChromeDeps): void {
     return origSetExpanded(next);
   };
   c.render = function (width: number): readonly string[] {
-    if (!isTodo || !deps.skinCard()) return origRender(width);
+    if (deps.active?.() === false || !isTodo || !deps.skinCard()) return origRender(width);
     try {
       return deps.paintCard(width, expanded);
     } catch {
@@ -136,52 +137,60 @@ function skinTodoCard(child: object, deps: TodoChromeDeps): void {
 export function installTodoChrome(
   ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
   deps: TodoChromeDeps,
-): void {
+): () => void {
   depsRef = deps;
-  if (installed) return;
-  let origAddChild: (...args: unknown[]) => unknown;
-  try {
-    if (!ContainerCtor || typeof ContainerCtor.prototype?.addChild !== "function") return;
-    origAddChild = ContainerCtor.prototype.addChild;
-  } catch {
-    return;
-  }
-  try {
-    ContainerCtor.prototype.addChild = function (this: unknown, ...args: unknown[]) {
-      let hideHud = false;
+  if (installed) return () => {};
+  const prototype = ContainerCtor?.prototype;
+  const addChild = prototype?.addChild;
+  if (typeof addChild !== "function") return () => {};
+  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
+    if (deps.active?.() === false) return addChild.apply(this, args);
+    let hideHud = false;
+    try {
+      hideHud = deps.hideHud();
+    } catch {
+      hideHud = false;
+    }
+    const dropHudChildren = hideHud && isTodoHudContainer(this);
+    const kept: unknown[] = [];
+    for (const arg of args) {
       try {
-        hideHud = deps.hideHud();
-      } catch {
-        hideHud = false;
-      }
-      const dropHudChildren = hideHud && isTodoHudContainer(this);
-      const kept: unknown[] = [];
-      for (const arg of args) {
-        try {
-          if (arg && typeof arg === "object") {
-            if (isTodoHudBanner(arg)) {
-              try {
-                deps.onHud?.();
-              } catch {
-                // Sync is best-effort; widget still follows tool_result.
-              }
-              if (hideHud) {
-                if (!skinned.has(arg)) skinEmpty(arg);
-                if (dropHudChildren) continue;
-              }
-            } else if (!skinned.has(arg) && isTodoCardHost(arg)) {
-              skinTodoCard(arg, deps);
+        if (arg && typeof arg === "object") {
+          if (isTodoHudBanner(arg)) {
+            try {
+              deps.onHud?.();
+            } catch {
+              // Sync is best-effort; widget still follows tool_result.
             }
+            if (hideHud) {
+              if (!skinned.has(arg)) skinEmpty(arg);
+              if (dropHudChildren) continue;
+            }
+          } else if (!skinned.has(arg) && isTodoCardHost(arg)) {
+            skinTodoCard(arg, deps);
           }
-        } catch {
-          // One bad child must not break the container.
         }
-        kept.push(arg);
+      } catch {
+        // One bad child must not break the container.
       }
-      return origAddChild.apply(this, dropHudChildren ? [] : kept.length === args.length ? args : kept);
-    };
+      kept.push(arg);
+    }
+    return addChild.apply(this, dropHudChildren ? [] : kept.length === args.length ? args : kept);
+  };
+  try {
+    prototype.addChild = patchedAddChild;
   } catch {
-    return;
+    return () => {};
   }
   installed = true;
+  return () => {
+    depsRef = undefined;
+    try {
+      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
+    } catch {
+      // Another extension may own the current hook; never overwrite it.
+    }
+    installed = false;
+    skinned = new WeakSet<object>();
+  };
 }

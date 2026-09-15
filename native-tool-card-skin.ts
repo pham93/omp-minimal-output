@@ -32,6 +32,7 @@ export interface NativeToolCardSkinDeps {
   enabled: (kind: NativeToolCardKind) => boolean;
   theme: () => unknown;
   pump?: () => void;
+  active?: () => boolean;
 }
 
 function methodOf(
@@ -158,7 +159,7 @@ export function nativeToolCardsNeedPump(): boolean {
 export function resetNativeToolCardPump(): void {
   pumpingCards.clear();
 }
-const skinned = new WeakSet<object>();
+let skinned = new WeakSet<object>();
 let installed = false;
 
 function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
@@ -322,30 +323,41 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
 export function installNativeToolCardSkin(
   ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
   deps: NativeToolCardSkinDeps,
-): void {
-  if (installed) return;
+): () => void {
+  if (installed) return () => {};
   const prototype = ContainerCtor?.prototype;
   const addChild = prototype?.addChild;
-  if (typeof addChild !== "function") return;
-  try {
-    prototype.addChild = function (this: unknown, ...args: unknown[]): unknown {
+  if (typeof addChild !== "function") return () => {};
+  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
+    if (deps.active?.() === false) return addChild.apply(this, args);
+    try {
+      if (isToolExecutionComponentLike(this)) skinToolExecution(this as object, deps);
+    } catch {
+      // Constructor-time parent probing is display-only.
+    }
+    for (const child of args) {
       try {
-        if (isToolExecutionComponentLike(this)) skinToolExecution(this, deps);
+        if (isToolExecutionComponentLike(child)) skinToolExecution(child, deps);
       } catch {
-        // Constructor-time parent probing is display-only.
+        // One unfamiliar child must never affect its native parent insertion.
       }
-      for (const child of args) {
-        try {
-          if (isToolExecutionComponentLike(child))
-            skinToolExecution(child, deps);
-        } catch {
-          // One unfamiliar child must never affect its native parent insertion.
-        }
-      }
-      return addChild.apply(this, args);
-    };
+    }
+    return addChild.apply(this, args);
+  };
+  try {
+    prototype.addChild = patchedAddChild;
   } catch {
-    return;
+    return () => {};
   }
   installed = true;
+  return () => {
+    resetNativeToolCardPump();
+    try {
+      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
+    } catch {
+      // Another extension may own the current hook; never overwrite it.
+    }
+    installed = false;
+    skinned = new WeakSet<object>();
+  };
 }

@@ -14,6 +14,11 @@ export type ReadSkinEntry = {
   pending: boolean;
   error: boolean;
 };
+export interface ReadGroupSkinDeps {
+  enabled: () => boolean;
+  theme: () => unknown;
+  active?: () => boolean;
+}
 
 export function paintReadGroupLines(theme: unknown, width: number, entries: readonly ReadSkinEntry[]): string[] {
   if (entries.length === 0) return [];
@@ -66,7 +71,7 @@ export function isReadGroupLike(child: unknown): boolean {
   );
 }
 
-const skinned = new WeakSet<object>();
+let skinned = new WeakSet<object>();
 let installed = false;
 
 function entryPathOf(args: unknown): string {
@@ -82,7 +87,7 @@ function resultIsError(result: unknown): boolean {
   return typeof result === "object" && result !== null && (result as Record<string, unknown>)["isError"] === true;
 }
 
-function skinReadGroup(child: object, deps: { enabled: () => boolean; theme: () => unknown }): void {
+function skinReadGroup(child: object, deps: ReadGroupSkinDeps): void {
   if (skinned.has(child)) return;
   const c = child as Record<string, unknown>;
   if (
@@ -176,29 +181,36 @@ function skinReadGroup(child: object, deps: { enabled: () => boolean; theme: () 
 
 export function installReadGroupSkin(
   ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
-  deps: { enabled: () => boolean; theme: () => unknown },
-): void {
-  if (installed) return;
-  let origAddChild: (...args: unknown[]) => unknown;
-  try {
-    if (!ContainerCtor || typeof ContainerCtor.prototype?.addChild !== "function") return;
-    origAddChild = ContainerCtor.prototype.addChild;
-  } catch {
-    return;
-  }
-  try {
-    ContainerCtor.prototype.addChild = function (this: unknown, ...args: unknown[]) {
-      for (const arg of args) {
-        try {
-          if (isReadGroupLike(arg)) skinReadGroup(arg as object, deps);
-        } catch {
-          // One bad child must not break the container.
-        }
+  deps: ReadGroupSkinDeps,
+): () => void {
+  if (installed) return () => {};
+  const prototype = ContainerCtor?.prototype;
+  const addChild = prototype?.addChild;
+  if (typeof addChild !== "function") return () => {};
+  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
+    if (deps.active?.() === false) return addChild.apply(this, args);
+    for (const arg of args) {
+      try {
+        if (isReadGroupLike(arg)) skinReadGroup(arg as object, deps);
+      } catch {
+        // One bad child must not break the container.
       }
-      return origAddChild.apply(this, args);
-    };
+    }
+    return addChild.apply(this, args);
+  };
+  try {
+    prototype.addChild = patchedAddChild;
   } catch {
-    return;
+    return () => {};
   }
   installed = true;
+  return () => {
+    try {
+      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
+    } catch {
+      // Another extension may own the current hook; never overwrite it.
+    }
+    installed = false;
+    skinned = new WeakSet<object>();
+  };
 }

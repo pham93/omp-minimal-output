@@ -272,43 +272,59 @@ export function invalidateLiveAlerts(): void {
   }
 }
 
-const skinned = new WeakSet<object>();
+let skinned = new WeakSet<object>();
 let installed = false;
+
+export interface WarningSkinDeps {
+  enabled: () => boolean;
+  theme: () => unknown;
+  pump?: () => void;
+  active?: () => boolean;
+}
 
 export function installWarningSkin(
   ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
-  deps: { enabled: () => boolean; theme: () => unknown; pump?: () => void },
-): void {
-  if (installed) return;
-  let origAddChild: (...args: unknown[]) => unknown;
-  try {
-    if (!ContainerCtor || typeof ContainerCtor.prototype?.addChild !== "function") return;
-    origAddChild = ContainerCtor.prototype.addChild;
-  } catch {
-    return;
-  }
-  try {
-    ContainerCtor.prototype.addChild = function (this: unknown, ...args: unknown[]) {
-      for (const arg of args) {
-        try {
-          if (arg && typeof arg === "object" && !skinned.has(arg as object) && isAlertLike(arg)) {
-            skinAlert(arg as object, deps);
-          }
-        } catch {
-          // One bad child must not break the container.
+  deps: WarningSkinDeps,
+): () => void {
+  if (installed) return () => {};
+  const prototype = ContainerCtor?.prototype;
+  const addChild = prototype?.addChild;
+  if (typeof addChild !== "function") return () => {};
+  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
+    if (deps.active?.() === false) return addChild.apply(this, args);
+    for (const arg of args) {
+      try {
+        if (arg && typeof arg === "object" && !skinned.has(arg as object) && isAlertLike(arg)) {
+          skinAlert(arg as object, deps);
         }
+      } catch {
+        // One bad child must not break the container.
       }
-      return origAddChild.apply(this, args);
-    };
+    }
+    return addChild.apply(this, args);
+  };
+  try {
+    prototype.addChild = patchedAddChild;
   } catch {
-    return;
+    return () => {};
   }
   installed = true;
+  return () => {
+    liveAlerts.clear();
+    alertLive = false;
+    try {
+      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
+    } catch {
+      // Another extension may own the current hook; never overwrite it.
+    }
+    installed = false;
+    skinned = new WeakSet<object>();
+  };
 }
 
 function skinAlert(
   child: object,
-  deps: { enabled: () => boolean; theme: () => unknown; pump?: () => void },
+  deps: WarningSkinDeps,
 ): void {
   const c = child as Record<string, unknown> & {
     render?: (width: number) => readonly string[];
@@ -336,7 +352,7 @@ function skinAlert(
     };
     (c as Record<string, unknown>)["render"] = function (width: number): readonly string[] {
       if (!toolActivityVisible) return [];
-      if (!deps.enabled()) return origRender(width);
+      if (deps.active?.() === false || !deps.enabled()) return origRender(width);
       try {
         if (typeof c.isExpanded === "function" && c.isExpanded() === true) return origRender(width);
         return paintAlertLine(deps.theme(), width, child, origRender);
@@ -347,12 +363,12 @@ function skinAlert(
   } catch {
     return;
   }
+  if (deps.active?.() === false) return;
   alertLive = true;
   liveAlerts.add(child);
   try {
     deps.pump?.();
   } catch {
-    // Pump is best-effort; a later command/session_start retries.
   }
   skinned.add(child);
 }

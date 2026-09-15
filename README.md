@@ -82,9 +82,11 @@ sequenceDiagram
 
 Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the group, siblings return empty framed blocks). Settled records freeze `label/total/runId` in message details so rebuilds and resumed sessions never mirror a later run; only the current turn's live row follows shared module state.
 
+Extension generations use one process-global runtime lease. A hot reload disposes the previous generation's widgets, timer, and prototype skins before the replacement registers callbacks; stale renderers remain fail-open and cannot hide core transcript input.
+
 ## Files
 
-- `index.ts` — extension entry: 8 shadows plus display-only Task/Hub, read-group, warning, and todo skins; lifecycle handlers; `/minimal-on|off|status`.
+- `index.ts` — extension entry: 8 shadows plus display-only Task/Hub, read-group, warning, todo skins; lifecycle handlers; `/minimal-on|off|status`. `runtime-owner.ts` owns hot-reload cleanup across module generations.
 - `card-primitives.ts` — shared lifecycle, text sanitation, header, detail, error, and limit mechanics. `task-card.ts` and `hub-card.ts` own tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
 - `todos-header.ts` / `todo-hud.ts` — sticky todo widget and native TODO HUD handling. `edit-card.ts`, `eval-card.ts`, and `web-search-card.ts` — dedicated wrapped-tool cards.
 - `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` — pure output filters.
