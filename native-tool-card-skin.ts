@@ -1,17 +1,23 @@
 // Display-only skin for native ToolExecutionComponent instances. It never registers or executes tools.
 
 import { compactCardText } from "./card-primitives.ts";
+import { isDebugCardData, renderDebugCardLines } from "./debug-card.ts";
 import { isHubCardData, renderHubCardLines } from "./hub-card.ts";
+import { isLspCardData, renderLspCardLines } from "./lsp-card.ts";
 import {
   fingerprintForToolCall,
   identityForToolCall,
   toolFingerprint,
   toolFpBase,
 } from "./results.ts";
+import { isAstGrepCardData, renderSearchCardLines, SEARCH_CARD_KIND } from "./search-card.ts";
 import { isTaskCardData, renderTaskCardLines } from "./task-card.ts";
 
 export const NATIVE_TOOL_CARD_KIND = {
+  astGrep: "ast_grep",
+  debug: "debug",
   hub: "hub",
+  lsp: "lsp",
   task: "task",
 } as const;
 
@@ -60,10 +66,7 @@ export function isToolExecutionComponentLike(child: unknown): child is object {
   );
 }
 
-function nativeRendererMatches(
-  native: unknown,
-  label: "Task" | "Hub",
-): boolean {
+function nativeRendererMatches(native: unknown, labels: readonly string[]): boolean {
   if (!Array.isArray(native)) return false;
   const first = native
     .slice(0, 3)
@@ -71,12 +74,45 @@ function nativeRendererMatches(
     .map((line) => compactCardText(line, 500))
     .find(Boolean);
   if (!first) return false;
-  return new RegExp(`^[^A-Za-z0-9]{0,24}${label}(?:\\b|:)`, "u").test(first);
+  return labels.some((label) =>
+    new RegExp(`^[^A-Za-z0-9]{0,24}${label}(?:\\b|:)`, "iu").test(first),
+  );
 }
 
 interface SelectedNativeCard {
   kind: NativeToolCardKind;
   args: unknown;
+}
+
+function selectionForIdentity(
+  toolName: string,
+  args: unknown,
+  result: unknown,
+): SelectedNativeCard | undefined {
+  switch (toolName) {
+    case NATIVE_TOOL_CARD_KIND.astGrep:
+      return isAstGrepCardData(args)
+        ? { kind: NATIVE_TOOL_CARD_KIND.astGrep, args }
+        : undefined;
+    case NATIVE_TOOL_CARD_KIND.debug:
+      return isDebugCardData(args, result)
+        ? { kind: NATIVE_TOOL_CARD_KIND.debug, args }
+        : undefined;
+    case NATIVE_TOOL_CARD_KIND.hub:
+      return isHubCardData(args, result)
+        ? { kind: NATIVE_TOOL_CARD_KIND.hub, args }
+        : undefined;
+    case NATIVE_TOOL_CARD_KIND.lsp:
+      return isLspCardData(args, result)
+        ? { kind: NATIVE_TOOL_CARD_KIND.lsp, args }
+        : undefined;
+    case NATIVE_TOOL_CARD_KIND.task:
+      return isTaskCardData(args, result)
+        ? { kind: NATIVE_TOOL_CARD_KIND.task, args }
+        : undefined;
+    default:
+      return undefined;
+  }
 }
 
 function selectedCard(
@@ -87,27 +123,38 @@ function selectedCard(
     ? identityForToolCall(state.toolCallId)
     : undefined;
   if (identity) {
-    const args = state.args ?? identity.args;
-    if (identity.toolName === "task" && isTaskCardData(args, state.result)) {
-      return { kind: NATIVE_TOOL_CARD_KIND.task, args };
-    }
-    if (identity.toolName === "hub" && isHubCardData(args, state.result)) {
-      return { kind: NATIVE_TOOL_CARD_KIND.hub, args };
-    }
-    return undefined;
+    return selectionForIdentity(
+      identity.toolName,
+      state.args ?? identity.args,
+      state.result,
+    );
   }
   if (state.result === undefined) return undefined;
-  const task =
-    isTaskCardData(undefined, state.result) &&
-    nativeRendererMatches(native, "Task");
-  const hub =
-    isHubCardData(undefined, state.result) &&
-    nativeRendererMatches(native, "Hub");
-  if (task === hub) return undefined;
-  return {
-    kind: task ? NATIVE_TOOL_CARD_KIND.task : NATIVE_TOOL_CARD_KIND.hub,
-    args: state.args,
-  };
+  const candidates = [
+    (isTaskCardData(state.args, state.result) ||
+      isTaskCardData(undefined, state.result)) &&
+    nativeRendererMatches(native, ["Task"])
+      ? { kind: NATIVE_TOOL_CARD_KIND.task, args: state.args }
+      : undefined,
+    (isHubCardData(state.args, state.result) ||
+      isHubCardData(undefined, state.result)) &&
+    nativeRendererMatches(native, ["Hub"])
+      ? { kind: NATIVE_TOOL_CARD_KIND.hub, args: state.args }
+      : undefined,
+    isLspCardData(state.args, state.result) &&
+    nativeRendererMatches(native, ["LSP", "Lsp"])
+      ? { kind: NATIVE_TOOL_CARD_KIND.lsp, args: state.args }
+      : undefined,
+    isDebugCardData(state.args, state.result) &&
+    nativeRendererMatches(native, ["Debug"])
+      ? { kind: NATIVE_TOOL_CARD_KIND.debug, args: state.args }
+      : undefined,
+    isAstGrepCardData(state.args) &&
+    nativeRendererMatches(native, ["AST Grep", "Ast Grep", "Search"])
+      ? { kind: NATIVE_TOOL_CARD_KIND.astGrep, args: state.args }
+      : undefined,
+  ].filter((candidate): candidate is SelectedNativeCard => candidate !== undefined);
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function captureCallIdentity(
@@ -130,6 +177,36 @@ function skinFingerprint(
   const base = toolFpBase(kind, args);
   if (state.toolCallId) return `${base}#${state.toolCallId}`;
   return toolFingerprint(kind, args);
+}
+function renderSelectedCardLines(
+  kind: NativeToolCardKind,
+  theme: unknown,
+  width: number,
+  args: unknown,
+  result: unknown,
+  options: unknown,
+  fingerprint: string,
+): readonly string[] | undefined {
+  switch (kind) {
+    case NATIVE_TOOL_CARD_KIND.astGrep:
+      return renderSearchCardLines(
+        theme,
+        width,
+        SEARCH_CARD_KIND.astGrep,
+        args,
+        result,
+        options,
+        fingerprint,
+      );
+    case NATIVE_TOOL_CARD_KIND.debug:
+      return renderDebugCardLines(theme, width, args, result, options, fingerprint);
+    case NATIVE_TOOL_CARD_KIND.hub:
+      return renderHubCardLines(theme, width, args, result, options, fingerprint);
+    case NATIVE_TOOL_CARD_KIND.lsp:
+      return renderLspCardLines(theme, width, args, result, options, fingerprint);
+    case NATIVE_TOOL_CARD_KIND.task:
+      return renderTaskCardLines(theme, width, args, result, options, fingerprint);
+  }
 }
 
 function requestPump(deps: NativeToolCardSkinDeps): void {
@@ -269,24 +346,15 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
           selected.args,
           state,
         );
-        const painted =
-          selected.kind === NATIVE_TOOL_CARD_KIND.task
-            ? renderTaskCardLines(
-                deps.theme(),
-                width,
-                selected.args,
-                state.result,
-                options,
-                fingerprint,
-              )
-            : renderHubCardLines(
-                deps.theme(),
-                width,
-                selected.args,
-                state.result,
-                options,
-                fingerprint,
-              );
+      const painted = renderSelectedCardLines(
+        selected.kind,
+        deps.theme(),
+        width,
+        selected.args,
+        state.result,
+        options,
+        fingerprint,
+      );
         return painted ?? native;
       } catch {
         return native;
