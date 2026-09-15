@@ -30,7 +30,7 @@ export const SETTLE_MS = 500;
 
 export const TOOL_INDENT = "  ";
 
-export const LINE_WIDTH_RATIO = 0.7;
+export const LINE_WIDTH_RATIO = 0.95;
 
 export const settleAt = new Map<string, number>();
 
@@ -314,7 +314,7 @@ export function formatRowLine(
   const branch = opts.tree === "mid" ? "├─" : opts.tree === "last" ? "╰─" : "";
   const branchPaint = branch ? `${paintAt(theme, branch, opts.error ? "error" : spin ? "accent" : "dim", op)} ` : "";
   const indentPrefix =
-    typeof opts.indent === "string" ? opts.indent : branch || opts.indent === true ? TOOL_INDENT : " ";
+    typeof opts.indent === "string" ? opts.indent : branch ? "" : opts.indent === true ? TOOL_INDENT : "";
   const pad = branch ? indentPrefix + branchPaint : indentPrefix;
   const w = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
   const prefix = branch && !spin ? pad : `${pad}${paintMark(theme, mark, markToken)} `;
