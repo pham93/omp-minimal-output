@@ -42,7 +42,6 @@ import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
-import { renderSearchCard, SEARCH_CARD_KIND } from "./search-card.ts";
 import { cardIsPartial } from "./card-primitives.ts";
 import { installReadGroupSkin } from "./read-group.ts";
 import {
@@ -82,28 +81,6 @@ const CARD_RENDERERS = {
     },
     renderResult(theme, args, result, options, fingerprint) {
       return renderEvalCard(theme, args, result, options, false, fingerprint);
-    },
-  },
-  grep: {
-    renderCall(theme, args, options, fingerprint) {
-      return renderSearchCard(
-        theme,
-        SEARCH_CARD_KIND.grep,
-        args,
-        undefined,
-        options,
-        fingerprint,
-      );
-    },
-    renderResult(theme, args, result, options, fingerprint) {
-      return renderSearchCard(
-        theme,
-        SEARCH_CARD_KIND.grep,
-        args,
-        result,
-        options,
-        fingerprint,
-      );
     },
   },
   web_search: {
@@ -275,40 +252,15 @@ function pruneMcpEnvelopes(list: TextItem[], anchor: TextItem, raw: string): Tex
   );
 }
 
-const NATIVE_CARD_TOOL_NAMES: Record<string, true> = {
-  ast_grep: true,
-  debug: true,
-  hub: true,
-  lsp: true,
-  task: true,
-};
-
 function nativeToolCardSkinActive(toolName: string): boolean {
   if (!enabled) return false;
   const cfg = getPluginConfig();
-  switch (toolName) {
-    case "ast_grep":
-      return cfg.nativeAstGrep !== true;
-    case "debug":
-      return cfg.nativeDebug !== true;
-    case "hub":
-      return cfg.nativeHub !== true;
-    case "lsp":
-      return cfg.nativeLsp !== true;
-    case "task":
-      return cfg.nativeTask !== true;
-    default:
-      return false;
-  }
+  return (toolName === "task" && cfg.nativeTask !== true) || (toolName === "hub" && cfg.nativeHub !== true);
 }
 
 function isCollapseTarget(event: ToolResultEvent): boolean {
   if (event.toolName === "web_search" && !wrapTool("web_search")) return false;
-  if (event.toolName === "grep" && !wrapTool("grep")) return false;
-  if (
-    NATIVE_CARD_TOOL_NAMES[event.toolName] === true &&
-    !nativeToolCardSkinActive(event.toolName)
-  ) {
+  if ((event.toolName === "task" || event.toolName === "hub") && !nativeToolCardSkinActive(event.toolName)) {
     return false;
   }
   return (
@@ -1572,11 +1524,13 @@ export default function (pi: ExtensionAPI) {
     } else {
       activityLive = true;
     }
-    // Dedicated wrappers and native component skins paint their own rows.
-    const dedicatedWrapper = isWrappedTool(toolName) &&
-      Object.hasOwn(CARD_RENDERERS, toolName) &&
-      wrapTool(toolName);
-    if (!dedicatedWrapper && !nativeToolCardSkinActive(toolName)) {
+    // Task and Hub paint through the native component skin when enabled.
+    if (
+      toolName !== "edit" &&
+      toolName !== "eval" &&
+      toolName !== "web_search" &&
+      !nativeToolCardSkinActive(toolName)
+    ) {
       upsertGroupRow(fp, {
         body: toolActionLabel(toolName, args),
         live: true,
@@ -1775,9 +1729,6 @@ export default function (pi: ExtensionAPI) {
       if (cfg.nativeBash) native.push("bash");
       if (cfg.nativeRead) native.push("read");
       if (cfg.nativeGrep) native.push("grep");
-      if (cfg.nativeAstGrep) native.push("ast_grep");
-      if (cfg.nativeLsp) native.push("lsp");
-      if (cfg.nativeDebug) native.push("debug");
       if (cfg.nativeGlob) native.push("glob");
       if (cfg.nativeWrite) native.push("write");
       if (cfg.nativeEdit) native.push("edit");
@@ -1786,7 +1737,7 @@ export default function (pi: ExtensionAPI) {
       if (cfg.nativeTask) native.push("task");
       if (cfg.nativeHub) native.push("hub");
       ctx.ui.notify(
-        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] searchMax=${cfg.webSearchMaxResults} grepMax=${cfg.grepMaxMatches} astGrepMax=${cfg.astGrepMaxMatches} lspMax=${cfg.lspMaxItems} debugMax=${cfg.debugMaxItems} taskMax=${cfg.taskMaxAgents} hubMax=${cfg.hubMaxItems} tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine ? "one-line" : "native"}`,
+        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] searchMax=${cfg.webSearchMaxResults} taskMax=${cfg.taskMaxAgents} hubMax=${cfg.hubMaxItems} tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine !== false ? "on" : "off"}`,
         "info",
       );
     },

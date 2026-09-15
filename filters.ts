@@ -543,7 +543,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
       rules.push("grep");
     }
   } else if (toolName === "ast_grep") {
-    const raw = fields["pat"] ?? fields["pattern"] ?? fields["query"] ?? fields["path"] ?? "";
+    const raw = fields["pattern"] ?? fields["query"] ?? fields["path"] ?? "";
     const pattern = typeof raw === "string" ? raw : "";
     const grouped = groupSearchResults(stripped, pattern);
     if (grouped) {
@@ -558,12 +558,11 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     const pat = strField(fields, "pattern", "query", "path", "file");
     const grouped = groupSearchResults(stripped, pat || action);
     if (grouped) {
-      oneLiner = grouped.oneLiner.replace(/^◆ Search/, action ? `◆ LSP ${action}` : "◆ LSP");
-      details = grouped.details;
+      oneLiner = grouped.oneLiner.replace(/^◆ Search/, action ? `◆ Lsp ${action}` : "◆ Lsp");
     } else {
       const base = baseName(strField(fields, "file", "path"));
       const label = `${action ? ` ${action}` : ""}${base ? ` ${base}` : ""}`.trim();
-      oneLiner = label ? `◆ LSP ${label}` : "◆ LSP";
+      oneLiner = label ? `◆ Lsp ${label}` : "◆ Lsp";
     }
     rules.push("lsp");
   } else if (toolName === "glob") {

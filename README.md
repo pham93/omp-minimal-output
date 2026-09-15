@@ -1,8 +1,8 @@
 # omp-minimal-output
 
-Grok-build-style minimal console output for omp. Dedicated cards use theme-derived settled marks (`●`) and no background fill; general rows use the configured indicator. `ctrl+o` (`app.tools.expand`) toggles expansion globally. Rows are not clickable because row input remains core-owned.
+Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
 
-Wrapped Grep merges call and result into one row. AST Grep, LSP, Debug, Task, and Hub keep native registrations, schemas, approvals, execution, and result details; the display-only skin projects native component state into the same minimal card language.
+Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
@@ -13,14 +13,10 @@ Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
 | Card | Native fallback | Expanded limit |
 | --- | --- | --- |
 | Web search | `nativeWebSearch` (default `false`) | `webSearchMaxResults` (default `5`, range `1..10`) |
-| Grep | `nativeGrep` (default `false`) | `grepMaxMatches` (default `5`, range `1..20`) |
-| AST Grep | `nativeAstGrep` (default `false`) | `astGrepMaxMatches` (default `5`, range `1..20`) |
-| LSP | `nativeLsp` (default `false`) | `lspMaxItems` (default `5`, range `1..10`) |
-| Debug | `nativeDebug` (default `false`) | `debugMaxItems` (default `5`, range `1..10`) |
 | Task | `nativeTask` (default `false`) | `taskMaxAgents` (default `4`, range `1..8`) |
 | Hub | `nativeHub` (default `false`) | `hubMaxItems` (default `5`, range `1..10`) |
 
-Each fallback is independent. Native fallbacks restore the host renderer and leave that tool's result text untouched. AST Grep, LSP, Debug, Task, and Hub are never shadow-registered.
+Each fallback is independent. `nativeTask` and `nativeHub` restore the host renderer and leave result text untouched; the plugin never shadow-registers either tool.
 
 ## Runtime overview
 
@@ -65,9 +61,9 @@ flowchart TD
     trunc -->|no| out["line 1: ◆ one-liner\nline 2+: details"]
 ```
 
-Contract: ordinary rewritten results keep a settled one-liner on line 1 with filtered details below it. Dedicated cards (`edit`, `eval`, `web_search`, Grep, AST Grep, LSP, Debug, Task, Hub) use stashed text and preserved structured details for expansion.
+Contract: ordinary rewritten results keep a settled one-liner on line 1 and filtered details below it. Dedicated cards (`edit`, `eval`, `web_search`, Task, Hub) use stashed text or preserved structured native details for expansion.
 
-Grep and AST Grep show bounded matches grouped by file. LSP emphasizes action, symbol or file, and result count. Debug emphasizes action, target, debugger state, and bounded result rows. Task reads native `progress`/`results`; Hub reads native coordination/process details.
+Task reads native `progress`/`results` and limits expanded rows with `taskMaxAgents`. Hub reads native coordination/process details and limits expanded rows with `hubMaxItems`. `nativeTask` and `nativeHub` keep native result text uncollapsed.
 
 ## Row lifecycle
 
@@ -88,17 +84,16 @@ Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the
 
 ## Files
 
-- `index.ts` — extension entry: wrapped cards plus display-only AST Grep/LSP/Debug/Task/Hub, read-group, warning, and todo skins; lifecycle and `/minimal-on|off|status`.
-- `card-primitives.ts` — shared lifecycle, sanitation, header, detail, error, and limit mechanics.
-- `search-card.ts`, `lsp-card.ts`, `debug-card.ts`, `task-card.ts`, `hub-card.ts` — tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
-- `edit-card.ts`, `eval-card.ts`, `web-search-card.ts` — dedicated wrapped-tool cards. `todos-header.ts` and `todo-hud.ts` own todo chrome.
-- `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` owns pure output filters.
+- `index.ts` — extension entry: 8 shadows plus display-only Task/Hub, read-group, warning, and todo skins; lifecycle handlers; `/minimal-on|off|status`.
+- `card-primitives.ts` — shared lifecycle, text sanitation, header, detail, error, and limit mechanics. `task-card.ts` and `hub-card.ts` own tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
+- `todos-header.ts` / `todo-hud.ts` — sticky todo widget and native TODO HUD handling. `edit-card.ts`, `eval-card.ts`, and `web-search-card.ts` — dedicated wrapped-tool cards.
+- `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` — pure output filters.
 - `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`.
 - `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`.
 
 ## Constraints
 
 - `tryWrapTool` allowlist is `bash/read/grep/glob/edit/write/eval/web_search`; never add an unsupported shadow.
-- AST Grep, LSP, Debug, Task, and Hub stay native. The skin may observe public render lifecycle methods, but must never replace schemas, execution, debugger state, LSP mutations, Task runtime schemas, or Hub's argument-dependent approval policy.
+- Task and Hub stay native. Their skin may observe public render lifecycle methods, but must never copy or replace Task's runtime schema or Hub's argument-dependent approval policy.
 - Shadows are transparent delegates: no behavior change to what tools do, only how rows render.
 - Agent rules (`AGENTS.md`): prefer `read`/`grep`/`glob` over shell pipelines; one verification per change; one short intent line per tool call.

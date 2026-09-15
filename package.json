@@ -45,54 +45,7 @@
       "nativeGrep": {
         "type": "boolean",
         "default": false,
-        "description": "Leave grep on native Ohmypi renderer and leave its result text untouched."
-      },
-      "grepMaxMatches": {
-        "type": "number",
-        "default": 5,
-        "min": 1,
-        "max": 20,
-        "step": 1,
-        "description": "Maximum matches shown in expanded minimal Grep card."
-      },
-      "nativeAstGrep": {
-        "type": "boolean",
-        "default": false,
-        "description": "Leave AST Grep on native Ohmypi renderer and leave its result text untouched."
-      },
-      "astGrepMaxMatches": {
-        "type": "number",
-        "default": 5,
-        "min": 1,
-        "max": 20,
-        "step": 1,
-        "description": "Maximum matches shown in expanded minimal AST Grep card."
-      },
-      "nativeLsp": {
-        "type": "boolean",
-        "default": false,
-        "description": "Leave LSP on native Ohmypi renderer and leave its result text untouched."
-      },
-      "lspMaxItems": {
-        "type": "number",
-        "default": 5,
-        "min": 1,
-        "max": 10,
-        "step": 1,
-        "description": "Maximum rows shown in expanded minimal LSP card."
-      },
-      "nativeDebug": {
-        "type": "boolean",
-        "default": false,
-        "description": "Leave Debug on native Ohmypi renderer and leave its result text untouched."
-      },
-      "debugMaxItems": {
-        "type": "number",
-        "default": 5,
-        "min": 1,
-        "max": 10,
-        "step": 1,
-        "description": "Maximum rows shown in expanded minimal Debug card."
+        "description": "Leave grep on the native Ohmypi renderer."
       },
       "nativeGlob": {
         "type": "boolean",
@@ -190,9 +143,6 @@
     "edit-card.ts",
     "eval-card.ts",
     "web-search-card.ts",
-    "search-card.ts",
-    "lsp-card.ts",
-    "debug-card.ts",
     "card-primitives.ts",
     "task-card.ts",
     "hub-card.ts",

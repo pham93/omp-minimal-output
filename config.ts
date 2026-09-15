@@ -46,13 +46,6 @@ export interface PluginConfig extends WrappedToolSettings {
   opacity: number;
   indicator: IndicatorId;
   indicatorAnimation: boolean;
-  grepMaxMatches: number;
-  nativeAstGrep: boolean;
-  astGrepMaxMatches: number;
-  nativeLsp: boolean;
-  lspMaxItems: number;
-  nativeDebug: boolean;
-  debugMaxItems: number;
   nativeTask: boolean;
   taskMaxAgents: number;
   nativeHub: boolean;
@@ -72,13 +65,6 @@ export const DEFAULT_CONFIG: PluginConfig = {
   nativeBash: false,
   nativeRead: false,
   nativeGrep: false,
-  grepMaxMatches: 5,
-  nativeAstGrep: false,
-  astGrepMaxMatches: 5,
-  nativeLsp: false,
-  lspMaxItems: 5,
-  nativeDebug: false,
-  debugMaxItems: 5,
   nativeGlob: false,
   nativeWrite: false,
   nativeEdit: false,
@@ -98,9 +84,6 @@ export const DEFAULT_CONFIG: PluginConfig = {
 
 const BOOLEAN_KEYS: Record<string, true> = {
   indicatorAnimation: true,
-  nativeAstGrep: true,
-  nativeLsp: true,
-  nativeDebug: true,
   nativeTask: true,
   nativeHub: true,
   todosHeader: true,
@@ -165,34 +148,6 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         }
         continue;
       }
-    if (key === "grepMaxMatches") {
-      const v = src[key];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        next.grepMaxMatches = Math.min(20, Math.max(1, Math.floor(v)));
-      }
-      continue;
-    }
-    if (key === "astGrepMaxMatches") {
-      const v = src[key];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        next.astGrepMaxMatches = Math.min(20, Math.max(1, Math.floor(v)));
-      }
-      continue;
-    }
-    if (key === "lspMaxItems") {
-      const v = src[key];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        next.lspMaxItems = Math.min(10, Math.max(1, Math.floor(v)));
-      }
-      continue;
-    }
-    if (key === "debugMaxItems") {
-      const v = src[key];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        next.debugMaxItems = Math.min(10, Math.max(1, Math.floor(v)));
-      }
-      continue;
-    }
       if (key === "taskMaxAgents") {
         const v = src[key];
         if (typeof v === "number" && Number.isFinite(v)) {
