@@ -4,7 +4,7 @@ import { Container } from "@oh-my-pi/pi-tui";
 import { getPluginConfig } from "./config.ts";
 import {
   cardDetailLine,
-  cardHeaderLine,
+  parentCardHeaderLines,
   cardLifecycle,
   cardTitleLine,
   compactCardText,
@@ -13,6 +13,7 @@ import {
   resultDetails,
   stashedOrResultText,
 } from "./card-primitives.ts";
+import type { ParentCardLabel } from "./card-primitives.ts";
 import { markFlush } from "./loaders.ts";
 import { searchPatternText } from "./text.ts";
 
@@ -69,6 +70,7 @@ export function renderWebSearchCard(
   result: unknown,
   options: unknown,
   fp?: string,
+  parentLabel?: ParentCardLabel,
 ): Container {
   try {
     const nativeError = compactCardText(resultDetails(result)?.["error"], 120);
@@ -89,15 +91,14 @@ export function renderWebSearchCard(
     c.addChild({
       render: (width: number): readonly string[] => {
         try {
-          const lines: string[] = [
-            cardHeaderLine(theme, width, {
-              body,
-              lifecycle,
-              right,
-              fingerprint: fp,
-              settledMark: "●",
-            }),
-          ];
+          const lines: string[] = parentCardHeaderLines(theme, width, {
+            body,
+            lifecycle,
+            right,
+            fingerprint: fp,
+            settledMark: "●",
+            parentLabel,
+          });
           if (!expanded || running) return lines;
           if (error) {
             lines.push(

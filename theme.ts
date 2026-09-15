@@ -127,7 +127,6 @@ export function paintAt(theme: unknown, text: string, token: string, opacity: nu
   return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
 }
 
-
 // Basic/bright foreground color number → sRGB.
 const BASIC_FG_RGB: Record<number, [number, number, number]> = {
   30: [0, 0, 0],
@@ -295,7 +294,7 @@ export function formatRowLine(
   width: number,
   opts: {
     body: string;
-    indent?: boolean;
+    indent?: boolean | string;
     live?: boolean;
     error?: boolean;
     right?: string;
@@ -314,7 +313,8 @@ export function formatRowLine(
   const mark = opts.mark ?? (spin ? currentIndicatorFrame(cfg) : (settled ?? "◆"));
   const branch = opts.tree === "mid" ? "├─" : opts.tree === "last" ? "╰─" : "";
   const branchPaint = branch ? `${paintAt(theme, branch, opts.error ? "error" : spin ? "accent" : "dim", op)} ` : "";
-  const indentPrefix = branch || opts.indent === true ? TOOL_INDENT : " ";
+  const indentPrefix =
+    typeof opts.indent === "string" ? opts.indent : branch || opts.indent === true ? TOOL_INDENT : " ";
   const pad = branch ? indentPrefix + branchPaint : indentPrefix;
   const w = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
   const prefix = branch && !spin ? pad : `${pad}${paintMark(theme, mark, markToken)} `;

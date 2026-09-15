@@ -42,8 +42,9 @@ import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
-import { cardIsPartial } from "./card-primitives.ts";
+import { cardIsPartial, resultDetails } from "./card-primitives.ts";
 import { installReadGroupSkin } from "./read-group.ts";
+import { commentaryStatusFromMessage, installAssistantCommentarySkin } from "./assistant-commentary-skin.ts";
 import {
   installNativeToolCardSkin,
   nativeToolCardsNeedPump,
@@ -63,36 +64,63 @@ import {
 } from "./todos-header.ts";
 
 interface ToolCardRenderer {
-  renderCall(theme: unknown, args: unknown, options: unknown, fingerprint: string): Container;
-  renderResult(theme: unknown, args: unknown, result: unknown, options: unknown, fingerprint: string): Container;
+  renderCall(
+    theme: unknown,
+    args: unknown,
+    options: unknown,
+    fingerprint: string,
+    parentLabel: () => string,
+  ): Container;
+  renderResult(
+    theme: unknown,
+    args: unknown,
+    result: unknown,
+    options: unknown,
+    fingerprint: string,
+    parentLabel: () => string,
+  ): Container;
 }
 
 const CARD_RENDERERS = {
   edit: {
-    renderCall(theme, args, options) {
-      return renderPrettyEditCard(theme, args, undefined, options, cardIsPartial(options));
+    renderCall(theme, args, options, _fingerprint, parentLabel) {
+      return renderPrettyEditCard(theme, args, undefined, options, cardIsPartial(options), parentLabel);
     },
-    renderResult(theme, args, result, options) {
-      return renderPrettyEditCard(theme, args, result, options, false);
+    renderResult(theme, args, result, options, _fingerprint, parentLabel) {
+      return renderPrettyEditCard(theme, args, result, options, false, parentLabel);
     },
   },
   eval: {
-    renderCall(theme, args, options, fingerprint) {
-      return renderEvalCard(theme, args, undefined, options, cardIsPartial(options), fingerprint);
+    renderCall(theme, args, options, fingerprint, parentLabel) {
+      return renderEvalCard(theme, args, undefined, options, cardIsPartial(options), fingerprint, parentLabel);
     },
-    renderResult(theme, args, result, options, fingerprint) {
-      return renderEvalCard(theme, args, result, options, false, fingerprint);
+    renderResult(theme, args, result, options, fingerprint, parentLabel) {
+      return renderEvalCard(theme, args, result, options, false, fingerprint, parentLabel);
     },
   },
   web_search: {
-    renderCall(theme, args, options, fingerprint) {
-      return renderWebSearchCard(theme, args, undefined, options, fingerprint);
+    renderCall(theme, args, options, fingerprint, parentLabel) {
+      return renderWebSearchCard(theme, args, undefined, options, fingerprint, parentLabel);
     },
-    renderResult(theme, args, result, options, fingerprint) {
-      return renderWebSearchCard(theme, args, result, options, fingerprint);
+    renderResult(theme, args, result, options, fingerprint, parentLabel) {
+      return renderWebSearchCard(theme, args, result, options, fingerprint, parentLabel);
     },
   },
 } satisfies Partial<Record<WrappedTool, ToolCardRenderer>>;
+
+const ACTIVITY_LABEL_SOURCE = {
+  generated: "generated",
+  tool: "tool",
+  commentary: "commentary",
+} as const;
+
+type ActivityLabelSource = (typeof ACTIVITY_LABEL_SOURCE)[keyof typeof ACTIVITY_LABEL_SOURCE];
+
+const ACTIVITY_LABEL_RANK = {
+  [ACTIVITY_LABEL_SOURCE.generated]: 0,
+  [ACTIVITY_LABEL_SOURCE.tool]: 1,
+  [ACTIVITY_LABEL_SOURCE.commentary]: 2,
+} as const satisfies Record<ActivityLabelSource, number>;
 
 // Elapsed base for the live row timer (ms epoch). Maintained by the
 // tool handlers below; renderers only read it.
@@ -100,22 +128,40 @@ let spinStartedAt = 0;
 let activityStartedAt = 0;
 let activityLabel = "";
 let activityLive = false;
+let activityLabelSource: ActivityLabelSource = ACTIVITY_LABEL_SOURCE.generated;
 // Per-turn mirror identity for the aside-channel records below. The live row
 // is sent once per turn; a settled record goes out on every tool drain.
 // Renderer state freezes in message details so old rows never mirror a later run.
 let activityRunId: string | null = null;
 let activityLiveSent = false;
 let activityContext = "";
-let activityOutcome = "";
-let activityStatusFp = "";
-let activityResultSeen = false;
 let activitySettledSent = false;
-let activityError = false;
 let activityApiDead = false;
 const activityProcessTag = Math.floor(Math.random() * 36 ** 6).toString(36);
 let activityRunSeq = 0;
 const liveRuns = new Map<string, { label: string; startedAt: number; fp: string }>();
 let activityLeadFp = "";
+
+function parentLabelForCard(fingerprint: string, result?: unknown): string {
+  const details = resultDetails(result);
+  const persisted = details?.["minimalActivityLabel"];
+  if (details?.["minimalActivityLead"] === true && typeof persisted === "string") {
+    const label = persisted.trim();
+    if (label) return label;
+  }
+  return fingerprint === activityLeadFp ? activityLabel : "";
+}
+function parentLabelForToolCall(toolCallId: string, fingerprint: string, result?: unknown): string {
+  const persisted = parentLabelForCard(fingerprint, result);
+  if (persisted) return persisted;
+  const live = liveRuns.get(toolCallId);
+  return live?.fp === activityLeadFp ? live.label : "";
+}
+
+function toolOwnsParentCard(toolName: string): boolean {
+  const normalized = toolName.toLowerCase();
+  return normalized in CARD_RENDERERS || normalized === "task" || normalized === "hub";
+}
 let enabled = true;
 let runtimeIsActive = (): boolean => true;
 let thoughtLive = false;
@@ -129,7 +175,7 @@ let thoughtUi:
       requestRender?: () => void;
     }
   | undefined;
-let todosCollapsed = false;
+let todosCollapsed = true;
 let todoHeaderState: TodoHeaderState | null = null;
 const todoCompletingAt = new Map<string, number>();
 const todoSeen = new Map<string, string>();
@@ -548,25 +594,11 @@ function refreshTodosWidget(): void {
 let todoHeaderSig = "";
 let todoSource: (() => { phases: unknown } | undefined) | undefined;
 let todoSessionVisible = false;
-let todoSessionBaselineSig = "";
-
-function todoSourceSignature(): string {
-  try {
-    const raw = todoSource?.();
-    return raw ? JSON.stringify(raw.phases) : "";
-  } catch {
-    return "";
-  }
-}
-
-function captureTodoSessionBaseline(): void {
-  todoSessionBaselineSig = todoSourceSignature();
-}
 
 function resetTodoSessionState(): void {
   todoSource = undefined;
+  todosCollapsed = true;
   todoSessionVisible = false;
-  todoSessionBaselineSig = "";
   todoHeaderSig = "";
   todoHeaderState = null;
   todoSeen.clear();
@@ -661,12 +693,8 @@ function peekTodoState(): TodoHeaderState | null {
 function syncTodoHeaderFromSession(ctx?: unknown): void {
   if (ctx) bindTodoSource(ctx);
   try {
+    if (!todoSessionVisible) return;
     const raw = todoSource?.();
-    const sig = raw ? JSON.stringify(raw.phases) : "";
-    if (!todoSessionVisible) {
-      if (sig === todoSessionBaselineSig) return;
-      todoSessionVisible = true;
-    }
     const next = raw ? parseTodoPhases(raw) : null;
     if (next) applyTodoState(next);
   } catch {
@@ -864,16 +892,6 @@ const ACTIVITY_RECORD_KIND = {
 
 type ActivityRecordKind = (typeof ACTIVITY_RECORD_KIND)[keyof typeof ACTIVITY_RECORD_KIND];
 
-const ACTIVITY_TOOL_TITLE = {
-  ast_grep: "AST Grep",
-  debug: "Debug",
-  hub: "Hub",
-  lsp: "LSP",
-  task: "Task",
-  todo: "Todo",
-  web_search: "Search",
-} as const;
-
 interface ActivityDetails {
   kind?: unknown;
   label?: unknown;
@@ -904,76 +922,6 @@ interface ActivityStatusPaint {
   error: () => boolean;
   visible?: () => boolean;
   fadeKey: string;
-}
-
-function activityRecordOf(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function firstActivityText(fields: Record<string, unknown> | undefined, ...keys: string[]): string {
-  for (const key of keys) {
-    const value = fields?.[key];
-    if (typeof value === "string" && value.trim()) return value.replace(/\s+/g, " ").trim();
-  }
-  return "";
-}
-
-function activityToolContext(toolName: string, args: unknown): string {
-  const normalized = toolName.trim().toLowerCase();
-  const fields = activityRecordOf(args);
-  const title = ACTIVITY_TOOL_TITLE[normalized as keyof typeof ACTIVITY_TOOL_TITLE] ?? toolActionLabel(toolName, {});
-  const action = firstActivityText(fields, "action", "operation", "op", "method");
-  const target = firstActivityText(
-    fields,
-    "symbol",
-    "file",
-    "path",
-    "query",
-    "target",
-    "program",
-    "task",
-    "name",
-    "to",
-  );
-  if (normalized === "lsp" || normalized === "debug" || normalized === "hub") {
-    const head = action ? `${title} ${action}` : title;
-    return target ? `${head} · ${target}` : head;
-  }
-  if (Object.hasOwn(ACTIVITY_TOOL_TITLE, normalized)) return target ? `${title} · ${target}` : title;
-  const projected = toolActionLabel(toolName, args);
-  return projected || title;
-}
-
-const ACTIVITY_OUTCOME_RANK = {
-  reference: 0,
-  diagnostic: 1,
-  match: 2,
-  source: 3,
-  result: 4,
-  file: 5,
-  item: 6,
-  agent: 7,
-  job: 8,
-  task: 9,
-} as const;
-
-function activityOutcomeOf(result: unknown): string {
-  if (isToolError(result)) return "failed";
-  const text = toolResultText(result).replace(/\x1b\[[0-9;]*m/g, " ").replace(/\s+/g, " ");
-  const counts = text.matchAll(
-    /\b(\d+)\s+(references?|diagnostics?|matches?|sources?|files?|items?|results?|agents?|jobs?|tasks?)\b/gi,
-  );
-  let best: { rank: number; text: string } | undefined;
-  for (const count of counts) {
-    if (!count[1] || !count[2]) continue;
-    const noun = count[2].toLowerCase();
-    const singular = noun.endsWith("s") ? noun.slice(0, -1) : noun;
-    const rank = ACTIVITY_OUTCOME_RANK[singular as keyof typeof ACTIVITY_OUTCOME_RANK] ?? 99;
-    if (!best || rank < best.rank) best = { rank, text: `${count[1]} ${noun}` };
-  }
-  return best?.text ?? "";
 }
 
 function activityDetailsOf(message: unknown): ParsedActivityDetails | undefined {
@@ -1034,22 +982,14 @@ function paintActivityStatus(theme: unknown, status: ActivityStatusPaint): Conta
   return c;
 }
 
-// Activity rows supplement native/dedicated cards only. Generic wrapped tools
-// already render the same status header above their grouped child rows.
+// Activity records are live-only. Generic tools settle into grouped rows;
+// dedicated/native tools and Todo own their persistent result surfaces.
+// Older sessions may contain settled records from previous plugin versions;
+// render them empty so transcript rebuilds follow the current one-surface rule.
 function activityRenderer(message: unknown, _options: unknown, theme: unknown): Container {
   if (!runtimeIsActive()) return new Container();
   const details = activityDetailsOf(message);
-  if (!details) return new Container();
-  if (details.kind === ACTIVITY_RECORD_KIND.settled) {
-    return paintActivityStatus(theme, {
-      label: () => details.label,
-      context: () => details.context,
-      outcome: () => details.outcome,
-      live: () => false,
-      error: () => details.error,
-      fadeKey: `act:${details.runId}`,
-    });
-  }
+  if (!details || details.kind === ACTIVITY_RECORD_KIND.settled) return new Container();
   if (!details.runId || details.runId !== activityRunId || !activityLive) return new Container();
   const runId = details.runId;
   return paintActivityStatus(theme, {
@@ -1158,6 +1098,10 @@ export default function (pi: ExtensionAPI) {
     theme: () => readGroupTheme,
     active: runtimeOwner.owns,
   });
+  const disposeAssistantCommentarySkin = installAssistantCommentarySkin(Container, {
+    enabled: () => runtimeOwner.owns() && enabled,
+    active: runtimeOwner.owns,
+  });
   // Host warning/error panes (todo reminder, TTSR, showWarning/showError,
   // pinned ErrorBanner) -> one ⚠/✗ line. Pump slot is filled after
   // ensureSpinTimer exists; addChild-time skinning kicks it so fade/breathe
@@ -1167,6 +1111,7 @@ export default function (pi: ExtensionAPI) {
     enabled: () => runtimeOwner.owns() && nativeToolCardSkinActive(),
     theme: () => readGroupTheme,
     pump: () => kickAlertPump(),
+    parentLabel: (toolCallId, fingerprint, result) => parentLabelForToolCall(toolCallId, fingerprint, result),
     active: runtimeOwner.owns,
   });
   const disposeWarningSkin = installWarningSkin(Container, {
@@ -1240,11 +1185,7 @@ export default function (pi: ExtensionAPI) {
   const resetActivityPresentation = (): void => {
     activityLiveSent = false;
     activityContext = "";
-    activityOutcome = "";
-    activityStatusFp = "";
-    activityResultSeen = false;
     activitySettledSent = false;
-    activityError = false;
   };
 
   const maybeSendSettledActivity = (force = false): void => {
@@ -1253,21 +1194,9 @@ export default function (pi: ExtensionAPI) {
       activitySettledSent ||
       activityRunId === null ||
       (activityLive && !force) ||
-      liveRuns.size > 0 ||
-      (!activityResultSeen && !force)
+      liveRuns.size > 0
     )
       return;
-    const total = Math.max(0, Math.floor((Date.now() - Math.max(1, activityStartedAt)) / 1000));
-    sendActivityRecord({
-      kind: ACTIVITY_RECORD_KIND.settled,
-      label: activityLabel,
-      context: activityContext,
-      outcome: activityOutcome,
-      error: activityError,
-      startedAt: activityStartedAt,
-      total,
-      runId: activityRunId,
-    });
     activitySettledSent = true;
     markSettling(`act:${activityRunId}`);
   };
@@ -1276,26 +1205,39 @@ export default function (pi: ExtensionAPI) {
     spinStartedAt = 0;
     activityStartedAt = 0;
     activityLabel = "";
+    activityLabelSource = ACTIVITY_LABEL_SOURCE.generated;
     activityLive = false;
     activityRunId = null;
     activityLeadFp = "";
     resetActivityPresentation();
   };
-  const applyIntent = (text: string, startedAt: number): void => {
+  const applyIntent = (text: string, startedAt: number, source: ActivityLabelSource): void => {
     if (!text) return;
+    const sourceRank = ACTIVITY_LABEL_RANK[source];
+    const currentRank = ACTIVITY_LABEL_RANK[activityLabelSource];
     if (activitySettledSent) {
       activityRunId = null;
       activityLabel = "";
+      activityLabelSource = ACTIVITY_LABEL_SOURCE.generated;
       resetActivityPresentation();
+    }
+    if (activityRunId !== null && activityLive) {
+      if (sourceRank < currentRank) return;
+      activityLabel = text;
+      activityLabelSource = source;
+      return;
     }
     if (activityRunId !== null && text === activityLabel) {
       activityLive = true;
+      if (sourceRank > currentRank) activityLabelSource = source;
       return;
     }
     // Several grouped tools share one status parent. While any child is
-    // live, refresh the parent label without creating another transcript row.
+    // live, refresh the parent only from an equal or stronger source.
     if (activityRunId !== null && liveRuns.size > 0) {
+      if (sourceRank < currentRank) return;
       activityLabel = text;
+      activityLabelSource = source;
       activityLive = true;
       return;
     }
@@ -1305,6 +1247,7 @@ export default function (pi: ExtensionAPI) {
       resetActivityPresentation();
     }
     activityLabel = text;
+    activityLabelSource = source;
     activityRunId = `${activityProcessTag}-${activityRunSeq++}`;
     activityStartedAt = startedAt;
     textFades.set(`act:${activityRunId}`, Date.now());
@@ -1478,7 +1421,8 @@ export default function (pi: ExtensionAPI) {
         },
         renderCall(args, options, theme) {
           const fingerprint = toolFingerprint(name, args);
-          if (renderer) return renderer.renderCall(theme, args, options, fingerprint);
+          if (renderer)
+            return renderer.renderCall(theme, args, options, fingerprint, () => parentLabelForCard(fingerprint));
           return renderToolVisual(theme, fingerprint, {
             body: toolActionLabel(name, args),
             live: cardIsPartial(options),
@@ -1487,7 +1431,10 @@ export default function (pi: ExtensionAPI) {
         },
         renderResult(result, options, theme, args) {
           const fingerprint = toolFingerprint(name, args);
-          if (renderer) return renderer.renderResult(theme, args, result, options, fingerprint);
+          if (renderer)
+            return renderer.renderResult(theme, args, result, options, fingerprint, () =>
+              parentLabelForCard(fingerprint, result),
+            );
           return renderToolVisual(
             theme,
             fingerprint,
@@ -1501,7 +1448,7 @@ export default function (pi: ExtensionAPI) {
           );
         },
       });
-    wrapApplied.add(name);
+      wrapApplied.add(name);
     } catch {
       // Already registered or host rejected the wrap.
     }
@@ -1593,6 +1540,7 @@ export default function (pi: ExtensionAPI) {
     disposeTodoChrome();
     disposeWarningSkin();
     disposeNativeToolCardSkin();
+    disposeAssistantCommentarySkin();
     disposeReadGroupSkin();
     spinUi = undefined;
     spinCtx = undefined;
@@ -1615,7 +1563,8 @@ export default function (pi: ExtensionAPI) {
     bindThoughtUi(ctx);
     bindTodosUi(ctx);
     bindTodoSource(ctx);
-    captureTodoSessionBaseline();
+    todoSessionVisible = true;
+    syncTodoHeaderFromSession(ctx);
     try {
       const maybeTheme = (ctx as unknown as { ui?: { theme?: unknown } })?.ui?.theme;
       if (maybeTheme !== undefined) readGroupTheme = maybeTheme;
@@ -1631,24 +1580,22 @@ export default function (pi: ExtensionAPI) {
       // notify is best-effort chrome.
     }
   });
-  pi.on("session_switch", async (event, ctx) => {
+  pi.on("session_switch", async (_event, ctx) => {
     if (!runtimeOwner.owns()) return;
     agentRunning = false;
     resetTodoSessionState();
     bindTodosUi(ctx);
     bindTodoSource(ctx);
-    if (event.reason === "new") {
-      captureTodoSessionBaseline();
-    } else {
-      todoSessionVisible = true;
-      syncTodoHeaderFromSession(ctx);
-    }
+    todoSessionVisible = true;
+    syncTodoHeaderFromSession(ctx);
     stopSpinTimerIfIdle(ctx);
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!runtimeOwner.owns()) return;
     agentRunning = true;
+    todoSessionVisible = true;
+    syncTodoHeaderFromSession(ctx);
     ensureSpinTimer(ctx);
     if (todoHeaderState) refreshTodosWidget();
     reloadPluginConfig();
@@ -1681,12 +1628,6 @@ export default function (pi: ExtensionAPI) {
         }
       }
       const resultFp = eventFingerprint(event);
-      if (activityLiveSent && resultFp === activityStatusFp) {
-        activityResultSeen = true;
-        activityError = isToolError(event);
-        activityOutcome = activityOutcomeOf(event);
-        maybeSendSettledActivity();
-      }
       const frozen = frozenGroupKeys(event.toolName);
       const withFrozen = (details: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
         if (Object.keys(frozen).length === 0) return details;
@@ -1744,10 +1685,16 @@ export default function (pi: ExtensionAPI) {
         ? (event as { toolName: string }).toolName
         : "tool";
     const args = (event as { input?: unknown; args?: unknown }).input ?? (event as { args?: unknown }).args;
-    const intent = intentFromEvent(event) ?? (activityLabel || summarizeEvent(event));
-    applyIntent(intent, startedAt);
+    const eventIntent = intentFromEvent(event);
+    const intent = eventIntent ?? (activityLabel || summarizeEvent(event));
+    const source = eventIntent
+      ? ACTIVITY_LABEL_SOURCE.tool
+      : activityRunId !== null
+        ? activityLabelSource
+        : ACTIVITY_LABEL_SOURCE.generated;
+    applyIntent(intent, startedAt, source);
     liveRuns.set(event.toolCallId, {
-      label: intent,
+      label: activityLabel || intent,
       startedAt,
       fp,
     });
@@ -1765,9 +1712,8 @@ export default function (pi: ExtensionAPI) {
         right: "",
         startedAt,
       });
-    } else if (!activityLiveSent && activityRunId !== null) {
-      activityContext = activityToolContext(toolName, args);
-      activityStatusFp = fp;
+    } else if (!toolOwnsParentCard(toolName) && !activityLiveSent && activityRunId !== null) {
+      activityContext = "";
       activityLiveSent = true;
       sendActivityRecord({
         kind: ACTIVITY_RECORD_KIND.live,
@@ -1809,16 +1755,24 @@ export default function (pi: ExtensionAPI) {
     bindThoughtUi(ctx);
     const prevRun = activityRunId;
     const prevLabel = activityLabel;
-    const next = intentFromAssistantMessage(event.message);
+    const streamType = (event.assistantMessageEvent as { type?: unknown })?.type;
+    const commentary =
+      streamType === "toolcall_start" || streamType === "toolcall_end"
+        ? commentaryStatusFromMessage(event.message)
+        : undefined;
+    const toolIntent = intentFromAssistantMessage(event.message);
+    const next = commentary ?? toolIntent;
     if (next) {
-      applyIntent(next, Date.now());
+      applyIntent(next, Date.now(), commentary ? ACTIVITY_LABEL_SOURCE.commentary : ACTIVITY_LABEL_SOURCE.tool);
       ensureSpinTimer(ctx);
     }
     const thinking = extractThinking(event.message);
     if (thinking.text) thoughtText = thinking.text;
     if (thinking.live) {
       thoughtLive = true;
-      if (!activityRunId) applyIntent(activityLabel || "Working", Date.now());
+      if (!activityRunId) {
+        applyIntent("Working", Date.now(), ACTIVITY_LABEL_SOURCE.generated);
+      }
       syncThought();
       setThoughtWidget(liveRuns.size === 0);
       ensureSpinTimer(ctx);

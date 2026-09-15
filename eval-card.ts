@@ -10,6 +10,7 @@
 // collapsed, 60 expanded).
 // Full text sits behind Ctrl+O.
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
+import { resolveParentCardLabel, type ParentCardLabel } from "./card-primitives.ts";
 import { markFlush } from "./loaders.ts";
 import { durationSuffix, isToolError, toolResultText } from "./results.ts";
 import {
@@ -48,13 +49,7 @@ const SCAN_STEP_MS = 17;
 // the whole line end to end — label included, index 0 to the last dash —
 // ping-pong (position read at render time so every repaint advances it);
 // settled rows keep the static dim rule.
-function paintRule(
-  theme: unknown,
-  label: string,
-  fill: number,
-  scanning: boolean,
-  op: number,
-): string {
+function paintRule(theme: unknown, label: string, fill: number, scanning: boolean, op: number): string {
   const full = `${label}${"─".repeat(fill)}`;
   const chars = Array.from(full);
   const width = Math.min(SCAN_WIDTH, Math.max(1, chars.length));
@@ -98,8 +93,7 @@ function evalResultText(result: unknown, header: string): string {
     typeof result === "object" && result !== null
       ? ((result as { details?: unknown }).details as Record<string, unknown> | undefined)
       : undefined;
-  const stashed =
-    details !== undefined && typeof details === "object" ? details["minimalFullText"] : undefined;
+  const stashed = details !== undefined && typeof details === "object" ? details["minimalFullText"] : undefined;
   if (typeof stashed === "string" && stashed) return stashed;
   const raw = toolResultText(result);
   const nl = raw.indexOf("\n");
@@ -115,13 +109,12 @@ export function renderEvalCard(
   options: unknown,
   live: boolean,
   fp?: string,
+  parentLabel?: ParentCardLabel,
 ): Container {
   try {
     const header = evalLabelText(args);
     const partial =
-      !live &&
-      result !== undefined &&
-      (options as { isPartial?: boolean } | null | undefined)?.isPartial === true;
+      !live && result !== undefined && (options as { isPartial?: boolean } | null | undefined)?.isPartial === true;
     const settled = !live && result !== undefined && !partial;
     const running = live || partial;
     const error = settled && isToolError(result, options);
@@ -147,7 +140,11 @@ export function renderEvalCard(
       // and drops background fills (no boxes).
       const rawText = evalResultText(result, header);
       if (error) {
-        const errSrc = stripSgr(rawText).split("\n").map((l) => l.trim()).find((l) => l) ?? "";
+        const errSrc =
+          stripSgr(rawText)
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l) ?? "";
         for (const line of errSrc.split("\n").slice(0, 10)) {
           if (line.trim()) errorLines.push(line);
         }
@@ -173,17 +170,23 @@ export function renderEvalCard(
           // streaming repaints): falls back to our own 120ms pump otherwise.
           const coreFrame = (options as { spinnerFrame?: unknown })?.spinnerFrame;
           if (typeof coreFrame === "number" && Number.isFinite(coreFrame)) setSpinFrame(coreFrame);
-          const lines = [
-            formatRowLine(theme, width, {
-              body: header,
-              live: running,
-              error,
-              // Settled outcome is a ● dot: green on success, red on error
-              // via the shared markToken (success/error); live keeps spinner.
-              mark: settled ? "●" : undefined,
-              right: running ? elapsedSuffix(since) : settled ? durationSuffix(result) : "",
-            }),
-          ];
+          const parent = resolveParentCardLabel(parentLabel);
+          const right = running ? elapsedSuffix(since) : settled ? durationSuffix(result) : "";
+          const lines = parent
+            ? [
+                formatRowLine(theme, width, { body: parent, live: running, error }),
+                formatRowLine(theme, width, { body: header, tree: "last", error, right }),
+              ]
+            : [
+                formatRowLine(theme, width, {
+                  body: header,
+                  live: running,
+                  error,
+                  // Settled outcome is a ● dot: green on success, red on error.
+                  mark: settled ? "●" : undefined,
+                  right,
+                }),
+              ];
           const w = contentWidth(width);
           const op = rowOpacity(false, undefined);
           for (const line of input) {

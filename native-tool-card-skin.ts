@@ -2,12 +2,7 @@
 
 import { compactCardText } from "./card-primitives.ts";
 import { isHubCardData, renderHubCardLines } from "./hub-card.ts";
-import {
-  fingerprintForToolCall,
-  identityForToolCall,
-  toolFingerprint,
-  toolFpBase,
-} from "./results.ts";
+import { fingerprintForToolCall, identityForToolCall, toolFingerprint, toolFpBase } from "./results.ts";
 import { isTaskCardData, renderTaskCardLines } from "./task-card.ts";
 
 export const NATIVE_TOOL_CARD_KIND = {
@@ -15,8 +10,7 @@ export const NATIVE_TOOL_CARD_KIND = {
   task: "task",
 } as const;
 
-export type NativeToolCardKind =
-  (typeof NATIVE_TOOL_CARD_KIND)[keyof typeof NATIVE_TOOL_CARD_KIND];
+export type NativeToolCardKind = (typeof NATIVE_TOOL_CARD_KIND)[keyof typeof NATIVE_TOOL_CARD_KIND];
 
 interface CapturedToolExecutionState {
   args: unknown;
@@ -33,16 +27,12 @@ export interface NativeToolCardSkinDeps {
   theme: () => unknown;
   pump?: () => void;
   active?: () => boolean;
+  parentLabel?: (toolCallId: string, fingerprint: string, result: unknown) => string;
 }
 
-function methodOf(
-  record: Record<string, unknown>,
-  name: string,
-): ((...args: unknown[]) => unknown) | undefined {
+function methodOf(record: Record<string, unknown>, name: string): ((...args: unknown[]) => unknown) | undefined {
   const value = record[name];
-  return typeof value === "function"
-    ? (value as (...args: unknown[]) => unknown)
-    : undefined;
+  return typeof value === "function" ? (value as (...args: unknown[]) => unknown) : undefined;
 }
 
 /** Strictly distinguish a native ToolExecutionComponent from read-group and unrelated containers. */
@@ -61,10 +51,7 @@ export function isToolExecutionComponentLike(child: unknown): child is object {
   );
 }
 
-function nativeRendererMatches(
-  native: unknown,
-  label: "Task" | "Hub",
-): boolean {
+function nativeRendererMatches(native: unknown, label: "Task" | "Hub"): boolean {
   if (!Array.isArray(native)) return false;
   const first = native
     .slice(0, 3)
@@ -80,13 +67,8 @@ interface SelectedNativeCard {
   args: unknown;
 }
 
-function selectedCard(
-  state: CapturedToolExecutionState,
-  native: unknown,
-): SelectedNativeCard | undefined {
-  const identity = state.toolCallId
-    ? identityForToolCall(state.toolCallId)
-    : undefined;
+function selectedCard(state: CapturedToolExecutionState, native: unknown): SelectedNativeCard | undefined {
+  const identity = state.toolCallId ? identityForToolCall(state.toolCallId) : undefined;
   if (identity) {
     const args = state.args ?? identity.args;
     if (identity.toolName === "task" && isTaskCardData(args, state.result)) {
@@ -98,12 +80,8 @@ function selectedCard(
     return undefined;
   }
   if (state.result === undefined) return undefined;
-  const task =
-    isTaskCardData(undefined, state.result) &&
-    nativeRendererMatches(native, "Task");
-  const hub =
-    isHubCardData(undefined, state.result) &&
-    nativeRendererMatches(native, "Hub");
+  const task = isTaskCardData(undefined, state.result) && nativeRendererMatches(native, "Task");
+  const hub = isHubCardData(undefined, state.result) && nativeRendererMatches(native, "Hub");
   if (task === hub) return undefined;
   return {
     kind: task ? NATIVE_TOOL_CARD_KIND.task : NATIVE_TOOL_CARD_KIND.hub,
@@ -111,19 +89,12 @@ function selectedCard(
   };
 }
 
-function captureCallIdentity(
-  state: CapturedToolExecutionState,
-  value: unknown,
-): void {
+function captureCallIdentity(state: CapturedToolExecutionState, value: unknown): void {
   if (typeof value !== "string" || value.length === 0) return;
   state.toolCallId = value;
 }
 
-function skinFingerprint(
-  kind: NativeToolCardKind,
-  args: unknown,
-  state: CapturedToolExecutionState,
-): string {
+function skinFingerprint(kind: NativeToolCardKind, args: unknown, state: CapturedToolExecutionState): string {
   if (state.toolCallId) {
     const known = fingerprintForToolCall(state.toolCallId);
     if (known) return known;
@@ -143,12 +114,8 @@ function requestPump(deps: NativeToolCardSkinDeps): void {
 
 const pumpingCards = new Set<CapturedToolExecutionState>();
 
-function syncPartialPump(
-  state: CapturedToolExecutionState,
-  deps: NativeToolCardSkinDeps,
-): void {
-  if (state.kind && state.partial && !state.sealed && deps.enabled(state.kind))
-    pumpingCards.add(state);
+function syncPartialPump(state: CapturedToolExecutionState, deps: NativeToolCardSkinDeps): void {
+  if (state.kind && state.partial && !state.sealed && deps.enabled(state.kind)) pumpingCards.add(state);
   else pumpingCards.delete(state);
 }
 
@@ -172,15 +139,7 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
   const setExecutionStarted = methodOf(component, "setExecutionStarted");
   const stopAnimation = methodOf(component, "stopAnimation");
   const seal = methodOf(component, "seal");
-  if (
-    !render ||
-    !updateArgs ||
-    !updateResult ||
-    !setExecutionStarted ||
-    !setExpanded ||
-    !seal
-  )
-    return;
+  if (!render || !updateArgs || !updateResult || !setExecutionStarted || !setExpanded || !seal) return;
 
   const state: CapturedToolExecutionState = {
     args: undefined,
@@ -260,34 +219,16 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
         state.kind = selected?.kind;
         syncPartialPump(state, deps);
         if (!selected || !deps.enabled(selected.kind)) return native;
-        if (state.sealed && (state.result === undefined || state.partial))
-          return native;
+        if (state.sealed && (state.result === undefined || state.partial)) return native;
         const width = args[0];
         if (typeof width !== "number") return native;
         const options = { expanded: state.expanded, isPartial: state.partial };
-        const fingerprint = skinFingerprint(
-          selected.kind,
-          selected.args,
-          state,
-        );
+        const fingerprint = skinFingerprint(selected.kind, selected.args, state);
+        const parentLabel = deps.parentLabel?.(state.toolCallId, fingerprint, state.result);
         const painted =
           selected.kind === NATIVE_TOOL_CARD_KIND.task
-            ? renderTaskCardLines(
-                deps.theme(),
-                width,
-                selected.args,
-                state.result,
-                options,
-                fingerprint,
-              )
-            : renderHubCardLines(
-                deps.theme(),
-                width,
-                selected.args,
-                state.result,
-                options,
-                fingerprint,
-              );
+            ? renderTaskCardLines(deps.theme(), width, selected.args, state.result, options, fingerprint, parentLabel)
+            : renderHubCardLines(deps.theme(), width, selected.args, state.result, options, fingerprint, parentLabel);
         return painted ?? native;
       } catch {
         return native;

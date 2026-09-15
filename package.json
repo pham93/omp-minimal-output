@@ -148,6 +148,7 @@
     "task-card.ts",
     "hub-card.ts",
     "native-tool-card-skin.ts",
+    "assistant-commentary-skin.ts",
     "card-gallery.ts",
     "read-group.ts",
     "todos-header.ts",

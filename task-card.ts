@@ -2,13 +2,14 @@
 import { Container } from "@oh-my-pi/pi-tui";
 import {
   cardDetailLine,
-  cardHeaderLine,
+  parentCardHeaderLines,
   cardLifecycle,
   cardTitleLine,
   compactCardText,
   conciseErrorText,
   resultDetails,
 } from "./card-primitives.ts";
+import type { ParentCardLabel } from "./card-primitives.ts";
 import { getPluginConfig } from "./config.ts";
 import { markFlush } from "./loaders.ts";
 
@@ -44,11 +45,7 @@ function textOf(value: unknown, max: number): string {
   return compactCardText(value, max);
 }
 
-function recordText(
-  record: Record<string, unknown> | undefined,
-  keys: readonly string[],
-  max: number,
-): string {
+function recordText(record: Record<string, unknown> | undefined, keys: readonly string[], max: number): string {
   if (!record) return "";
   for (const key of keys) {
     const text = textOf(record[key], max);
@@ -75,8 +72,7 @@ function taskArgMatches(args: unknown): boolean {
   const hasTask = textOf(fields["task"], 1) !== "";
   const tasks = fields["tasks"];
   const hasTasks = Array.isArray(tasks) && tasks.length > 0;
-  const hasRouting =
-    textOf(fields["agent"], 1) !== "" || textOf(fields["context"], 1) !== "";
+  const hasRouting = textOf(fields["agent"], 1) !== "" || textOf(fields["context"], 1) !== "";
   return (hasTask || hasTasks) && hasRouting;
 }
 
@@ -84,8 +80,7 @@ function taskDetailsMatch(result: unknown): boolean {
   const details = resultDetails(result);
   if (!details || !Array.isArray(details["results"])) return false;
   return (
-    (typeof details["totalDurationMs"] === "number" &&
-      Number.isFinite(details["totalDurationMs"])) ||
+    (typeof details["totalDurationMs"] === "number" && Number.isFinite(details["totalDurationMs"])) ||
     textOf(details["projectAgentsDir"], 1) !== "" ||
     Array.isArray(details["progress"]) ||
     recordOf(details["progress"]) !== undefined
@@ -108,12 +103,7 @@ function failureOf(fields: Record<string, unknown> | undefined): boolean {
     return true;
   }
   const exitCode = fields["exitCode"];
-  if (
-    typeof exitCode === "number" &&
-    Number.isFinite(exitCode) &&
-    exitCode !== 0
-  )
-    return true;
+  if (typeof exitCode === "number" && Number.isFinite(exitCode) && exitCode !== 0) return true;
   if (textOf(fields["error"], 1) !== "") return true;
   for (const key of ["status", "state", "outcome"] as const) {
     const status = textOf(fields[key], 64).toLowerCase();
@@ -136,21 +126,10 @@ function agentOf(fields: Record<string, unknown>): string {
   return recordText(agent, ["name", "id", "agent"], 80) || "agent";
 }
 
-function artifactOf(
-  fields: Record<string, unknown>,
-  nested: Record<string, unknown> | undefined,
-): string {
-  const direct = recordText(
-    fields,
-    ["artifact", "artifactPath", "outputPath", "patchPath", "path"],
-    180,
-  );
+function artifactOf(fields: Record<string, unknown>, nested: Record<string, unknown> | undefined): string {
+  const direct = recordText(fields, ["artifact", "artifactPath", "outputPath", "patchPath", "path"], 180);
   if (direct) return direct;
-  const nestedDirect = recordText(
-    nested,
-    ["artifact", "artifactPath", "outputPath", "patchPath", "path"],
-    180,
-  );
+  const nestedDirect = recordText(nested, ["artifact", "artifactPath", "outputPath", "patchPath", "path"], 180);
   if (nestedDirect) return nestedDirect;
   for (const value of [fields["artifacts"], nested?.["artifacts"]]) {
     if (!Array.isArray(value)) continue;
@@ -168,8 +147,7 @@ function taskRowOf(value: unknown): TaskAgentRow | undefined {
   const nested = recordOf(fields["result"]);
   const failed = failureOf(fields) || failureOf(nested);
   const task =
-    recordText(fields, ["task", "prompt", "description"], 180) ||
-    recordText(nested, ["task", "prompt"], 180);
+    recordText(fields, ["task", "prompt", "description"], 180) || recordText(nested, ["task", "prompt"], 180);
   const output =
     recordText(fields, ["output", "summary", "message"], 240) ||
     contentText(fields["content"], 240) ||
@@ -199,36 +177,21 @@ function requestedAgents(args: unknown): number {
 
 function requestedAgentName(args: unknown): string {
   const fields = recordOf(args);
-  return (
-    recordText(fields, ["name", "agent"], 80) ||
-    recordText(recordOf(fields?.["agent"]), ["name", "id"], 80)
-  );
+  return recordText(fields, ["name", "agent"], 80) || recordText(recordOf(fields?.["agent"]), ["name", "id"], 80);
 }
 
 function durationOf(details: Record<string, unknown> | undefined): string {
   const duration = details?.["totalDurationMs"];
-  if (
-    typeof duration !== "number" ||
-    !Number.isFinite(duration) ||
-    duration < 0
-  )
-    return "";
+  if (typeof duration !== "number" || !Number.isFinite(duration) || duration < 0) return "";
   return `${(duration / 1000).toFixed(duration < 10_000 ? 1 : 0)}s`;
 }
 
-function taskData(
-  args: unknown,
-  result: unknown,
-  rowBudget: number,
-): TaskCardData | undefined {
+function taskData(args: unknown, result: unknown, rowBudget: number): TaskCardData | undefined {
   if (!isTaskCardData(args, result)) return undefined;
   const details = resultDetails(result);
-  const rawResults =
-    details && Array.isArray(details["results"]) ? details["results"] : [];
+  const rawResults = details && Array.isArray(details["results"]) ? details["results"] : [];
   const progress = details?.["progress"];
-  const rawProgress = Array.isArray(progress)
-    ? progress
-    : Object.values(recordOf(progress) ?? {});
+  const rawProgress = Array.isArray(progress) ? progress : Object.values(recordOf(progress) ?? {});
   const rawRows = rawResults.length > 0 ? rawResults : rawProgress;
   const rows: TaskAgentRow[] = [];
   let completed = 0;
@@ -242,8 +205,7 @@ function taskData(
     const rowFailed = failureOf(fields) || failureOf(nested);
     const status = statusOf(fields, rowFailed);
     if (rowFailed) failed += 1;
-    else if (/^(?:completed|done|success|succeeded)$/i.test(status))
-      completed += 1;
+    else if (/^(?:completed|done|success|succeeded)$/i.test(status)) completed += 1;
     if (rows.length < rowBudget) {
       const row = taskRowOf(value);
       if (row) rows.push(row);
@@ -263,10 +225,7 @@ function taskData(
 }
 
 function taskHeader(data: TaskCardData, running: boolean): string {
-  const identity =
-    data.agents === 1
-      ? `agent ${data.singleAgent || "task"}`
-      : `${data.agents} agents`;
+  const identity = data.agents === 1 ? `agent ${data.singleAgent || "task"}` : `${data.agents} agents`;
   if (running) {
     return data.completed > 0
       ? `Task ${identity} — ${data.completed} completed · running`
@@ -288,20 +247,20 @@ export function renderTaskCardLines(
   result: unknown,
   options: unknown,
   fingerprint?: string,
+  parentLabel?: ParentCardLabel,
 ): readonly string[] | undefined {
   const maxAgents = getPluginConfig().taskMaxAgents;
   const data = taskData(args, result, maxAgents);
   if (!data) return undefined;
   const lifecycle = cardLifecycle(result, options, { error: data.failure });
-  const lines = [
-    cardHeaderLine(theme, width, {
-      body: taskHeader(data, lifecycle.running),
-      lifecycle,
-      right: data.duration,
-      fingerprint,
-      settledMark: "●",
-    }),
-  ];
+  const lines = parentCardHeaderLines(theme, width, {
+    body: taskHeader(data, lifecycle.running),
+    lifecycle,
+    right: data.duration,
+    fingerprint,
+    settledMark: "●",
+    parentLabel,
+  });
   if (!lifecycle.expanded) return lines;
   if (data.rows.length === 0) {
     if (lifecycle.error) {
@@ -321,26 +280,15 @@ export function renderTaskCardLines(
   }
   const visible = data.rows.slice(0, maxAgents);
   for (const row of visible) {
-    lines.push(
-      cardTitleLine(theme, width, `${row.agent} — ${row.status}`, row.failed),
-    );
+    lines.push(cardTitleLine(theme, width, `${row.agent} — ${row.status}`, row.failed));
     if (row.task) lines.push(cardDetailLine(theme, width, `task: ${row.task}`));
-    if (row.output)
-      lines.push(cardDetailLine(theme, width, `output: ${row.output}`));
-    if (row.error)
-      lines.push(cardDetailLine(theme, width, `error: ${row.error}`));
-    if (row.artifact)
-      lines.push(cardDetailLine(theme, width, `artifact: ${row.artifact}`));
+    if (row.output) lines.push(cardDetailLine(theme, width, `output: ${row.output}`));
+    if (row.error) lines.push(cardDetailLine(theme, width, `error: ${row.error}`));
+    if (row.artifact) lines.push(cardDetailLine(theme, width, `artifact: ${row.artifact}`));
   }
   const hidden = Math.max(0, data.rowCount - visible.length);
   if (hidden > 0) {
-    lines.push(
-      cardDetailLine(
-        theme,
-        width,
-        `… ${hidden} more ${hidden === 1 ? "agent" : "agents"}`,
-      ),
-    );
+    lines.push(cardDetailLine(theme, width, `… ${hidden} more ${hidden === 1 ? "agent" : "agents"}`));
   }
   return lines;
 }
@@ -351,12 +299,12 @@ export function renderTaskCard(
   result: unknown,
   options: unknown,
   fingerprint?: string,
+  parentLabel?: ParentCardLabel,
 ): Container {
   const card = new Container();
   card.addChild({
     render: (width: number): readonly string[] =>
-      renderTaskCardLines(theme, width, args, result, options, fingerprint) ??
-      [],
+      renderTaskCardLines(theme, width, args, result, options, fingerprint, parentLabel) ?? [],
   });
   markFlush?.(card);
   return card;

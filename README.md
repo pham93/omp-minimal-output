@@ -10,11 +10,11 @@ Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
 
 ## Card settings
 
-| Card | Native fallback | Expanded limit |
-| --- | --- | --- |
+| Card       | Native fallback                     | Expanded limit                                     |
+| ---------- | ----------------------------------- | -------------------------------------------------- |
 | Web search | `nativeWebSearch` (default `false`) | `webSearchMaxResults` (default `5`, range `1..10`) |
-| Task | `nativeTask` (default `false`) | `taskMaxAgents` (default `4`, range `1..8`) |
-| Hub | `nativeHub` (default `false`) | `hubMaxItems` (default `5`, range `1..10`) |
+| Task       | `nativeTask` (default `false`)      | `taskMaxAgents` (default `4`, range `1..8`)        |
+| Hub        | `nativeHub` (default `false`)       | `hubMaxItems` (default `5`, range `1..10`)         |
 
 Each fallback is independent. `nativeTask` and `nativeHub` restore the host renderer and leave result text untouched; the plugin never shadow-registers either tool.
 
@@ -27,13 +27,18 @@ flowchart LR
     exec --> tend["tool_execution_end"]
     tend --> tr["tool_result → collapseToolText"]
     tr --> rr["shadow renderResult\nconfigured mark; web search ●"]
-    intent["literal tool arg i"] -.-> status["AI status header\nindented tool-context rail"]
+    commentary["provider commentary phase"] -.-> status["single AI status parent\ntool card/group is child"]
+    intent["literal tool arg i"] -.-> status
     status -.-> settle["tool result\nsettled outcome"]
 ```
 
-Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. `web_search` shows source count/provider and expands to bold titles with dim URLs; `edit` renders a compact gutter diff and `eval` replaces the boxed output panel.
+Provider-tagged commentary (`textSignature.phase = "commentary"`) wins over literal tool argument `i`, which wins over generated labels. `assistant-commentary-skin.ts` blanks the original native display block because OMP splits tool calls into separate timeline components; the label is projected into the owning tool surface while agent context and persisted message content remain verbatim.
 
-The literal tool argument `i` is never discarded. Generic wrapped tools keep it as the existing grouped parent above tool rows. Native and dedicated-card tools receive one display-only `minimal-activity` pair: animated status plus dim `╰─` context rail while live, then `◆ status — outcome` plus the same rail when settled. Retired live records render empty, so settled rows never duplicate them.
+The sticky Todo widget hydrates collapsed on session start only when the current session already has a nonempty todo list. Empty new sessions keep the widget absent until a todo tool result creates work.
+
+Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. `web_search` shows source count/provider and expands to bold titles with dim URLs; expanded `edit` cards use project-relative file branches, per-file stats, continuation rails, explicit diff markers, and hunk separators; `eval` replaces the boxed output panel.
+
+The literal tool argument `i` is never discarded. Generic wrapped tools (`bash`, `read`, `grep`, `glob`, `write`) keep their grouped status parent and tool children. Dedicated/native cards (`edit`, `eval`, `web_search`, Task, Hub) render the AI status as their single parent and indent the named card as its indicator-free `╰─` child. Todo settles into the sticky widget or native fallback. Live `minimal-activity` records remain only for surfaces without an owning group/card; the plugin emits no second settled activity row.
 
 The sticky Todo widget is the single Todo surface after a successful widget mount. Its native transcript card is suppressed only while that widget is active; headless, disabled, or failed widget mounts retain the transcript card as the safe fallback.
 
@@ -90,7 +95,7 @@ Extension generations use one process-global runtime lease. A hot reload dispose
 
 ## Files
 
-- `index.ts` — extension entry: 8 shadows plus display-only Task/Hub, read-group, warning, todo skins; lifecycle handlers; `/minimal-on|off|status`. `runtime-owner.ts` owns hot-reload cleanup across module generations.
+- `index.ts` — extension entry: 8 shadows plus display-only commentary, Task/Hub, read-group, warning, and todo skins; lifecycle handlers; `/minimal-on|off|status`. `assistant-commentary-skin.ts` consumes provider phase metadata without adding transcript records; `runtime-owner.ts` owns hot-reload cleanup across module generations.
 - `card-primitives.ts` — shared lifecycle, text sanitation, header, detail, error, and limit mechanics. `task-card.ts` and `hub-card.ts` own tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
 - `todos-header.ts` / `todo-hud.ts` — sticky todo widget and native TODO HUD handling. `edit-card.ts`, `eval-card.ts`, and `web-search-card.ts` — dedicated wrapped-tool cards.
 - `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` — pure output filters.

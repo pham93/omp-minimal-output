@@ -25,12 +25,17 @@ export interface CardLifecycle {
   error: boolean;
 }
 
+export type ParentCardLabel = string | (() => string);
+
 export interface CardHeaderOptions {
   body: string;
   lifecycle: CardLifecycle;
   right?: string;
   fingerprint?: string;
   settledMark?: string;
+}
+export interface ParentCardHeaderOptions extends CardHeaderOptions {
+  parentLabel?: ParentCardLabel;
 }
 
 export interface ConciseErrorOptions {
@@ -151,6 +156,28 @@ export function cardHeaderLine(theme: unknown, width: number, options: CardHeade
     fadeKey: options.fingerprint,
     mark: options.lifecycle.running || settling ? undefined : options.settledMark,
   });
+}
+export function resolveParentCardLabel(parentLabel: ParentCardLabel | undefined): string {
+  const value = typeof parentLabel === "function" ? parentLabel() : parentLabel;
+  return compactCardText(value, 200);
+}
+
+export function parentCardHeaderLines(theme: unknown, width: number, options: ParentCardHeaderOptions): string[] {
+  const parentLabel = resolveParentCardLabel(options.parentLabel);
+  if (!parentLabel) return [cardHeaderLine(theme, width, options)];
+  return [
+    cardHeaderLine(theme, width, {
+      body: parentLabel,
+      lifecycle: options.lifecycle,
+      fingerprint: options.fingerprint,
+    }),
+    formatRowLine(theme, width, {
+      body: options.body,
+      tree: "last",
+      error: options.lifecycle.error,
+      right: options.right,
+    }),
+  ];
 }
 
 export function cardTitleLine(theme: unknown, width: number, title: string, error = false): string {

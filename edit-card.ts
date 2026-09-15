@@ -2,6 +2,8 @@
 // Display-only: execution and delegation stay in index.ts.
 
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
+import { isAbsolute, relative } from "node:path";
+import { resolveParentCardLabel, type ParentCardLabel } from "./card-primitives.ts";
 import { diffStat, parsePipeDiff, parseUnifiedDiff, selectPrettyRows } from "./filters.ts";
 import type { PrettyRow } from "./filters.ts";
 import { markFlush } from "./loaders.ts";
@@ -97,23 +99,49 @@ export function prettyDiffCell(theme: unknown, text: string, token: string, band
 // Colorize the trailing ` — +a/−b` stat in row headers. The stat rides inside
 // formatRowLine's uniform body, so paint it beforehand: inner SGR overrides
 // the outer body color and the shared truncate stays width-correct (ANSI-aware).
+export function paintDiffStat(theme: unknown, added: number, removed: number): string {
+  const addedText = prettyDiffCell(theme, `+${added}`, "toolDiffAdded", false);
+  const removedText = prettyDiffCell(theme, `−${removed}`, "toolDiffRemoved", false);
+  return `${addedText}/${removedText}`;
+}
+
 export function paintHeaderStat(theme: unknown, header: string): string {
   const m = / — \+(\d+)\/−(\d+)$/u.exec(header);
   if (!m) return header;
-  const label = header.slice(0, m.index);
-  const added = prettyDiffCell(theme, `+${m[1]}`, "toolDiffAdded", false);
-  const removed = prettyDiffCell(theme, `−${m[2]}`, "toolDiffRemoved", false);
-  return `${label} — ${added}/${removed}`;
+  return `${header.slice(0, m.index)} — ${paintDiffStat(theme, Number(m[1]), Number(m[2]))}`;
 }
 
+function editDisplayPath(path: string): string {
+  const raw = path.trim();
+  if (!raw) return "file";
+  if (isAbsolute(raw)) {
+    try {
+      const local = relative(process.cwd(), raw);
+      if (local && !local.startsWith("..") && !isAbsolute(local)) return shortPathText(local);
+    } catch {
+      // Unknown host cwd; retain the original path.
+    }
+  }
+  return shortPathText(raw);
+}
+
+function editParentStatus(parentLabel: ParentCardLabel | undefined): string {
+  const label = resolveParentCardLabel(parentLabel)
+    .replace(/^(?:Edit|Create|Delete|Write):\s*/iu, "")
+    .trim();
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : "";
+}
+
+const EDIT_FILE_INDENT = `${TOOL_INDENT}   `;
+
 export interface PrettyEditSection {
-  subhead: string;
+  path: string;
   added: number;
   removed: number;
   rows: PrettyRow[];
   lang: string | undefined;
   // Syntax-highlighted full text, parallel to rows (falls back to raw text
-  // per line when the engine is missing or the language is unknown).
+  // per line when the engine or language is unknown).
   cells: string[];
 }
 
@@ -205,7 +233,6 @@ export function collectPrettyEdit(
         }
       }
     }
-    const statSuffix = stat.added === 0 && stat.removed === 0 ? "" : ` — +${stat.added}/−${stat.removed}`;
     let lang: string | undefined;
     try {
       lang = coreHighlight?.getLanguageFromPath?.(entry.path) ?? undefined;
@@ -213,7 +240,7 @@ export function collectPrettyEdit(
       lang = undefined;
     }
     sections.push({
-      subhead: entry.path ? `${shortPathText(entry.path) || "file"}${statSuffix}` : "",
+      path: editDisplayPath(entry.path),
       added: stat.added,
       removed: stat.removed,
       rows,
@@ -233,7 +260,7 @@ export function collectPrettyEdit(
   const statSuffix = totalAdded === 0 && totalRemoved === 0 ? "" : ` — +${totalAdded}/−${totalRemoved}`;
   const header = multi
     ? `${verb} ${Math.max(entries.length, editPaths.length)} files${statSuffix}`
-    : `${verb} ${shortPathText(rawPath) || "file"}${rawMove ? ` → ${shortPathText(rawMove)}` : ""}${statSuffix}`;
+    : `${verb} ${editDisplayPath(rawPath)}${rawMove ? ` → ${editDisplayPath(rawMove)}` : ""}${statSuffix}`;
   const errorLines: string[] = [];
   if (error) {
     const rawErr = details["displayErrorText"] ?? details["errorText"];
@@ -258,78 +285,97 @@ export function renderPrettyEditCard(
   result: unknown,
   options: unknown,
   live: boolean,
+  parentLabel?: ParentCardLabel,
 ): Container {
   try {
     const data = collectPrettyEdit(args, result, options);
     const error = !live && data.error;
-    const rows: PrettyRow[] = [];
-    const texts: string[] = [];
-    if (!live && !error) {
-      for (const section of data.sections) {
-        if (data.multi && section.subhead) {
-          rows.push({ kind: "|", num: null, text: section.subhead });
-          texts.push(section.subhead);
-        }
-        section.rows.forEach((row, i) => {
-          rows.push(row);
-          texts.push(section.cells[i] ?? row.text);
-        });
-      }
-    }
+    const expanded = (options as { expanded?: boolean } | null | undefined)?.expanded === true;
     const c = new Container();
     c.addChild({
       render: (width: number): readonly string[] => {
         try {
-          const lines = [
-            formatRowLine(theme, width, {
-              body: paintHeaderStat(theme, data.header),
-              live,
-              error,
-              right: live ? "" : data.right,
-            }),
-          ];
-          if (live || error) {
+          const parent = editParentStatus(parentLabel);
+          const lines = parent
+            ? [
+                formatRowLine(theme, width, { body: parent, live, error }),
+                formatRowLine(theme, width, {
+                  body: paintHeaderStat(theme, data.header),
+                  tree: "last",
+                  error,
+                  right: live ? "" : data.right,
+                }),
+              ]
+            : [
+                formatRowLine(theme, width, {
+                  body: paintHeaderStat(theme, data.header),
+                  live,
+                  error,
+                  right: live ? "" : data.right,
+                }),
+              ];
+          const childIndent = parent ? EDIT_FILE_INDENT : TOOL_INDENT;
+          if (live || error || !expanded) {
             if (error) {
-              const w = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - TOOL_INDENT.length);
+              const errorWidth = Math.max(
+                1,
+                Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - childIndent.length,
+              );
               for (const line of data.errorLines) {
-                lines.push(`${TOOL_INDENT}${paintAt(theme, truncatePlain(line, w), "error", 1)}`);
+                lines.push(`${childIndent}${paintAt(theme, truncatePlain(line, errorWidth), "error", 1)}`);
               }
             }
             return lines;
           }
-          const w = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
-          let gutterW = 0;
-          for (const row of rows) {
-            if (row.num !== null) gutterW = Math.max(gutterW, String(row.num).length);
-          }
-          const budget = Math.max(1, w - TOOL_INDENT.length - gutterW - 3);
-          const cells = rows.map((row, i) => truncatePlain(texts[i] ?? row.text, budget));
-          // Full-bleed bands: every -/+ row fills the content width so
-          // the card reads as red/green bars, not a tinted fragment.
-          // No +/- sign column: the background band alone carries the
-          // added/removed signal, gutter + code stay aligned with context.
-          const bandW = Math.max(0, budget - 2);
-          rows.forEach((row, i) => {
-            const cell = cells[i] ?? "";
-            if (row.kind === "|") {
-              lines.push(`${TOOL_INDENT}${" ".repeat(gutterW)}  ${paintAt(theme, cell, "dim", 1)}`);
-              return;
+
+          const rowWidth = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
+          for (const [sectionIndex, section] of data.sections.entries()) {
+            const lastSection = sectionIndex === data.sections.length - 1;
+            if (data.multi) {
+              const stat =
+                section.added === 0 && section.removed === 0
+                  ? ""
+                  : paintDiffStat(theme, section.added, section.removed);
+              lines.push(
+                formatRowLine(theme, width, {
+                  body: section.path || "file",
+                  tree: lastSection ? "last" : "mid",
+                  indent: EDIT_FILE_INDENT,
+                  right: stat,
+                }),
+              );
             }
-            const gutter = paintAt(
-              theme,
-              row.num === null ? " ".repeat(gutterW) : String(row.num).padStart(gutterW, " "),
-              "dim",
-              1,
-            );
-            if (row.kind === " ") {
-              lines.push(`${TOOL_INDENT}${gutter}${paintAt(theme, `  ${cell}`, "toolDiffContext", 1)}`);
-            } else {
+
+            const contentPrefix = data.multi ? `${EDIT_FILE_INDENT}${lastSection ? "   " : "│  "}` : childIndent;
+            let gutterWidth = 0;
+            for (const row of section.rows) {
+              if (row.num !== null) gutterWidth = Math.max(gutterWidth, String(row.num).length);
+            }
+            const codeBudget = Math.max(1, rowWidth - contentPrefix.length - gutterWidth - 3);
+            const bandWidth = Math.max(0, codeBudget);
+            for (const [rowIndex, row] of section.rows.entries()) {
+              const cell = truncatePlain(section.cells[rowIndex] ?? row.text, codeBudget);
+              if (row.kind === "|") {
+                if (cell.startsWith("···")) lines.push(contentPrefix.trimEnd());
+                lines.push(`${contentPrefix}${" ".repeat(gutterWidth)}   ${paintAt(theme, cell, "dim", 1)}`);
+                if (cell.startsWith("···")) lines.push(contentPrefix.trimEnd());
+                continue;
+              }
+
+              const number = row.num === null ? " ".repeat(gutterWidth) : String(row.num).padStart(gutterWidth, " ");
+              if (row.kind === " ") {
+                const gutter = paintAt(theme, number, "dim", 1);
+                const marker = paintAt(theme, "│", "dim", 0.7);
+                lines.push(`${contentPrefix}${gutter} ${marker} ${paintAt(theme, cell, "toolDiffContext", 1)}`);
+                continue;
+              }
+
               const token = row.kind === "+" ? "toolDiffAdded" : "toolDiffRemoved";
-              const num = row.num === null ? " ".repeat(gutterW) : String(row.num).padStart(gutterW, " ");
-              const padded = cell + " ".repeat(Math.max(0, bandW - visibleWidth(cell)));
-              lines.push(prettyDiffCell(theme, `${TOOL_INDENT}${num}  ${padded}`, token, true));
+              const padded = cell + " ".repeat(Math.max(0, bandWidth - visibleWidth(cell)));
+              lines.push(`${contentPrefix}${prettyDiffCell(theme, `${number} ${row.kind} ${padded}`, token, true)}`);
             }
-          });
+            if (data.multi && !lastSection) lines.push(`${EDIT_FILE_INDENT}${paintAt(theme, "│", "dim", 0.7)}`);
+          }
           return lines;
         } catch {
           return [formatRowLine(theme, width, { body: paintHeaderStat(theme, data.header), live, error })];
