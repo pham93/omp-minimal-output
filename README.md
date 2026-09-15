@@ -8,6 +8,8 @@ Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-outpu
 
 Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
 
+Approved detail-level design (not implemented): [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
+
 ## Card settings
 
 | Card       | Native fallback                     | Expanded limit                                     |
