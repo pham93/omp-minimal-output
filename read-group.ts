@@ -5,6 +5,7 @@
 // at Container.addChild time repaints the card with formatRowLine while
 // leaving execution, grouping, and Ctrl+O behavior untouched.
 
+import { capRenderedRows, detailProfile, standardRowLimit } from "./density.ts";
 import { tildePath } from "./text.ts";
 import { formatRowLine } from "./theme.ts";
 
@@ -20,18 +21,24 @@ export interface ReadGroupSkinDeps {
   active?: () => boolean;
 }
 
-export function paintReadGroupLines(theme: unknown, width: number, entries: readonly ReadSkinEntry[]): string[] {
+export function paintReadGroupLines(
+  theme: unknown,
+  width: number,
+  entries: readonly ReadSkinEntry[],
+  options?: { expanded?: boolean },
+): string[] {
   if (entries.length === 0) return [];
-  const anyPending = entries.some((e) => e.pending === true);
-  if (entries.length === 1) {
+  const profile = detailProfile(options);
+  const anyPending = entries.some((entry) => entry.pending === true);
+  if (entries.length === 1 || profile.minimal) {
     const only = entries[0];
     if (!only) return [];
     return [
       formatRowLine(theme, width, {
-        body: `Read ${only.path}`,
+        body: entries.length === 1 ? `Read ${only.path}` : `Read ${entries.length} files`,
         live: anyPending,
         mark: anyPending ? undefined : "●",
-        error: only.error,
+        error: entries.some((entry) => entry.error),
       }),
     ];
   }
@@ -42,18 +49,25 @@ export function paintReadGroupLines(theme: unknown, width: number, entries: read
       mark: anyPending ? undefined : "●",
     }),
   ];
-  entries.forEach((entry, idx) => {
-    lines.push(
-      formatRowLine(theme, width, {
-        body: entry.path,
-        tree: idx === entries.length - 1 ? "last" : "mid",
-        indent: true,
-        live: false,
-        error: entry.error,
-      }),
-    );
+  let terminalError: string | undefined;
+  entries.forEach((entry, index) => {
+    const line = formatRowLine(theme, width, {
+      body: entry.path,
+      tree: index === entries.length - 1 ? "last" : "mid",
+      live: entry.pending,
+      error: entry.error,
+    });
+    lines.push(line);
+    if (entry.error) terminalError = line;
   });
-  return lines;
+  if (!profile.standard) return lines;
+  const maxRows = standardRowLimit(false);
+  const hiddenRows = Math.max(1, lines.length - maxRows + 1);
+  const overflow = formatRowLine(theme, width, {
+    body: `… ${hiddenRows} more files`,
+    tree: "last",
+  });
+  return capRenderedRows(lines, maxRows, overflow, terminalError);
 }
 
 // Exported for verification; the five-method combination is unique to
@@ -102,6 +116,9 @@ function skinReadGroup(child: object, deps: ReadGroupSkinDeps): void {
   const origUpdateArgs = c["updateArgs"] as (...args: unknown[]) => unknown;
   const origUpdateResult = c["updateResult"] as (...args: unknown[]) => unknown;
   const origRemoveEntry = c["removeEntry"] as (...args: unknown[]) => unknown;
+  const origSetExpanded =
+    typeof c["setExpanded"] === "function" ? (c["setExpanded"] as (...args: unknown[]) => unknown) : undefined;
+  let expanded = false;
   const entries = new Map<string, ReadSkinEntry>();
   try {
     (c as Record<string, unknown>)["updateArgs"] = function (args: unknown, id: unknown, ...rest: unknown[]) {
@@ -147,17 +164,23 @@ function skinReadGroup(child: object, deps: ReadGroupSkinDeps): void {
       }
       return origRemoveEntry.apply(child, [id, ...rest]);
     };
+    if (origSetExpanded) {
+      (c as Record<string, unknown>)["setExpanded"] = function (value: unknown, ...rest: unknown[]) {
+        expanded = value === true;
+        return origSetExpanded.apply(child, [value, ...rest]);
+      };
+    }
     (c as Record<string, unknown>)["render"] = function (width: number): readonly string[] {
       if (!deps.enabled()) return origRender.apply(child, [width]);
       let native: readonly string[];
       try {
         native = origRender.apply(child, [width]);
       } catch {
-        return paintReadGroupLines(deps.theme(), width, [...entries.values()]);
+        return paintReadGroupLines(deps.theme(), width, [...entries.values()], { expanded });
       }
       if (native.length === 0) return native;
       if (entries.size === 0) return native;
-      return paintReadGroupLines(deps.theme(), width, [...entries.values()]);
+      return paintReadGroupLines(deps.theme(), width, [...entries.values()], { expanded });
     };
   } catch {
     // Non-writable method on this instance: best-effort restore so a
@@ -167,6 +190,7 @@ function skinReadGroup(child: object, deps: ReadGroupSkinDeps): void {
       ["updateArgs", origUpdateArgs],
       ["updateResult", origUpdateResult],
       ["removeEntry", origRemoveEntry],
+      ...(origSetExpanded ? [["setExpanded", origSetExpanded] as const] : []),
     ] as const) {
       try {
         (c as Record<string, unknown>)[key] = orig;

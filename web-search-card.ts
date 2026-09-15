@@ -4,16 +4,18 @@ import { Container } from "@oh-my-pi/pi-tui";
 import { getPluginConfig } from "./config.ts";
 import {
   cardDetailLine,
-  parentCardHeaderLines,
+  cardHeaderLine,
   cardLifecycle,
   cardTitleLine,
   compactCardText,
   conciseErrorText,
-  limitCardItems,
+  minimalCardHeaderLine,
+  parentCardHeaderLines,
   resultDetails,
   stashedOrResultText,
+  type ParentCardLabel,
 } from "./card-primitives.ts";
-import type { ParentCardLabel } from "./card-primitives.ts";
+import { capRenderedRows, standardRowLimit } from "./density.ts";
 import { markFlush } from "./loaders.ts";
 import { searchPatternText } from "./text.ts";
 
@@ -75,15 +77,14 @@ export function renderWebSearchCard(
   try {
     const nativeError = compactCardText(resultDetails(result)?.["error"], 120);
     const lifecycle = cardLifecycle(result, options, { error: nativeError !== "" });
-    const { expanded, running, error } = lifecycle;
     const query = compactCardText(searchPatternText(args), 80);
     const data = structuredSearchData(result);
     const sources = data.sources.length > 0 ? data.sources : fallbackSources(result);
     const base = `Search${query ? ` \`${query}\`` : ""}`;
     const count = sources.length;
-    const body = running
+    const body = lifecycle.running
       ? base
-      : error
+      : lifecycle.error
         ? `${base} — failed`
         : `${base} — ${count} ${count === 1 ? "source" : "sources"}`;
     const right = data.provider ? `via ${data.provider}` : "";
@@ -91,7 +92,19 @@ export function renderWebSearchCard(
     c.addChild({
       render: (width: number): readonly string[] => {
         try {
-          const lines: string[] = parentCardHeaderLines(theme, width, {
+          if (lifecycle.detail.minimal) {
+            return [
+              minimalCardHeaderLine(theme, width, {
+                body,
+                lifecycle,
+                right,
+                fingerprint: fp,
+                settledMark: "●",
+                parentLabel,
+              }),
+            ];
+          }
+          const lines = parentCardHeaderLines(theme, width, {
             body,
             lifecycle,
             right,
@@ -99,36 +112,37 @@ export function renderWebSearchCard(
             settledMark: "●",
             parentLabel,
           });
-          if (!expanded || running) return lines;
-          if (error) {
-            lines.push(
-              cardTitleLine(
-                theme,
-                width,
-                conciseErrorText(result, {
-                  fallback: "Search request failed",
-                  skipPattern: /^●?\s*Search\b/i,
-                }),
-                true,
-              ),
+          if (lifecycle.running) return lines;
+          if (lifecycle.error) {
+            const errorLine = cardTitleLine(
+              theme,
+              width,
+              conciseErrorText(result, {
+                fallback: "Search request failed",
+                skipPattern: /^●?\s*Search\b/iu,
+              }),
+              true,
             );
-            return lines;
+            lines.push(errorLine);
+            if (!lifecycle.detail.standard) return lines;
+            return capRenderedRows(lines, standardRowLimit(true), errorLine, errorLine);
           }
-          const limited = limitCardItems(sources, getPluginConfig().webSearchMaxResults);
-          for (const source of limited.visible) {
+          const visibleSources = lifecycle.detail.standard
+            ? sources.slice(0, getPluginConfig().webSearchMaxResults)
+            : sources;
+          for (const source of visibleSources) {
             lines.push(cardTitleLine(theme, width, source.title));
             lines.push(cardDetailLine(theme, width, source.url));
           }
-          if (limited.hidden > 0) {
-            lines.push(
-              cardDetailLine(
-                theme,
-                width,
-                `╰─ … ${limited.hidden} more ${limited.hidden === 1 ? "source" : "sources"}`,
-              ),
-            );
+          const hiddenSources = sources.length - visibleSources.length;
+          if (hiddenSources > 0) {
+            lines.push(cardDetailLine(theme, width, `… ${hiddenSources} more sources`));
           }
-          return lines;
+          if (!lifecycle.detail.standard) return lines;
+          const maxRows = standardRowLimit(sources.length > 0);
+          const hiddenRows = Math.max(1, lines.length - maxRows + 1);
+          const overflow = cardDetailLine(theme, width, `╰─ … ${hiddenRows} more rows`);
+          return capRenderedRows(lines, maxRows, overflow);
         } catch {
           return [cardHeaderLine(theme, width, { body, lifecycle, settledMark: "●" })];
         }

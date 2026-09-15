@@ -10,7 +10,14 @@
 // collapsed, 60 expanded).
 // Full text sits behind Ctrl+O.
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
-import { resolveParentCardLabel, type ParentCardLabel } from "./card-primitives.ts";
+import {
+  cardLifecycle,
+  minimalCardHeaderLine,
+  parentCardHeaderLines,
+  resolveParentCardLabel,
+  type ParentCardLabel,
+} from "./card-primitives.ts";
+import { capRenderedRows, standardRowLimit } from "./density.ts";
 import { markFlush } from "./loaders.ts";
 import { durationSuffix, isToolError, toolResultText } from "./results.ts";
 import {
@@ -113,47 +120,37 @@ export function renderEvalCard(
 ): Container {
   try {
     const header = evalLabelText(args);
-    const partial =
-      !live && result !== undefined && (options as { isPartial?: boolean } | null | undefined)?.isPartial === true;
-    const settled = !live && result !== undefined && !partial;
-    const running = live || partial;
-    const error = settled && isToolError(result, options);
-    const expanded = (options as { expanded?: boolean } | null | undefined)?.expanded === true;
-    if (settled && fp) evalRunSince.delete(fp);
+    const lifecycle = cardLifecycle(result, options);
+    const running = live || lifecycle.running;
+    const error = lifecycle.error;
+    if (lifecycle.settled && fp) evalRunSince.delete(fp);
     const since = running ? runSince(fp) : 0;
     const cell = evalCell(args);
-    const inputCap = expanded ? INPUT_EXPANDED_LINES : INPUT_COLLAPSED_LINES;
-    const outputCap = expanded ? OUTPUT_EXPANDED_LINES : OUTPUT_COLLAPSED_LINES;
-    const streamCap = expanded ? STREAM_EXPANDED_LINES : STREAM_COLLAPSED_LINES;
-    const codeLines = cell.code ? cell.code.split("\n") : [];
-    while (codeLines.length > 0 && !stripSgr(codeLines[codeLines.length - 1] ?? "").trim()) codeLines.pop();
-    const input = codeLines.slice(0, inputCap);
-    const inputMore = codeLines.length - input.length;
-    // Settled body: first N output lines. Streaming body: last N lines of
-    // the partial output so far (a live tail, not a head).
+    const rawCode = cell.code ? cell.code.split("\n") : [];
+    while (rawCode.length > 0 && !stripSgr(rawCode[rawCode.length - 1] ?? "").trim()) rawCode.pop();
+    const inputCap = lifecycle.detail.detailed ? rawCode.length : INPUT_COLLAPSED_LINES;
+    const input = rawCode.slice(0, inputCap);
+    const inputMore = rawCode.length - input.length;
+
     let output: string[] = [];
     let more = 0;
     let earlierHint = false;
-    let errorLines: string[] = [];
-    if (settled || partial) {
-      // Output keeps its ANSI colors; dimAnsi blends them to row opacity
-      // and drops background fills (no boxes).
+    const errorLines: string[] = [];
+    if (result !== undefined) {
       const rawText = evalResultText(result, header);
       if (error) {
-        const errSrc =
-          stripSgr(rawText)
-            .split("\n")
-            .map((l) => l.trim())
-            .find((l) => l) ?? "";
-        for (const line of errSrc.split("\n").slice(0, 10)) {
-          if (line.trim()) errorLines.push(line);
+        for (const line of stripSgr(rawText)
+          .split("\n")
+          .map((value) => value.trim())
+          .filter(Boolean)) {
+          errorLines.push(line);
         }
       } else {
         const raw = rawText.split("\n");
         while (raw.length > 0 && !stripSgr(raw[raw.length - 1] ?? "").trim()) raw.pop();
-        if (partial) {
-          const tail = raw.slice(-streamCap);
-          output = tail.length > 0 || raw.length > 0 ? tail : [];
+        const outputCap = lifecycle.detail.detailed ? raw.length : OUTPUT_COLLAPSED_LINES;
+        if (lifecycle.partial) {
+          output = lifecycle.detail.detailed ? raw : raw.slice(-STREAM_COLLAPSED_LINES);
           more = raw.length - output.length;
           earlierHint = true;
         } else {
@@ -162,31 +159,35 @@ export function renderEvalCard(
         }
       }
     }
+
     const c = new Container();
     c.addChild({
       render: (width: number): readonly string[] => {
         try {
-          // Drive our shared spinner off core's ticker when it ticks (partial
-          // streaming repaints): falls back to our own 120ms pump otherwise.
           const coreFrame = (options as { spinnerFrame?: unknown })?.spinnerFrame;
           if (typeof coreFrame === "number" && Number.isFinite(coreFrame)) setSpinFrame(coreFrame);
-          const parent = resolveParentCardLabel(parentLabel);
-          const right = running ? elapsedSuffix(since) : settled ? durationSuffix(result) : "";
-          const lines = parent
-            ? [
-                formatRowLine(theme, width, { body: parent, live: running, error }),
-                formatRowLine(theme, width, { body: header, tree: "last", error, right }),
-              ]
-            : [
-                formatRowLine(theme, width, {
-                  body: header,
-                  live: running,
-                  error,
-                  // Settled outcome is a ● dot: green on success, red on error.
-                  mark: settled ? "●" : undefined,
-                  right,
-                }),
-              ];
+          const right = running ? elapsedSuffix(since) : lifecycle.settled ? durationSuffix(result) : "";
+          if (lifecycle.detail.minimal) {
+            return [
+              minimalCardHeaderLine(theme, width, {
+                body: error ? `${header} — failed` : header,
+                lifecycle,
+                right,
+                fingerprint: fp,
+                settledMark: "●",
+                parentLabel,
+              }),
+            ];
+          }
+
+          const lines = parentCardHeaderLines(theme, width, {
+            body: header,
+            lifecycle,
+            right,
+            fingerprint: fp,
+            settledMark: "●",
+            parentLabel,
+          });
           const w = contentWidth(width);
           const op = rowOpacity(false, undefined);
           for (const line of input) {
@@ -197,32 +198,45 @@ export function renderEvalCard(
                 : "",
             );
           }
-          if (inputMore > 0) lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${inputMore} more lines)`, "dim", op)}`);
-          if (!settled && !partial) return lines;
-          if (input.length > 0 && (output.length > 0 || more > 0 || error)) {
-            const sepLabel = `── ${error ? "error" : "output"} `;
-            const sepFill = Math.max(2, w - TOOL_INDENT.length - visibleWidth(sepLabel));
-            lines.push(`${TOOL_INDENT}${paintRule(theme, sepLabel, sepFill, running, op)}`);
+          if (inputMore > 0) {
+            lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${inputMore} more input lines)`, "dim", op)}`);
           }
-          if (error) {
-            for (const line of errorLines) {
-              lines.push(`${TOOL_INDENT}${paintAt(theme, truncatePlain(line, w), "error", 1)}`);
+          if (result !== undefined && (output.length > 0 || more > 0 || error)) {
+            if (input.length > 0) {
+              const sepLabel = `── ${error ? "error" : "output"} `;
+              const sepFill = Math.max(2, w - TOOL_INDENT.length - visibleWidth(sepLabel));
+              lines.push(`${TOOL_INDENT}${paintRule(theme, sepLabel, sepFill, running, op)}`);
             }
-            return lines;
+            if (error) {
+              for (const line of errorLines) {
+                lines.push(`${TOOL_INDENT}${paintAt(theme, truncatePlain(line, w), "error", 1)}`);
+              }
+            } else {
+              if (earlierHint && more > 0) {
+                lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${more} earlier lines)`, "dim", op)}`);
+              }
+              for (const line of output) {
+                const cellText = dimAnsi(theme, line, op);
+                lines.push(
+                  stripSgr(line).trim()
+                    ? `${TOOL_INDENT}${paintAt(theme, truncatePlain(cellText, w), "toolOutput", op)}`
+                    : "",
+                );
+              }
+              if (!earlierHint && more > 0) {
+                lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${more} more lines)`, "dim", op)}`);
+              }
+            }
           }
-          if (earlierHint && more > 0)
-            lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${more} earlier lines)`, "dim", op)}`);
-          for (const line of output) {
-            const cellText = dimAnsi(theme, line, op);
-            lines.push(
-              stripSgr(line).trim()
-                ? `${TOOL_INDENT}${paintAt(theme, truncatePlain(cellText, w), "toolOutput", op)}`
-                : "",
-            );
-          }
-          if (!earlierHint && more > 0)
-            lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${more} more lines)`, "dim", op)}`);
-          return lines;
+          if (!lifecycle.detail.standard) return lines;
+          const maxRows = standardRowLimit(result !== undefined);
+          const hidden = Math.max(1, lines.length - maxRows + 1);
+          const overflow = `${TOOL_INDENT}${paintAt(theme, `… ${hidden} more lines`, "dim", op)}`;
+          const terminal =
+            error && errorLines.length > 0
+              ? `${TOOL_INDENT}${paintAt(theme, truncatePlain(errorLines[0] ?? "Eval failed", w), "error", 1)}`
+              : undefined;
+          return capRenderedRows(lines, maxRows, overflow, terminal);
         } catch {
           return [formatRowLine(theme, width, { body: header, live: running, error })];
         }

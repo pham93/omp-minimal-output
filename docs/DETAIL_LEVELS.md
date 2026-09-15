@@ -1,8 +1,8 @@
 # Detail Levels Specification
 
-Status: approved design; not implemented yet.
+Status: implemented.
 
-This document defines configurable transcript density for `omp-minimal-output`. It is the implementation contract for the planned Minimal, Standard, and Detailed modes.
+This document defines the configurable transcript-density contract implemented by `omp-minimal-output` for Minimal, Standard, and Detailed modes.
 
 ## Goals
 
@@ -22,7 +22,7 @@ This document defines configurable transcript density for `omp-minimal-output`. 
 | `standardEditRowsPerFile` | number                                  | `10`         | `1..50` | Diff/context rows retained for each edited file |
 | `standardWriteMaxRows`    | number                                  | `10`         | `1..50` | Total Standard rows retained for Write          |
 
-Planned configuration:
+Configuration example:
 
 ```json
 {
@@ -34,7 +34,7 @@ Planned configuration:
 }
 ```
 
-These settings belong in the existing plugin settings object in `~/.omp/plugins/omp-plugins.lock.json` or a project override. They must be validated and clamped through the same configuration path as current plugin settings.
+These settings belong in the existing plugin settings object in `~/.omp/plugins/omp-plugins.lock.json` or a project override. They are validated and clamped through the same configuration path as current plugin settings.
 
 ## Counting rules
 
@@ -85,7 +85,7 @@ Standard is the default mode.
 
 ### Detailed
 
-Detailed is unbounded and matches the current Ctrl+O-expanded representation. It shows every available file, hunk, result, source, agent, job, task, output row, error, and artifact retained by the tool result.
+Detailed is unbounded and matches the Ctrl+O-expanded representation. It shows every available file, hunk, result, source, agent, job, task, output row, error, and artifact retained in the tool result.
 
 ## Standard behavior by tool
 
@@ -197,6 +197,6 @@ Leaving the override restores the configured mode. Ctrl+O does not rewrite `deta
 
 - Tool execution, schemas, approval policy, persisted provider messages, and result data remain unchanged.
 - Density is a display-only projection over existing tool state.
-- No compatibility aliases or deprecated setting names.
-- Current `native*` settings continue to win: a native fallback bypasses plugin density rendering for that tool.
-- Full result text remains retained or spilled exactly as today so Detailed mode and Ctrl+O never depend on the Standard preview.
+- No compatibility aliases exist for deprecated setting names.
+- Current `native*` settings continue to win: a selected native fallback bypasses plugin density rendering for that tool.
+- Full result text remains retained or spilled exactly as before; Detailed mode and Ctrl+O never depend on the Standard preview.

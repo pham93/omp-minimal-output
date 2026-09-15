@@ -1,6 +1,7 @@
 // Pure string helpers for labels, wrapping, and truncation. Zero dependencies
 // beyond pi-tui width measurement. No module state, no side effects.
 import { homedir } from "node:os";
+import { isAbsolute, relative } from "node:path";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
 
 export function tildePath(p: string): string {
@@ -99,6 +100,20 @@ export function shortPathText(p: string): string {
     .trim();
   if (!one) return "file";
   return one.length > 80 ? `${one.slice(0, 80)}…` : one;
+}
+
+export function projectPathText(path: string): string {
+  const raw = String(path ?? "").trim();
+  if (!raw) return "file";
+  if (isAbsolute(raw)) {
+    try {
+      const local = relative(process.cwd(), raw);
+      if (local && !local.startsWith("..") && !isAbsolute(local)) return shortPathText(local);
+    } catch {
+      // Unknown host cwd; retain the original path.
+    }
+  }
+  return shortPathText(raw);
 }
 
 export function titleCaseWords(raw: string): string {
@@ -217,8 +232,7 @@ export function evalCell(args: unknown): EvalCell {
       ? (rawCells[0] as Record<string, unknown>)
       : undefined;
   const rawLang = (firstString(first?.["language"], fields["language"]) ?? "").trim().toLowerCase();
-  const language =
-    rawLang === "py" ? "python" : rawLang === "js" ? "javascript" : rawLang === "" ? undefined : rawLang;
+  const language = rawLang === "py" ? "python" : rawLang === "js" ? "javascript" : rawLang === "" ? undefined : rawLang;
   return {
     language,
     code: firstString(first?.["code"], fields["code"], fields["input"], fields["content"], fields["command"]),

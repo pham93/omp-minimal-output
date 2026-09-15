@@ -8,11 +8,11 @@ Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-outpu
 
 Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
 
-Approved detail-level design (not implemented): [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
+Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 
 ## Card settings
 
-| Card       | Native fallback                     | Expanded limit                                     |
+| Card       | Native fallback                     | Standard item selection                            |
 | ---------- | ----------------------------------- | -------------------------------------------------- |
 | Web search | `nativeWebSearch` (default `false`) | `webSearchMaxResults` (default `5`, range `1..10`) |
 | Task       | `nativeTask` (default `false`)      | `taskMaxAgents` (default `4`, range `1..8`)        |
@@ -40,7 +40,7 @@ The sticky Todo widget hydrates collapsed on session start only when the current
 
 Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. `web_search` shows source count/provider and expands to bold titles with dim URLs; expanded `edit` cards use project-relative file branches, per-file stats, continuation rails, explicit diff markers, and hunk separators; `eval` replaces the boxed output panel.
 
-The literal tool argument `i` is never discarded. Generic wrapped tools (`bash`, `read`, `grep`, `glob`, `write`) keep their grouped status parent and tool children. Dedicated/native cards (`edit`, `eval`, `web_search`, Task, Hub) render the AI status as their single parent and indent the named card as its indicator-free `╰─` child. Todo settles into the sticky widget or native fallback. Live `minimal-activity` records remain only for surfaces without an owning group/card; the plugin emits no second settled activity row.
+The literal tool argument `i` is never discarded. Generic wrapped tools (`bash`, `read`, `grep`, `glob`) keep the grouped status parent and tool children. Dedicated/native cards (`write`, `edit`, `eval`, `web_search`, Task, Hub) render the AI status as a parent and the named card as its indicator-free `╰─` child. Todo settles into the sticky widget or native fallback. Live `minimal-activity` records remain only for surfaces without an owning group/card; the plugin emits no second settled activity row.
 
 The sticky Todo widget is the single Todo surface after a successful widget mount. Its native transcript card is suppressed only while that widget is active; headless, disabled, or failed widget mounts retain the transcript card as the safe fallback.
 
@@ -74,7 +74,7 @@ flowchart TD
 
 Contract: ordinary rewritten results keep a settled one-liner on line 1 and filtered details below it. Dedicated cards (`edit`, `eval`, `web_search`, Task, Hub) use stashed text or preserved structured native details for expansion.
 
-Task reads native `progress`/`results` and limits expanded rows with `taskMaxAgents`. Hub reads native coordination/process details and limits expanded rows with `hubMaxItems`. `nativeTask` and `nativeHub` keep native result text uncollapsed.
+Task and Hub use their native `progress`/`results` details. Standard selection is bounded by `taskMaxAgents` and `hubMaxItems`; Detailed ignores those item limits. `nativeTask` and `nativeHub` keep native result text uncollapsed and bypass plugin density rendering.
 
 ## Row lifecycle
 

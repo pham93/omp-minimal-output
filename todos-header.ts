@@ -2,6 +2,7 @@
 // no I/O, no module state — all state lives in index.ts. Reuses only
 // formatRowLine (theme.ts) and truncatePlain (text.ts).
 import { currentIndicatorFrame, formatRowLine, paintAt, paintBold, LINE_WIDTH_RATIO } from "./theme.ts";
+import { capRenderedRows, detailProfile, standardRowLimit } from "./density.ts";
 import { truncatePlain } from "./text.ts";
 
 export type TodoStatus = "done" | "active" | "open" | "blocked" | "dropped";
@@ -60,7 +61,8 @@ export function parseTodoResult(raw: string): TodoHeaderState | null {
         note = (blocker[2] ?? "").trim() || undefined;
         if (!label) continue;
       }
-      const status = marker === "!" ? "blocked" : marker === "-" ? "dropped" : marker === "/" ? "active" : toStatus(marker);
+      const status =
+        marker === "!" ? "blocked" : marker === "-" ? "dropped" : marker === "/" ? "active" : toStatus(marker);
       items.push({ label, status, note });
       continue;
     }
@@ -114,14 +116,23 @@ export function parseTodoPhases(details: unknown): TodoHeaderState | null {
   const items: TodoItem[] = [];
   for (const phase of raw) {
     if (!isRecord(phase) || !Array.isArray((phase as { tasks?: unknown }).tasks)) continue;
-    const phaseName = typeof (phase as { name?: unknown }).name === "string" ? ((phase as { name: string }).name ?? "").trim() : "";
+    const phaseName =
+      typeof (phase as { name?: unknown }).name === "string" ? ((phase as { name: string }).name ?? "").trim() : "";
     for (const task of (phase as { tasks: unknown[] }).tasks) {
       if (items.length >= MAX_ITEMS) break;
       if (!isRecord(task) || typeof (task as { content?: unknown }).content !== "string") continue;
       const label = ((task as { content: string }).content ?? "").trim();
       if (!label) continue;
-      const note = typeof (task as { blocker?: unknown }).blocker === "string" ? ((task as { blocker: string }).blocker ?? "").trim() : "";
-      items.push({ label, status: phaseTaskStatus((task as { status?: unknown }).status), phase: phaseName || undefined, note: note || undefined });
+      const note =
+        typeof (task as { blocker?: unknown }).blocker === "string"
+          ? ((task as { blocker: string }).blocker ?? "").trim()
+          : "";
+      items.push({
+        label,
+        status: phaseTaskStatus((task as { status?: unknown }).status),
+        phase: phaseName || undefined,
+        note: note || undefined,
+      });
     }
     if (items.length >= MAX_ITEMS) break;
   }
@@ -299,13 +310,13 @@ export const TODO_TOGGLE_SHORTCUT = "Ctrl+Alt+T";
 export function todoToggleHint(collapsed: boolean): string {
   return `${collapsed ? "▸ expand" : "▾ collapse"} · ${TODO_TOGGLE_SHORTCUT}`;
 }
-
 export function renderTodoHeader(
   theme: unknown,
   width: number,
   state: TodoHeaderState,
   collapsed: boolean,
   anim?: TodoAnim,
+  phaseTaskLimit = TODO_PHASE_TASK_LIMIT,
 ): string[] {
   if (!state || state.items.length === 0) return [];
   const activeSuffix = state.activeLabel ? ` — ${truncatePlain(state.activeLabel.trim(), 60)}` : "";
@@ -334,7 +345,9 @@ export function renderTodoHeader(
   const phased = showPhaseHeaders(groups);
   const now = anim?.now ?? Date.now();
   for (const group of groups) {
-    const visibleItems = group.items.slice(-TODO_PHASE_TASK_LIMIT);
+    const visibleItems = Number.isFinite(phaseTaskLimit)
+      ? group.items.slice(-Math.max(0, Math.floor(phaseTaskLimit)))
+      : group.items;
     const hiddenCount = group.items.length - visibleItems.length;
     if (phased) {
       const hot = visibleItems.some((item) => {
@@ -368,4 +381,31 @@ export function renderTodoHeader(
     }
   }
   return rows;
+}
+
+export function renderDensityTodoHeader(
+  theme: unknown,
+  width: number,
+  state: TodoHeaderState,
+  manualExpanded: boolean,
+  anim?: TodoAnim,
+): string[] {
+  const profile = detailProfile({ expanded: manualExpanded });
+  if (profile.minimal) return renderTodoHeader(theme, width, state, true, anim);
+  const lines = renderTodoHeader(
+    theme,
+    width,
+    state,
+    false,
+    anim,
+    profile.detailed ? Number.POSITIVE_INFINITY : TODO_PHASE_TASK_LIMIT,
+  );
+  if (!profile.standard) return lines;
+  const maxRows = standardRowLimit(false);
+  const hiddenRows = Math.max(1, lines.length - maxRows + 1);
+  const overflow = formatRowLine(theme, width, {
+    body: `Todos — … ${hiddenRows} more rows`,
+    indent: true,
+  });
+  return capRenderedRows(lines, maxRows, overflow);
 }

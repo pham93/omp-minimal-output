@@ -42,7 +42,9 @@ import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
-import { cardIsPartial, resultDetails } from "./card-primitives.ts";
+import { renderWriteCard } from "./write-card.ts";
+import { cardIsPartial, resultDetails, stashedOrResultText } from "./card-primitives.ts";
+import { capRenderedRows, detailProfile, minimalToolSummary, standardRowLimit, type DetailProfile } from "./density.ts";
 import { installReadGroupSkin } from "./read-group.ts";
 import { commentaryStatusFromMessage, installAssistantCommentarySkin } from "./assistant-commentary-skin.ts";
 import {
@@ -57,7 +59,7 @@ import {
   latestTodoDetailsFromEntries,
   parseTodoPhases,
   parseTodoResult,
-  renderTodoHeader,
+  renderDensityTodoHeader,
   todoItemKey,
   todoNeedsPump,
   type TodoHeaderState,
@@ -82,6 +84,14 @@ interface ToolCardRenderer {
 }
 
 const CARD_RENDERERS = {
+  write: {
+    renderCall(theme, args, options, fingerprint, parentLabel) {
+      return renderWriteCard(theme, args, undefined, options, fingerprint, parentLabel);
+    },
+    renderResult(theme, args, result, options, fingerprint, parentLabel) {
+      return renderWriteCard(theme, args, result, options, fingerprint, parentLabel);
+    },
+  },
   edit: {
     renderCall(theme, args, options, _fingerprint, parentLabel) {
       return renderPrettyEditCard(theme, args, undefined, options, cardIsPartial(options), parentLabel);
@@ -232,6 +242,8 @@ interface GroupRow {
   error: boolean;
   right: string;
   startedAt: number;
+  details: string[];
+  detail?: DetailProfile;
 }
 interface ToolGroup {
   label: string;
@@ -548,7 +560,7 @@ function paintTodosWidget(theme: unknown): Container {
       }
       const state = peekTodoState();
       if (!show || !state || state.items.length === 0) return [];
-      return renderTodoHeader(theme, width, state, todosCollapsed, todoAnim());
+      return renderDensityTodoHeader(theme, width, state, !todosCollapsed, todoAnim());
     },
   });
   return c;
@@ -777,6 +789,8 @@ function upsertGroupRow(fp: string, row: Omit<GroupRow, "fp">, frozen?: { gid: s
     error: row.error,
     right: row.right,
     startedAt: prev?.startedAt ?? row.startedAt,
+    detail: row.detail ?? prev?.detail,
+    details: row.details ?? prev?.details ?? [],
   });
   if (toolGroups.size > 40) {
     const oldest = toolGroups.keys().next();
@@ -810,17 +824,31 @@ function paintGroup(theme: unknown, gid: string): Container {
     render: (width: number): readonly string[] => {
       const group = toolGroups.get(gid);
       if (!group) return [];
-      const lines: string[] = [];
-      const anyLive = [...group.rows.values()].some((row) => rowIsLive(row.fp));
-      const headerLive = anyLive && activityLive;
-      const header = activityRunId === gid && activityLabel ? activityLabel : group.label;
       const rows = [...group.rows.values()].sort((a, b) => a.startedAt - b.startedAt);
-      // Multi-read groups keep one row per file under a count header
-      // (`● Read 3 files` + tree children); the count lives in the header
-      // so no child is merged away.
       const bodies = rows.filter((row) => !row.fp.startsWith("thought:"));
+      const profile = bodies[0]?.detail ?? detailProfile();
+      const headerLive = rows.some((row) => rowIsLive(row.fp));
+      const header = group.label;
       const readCount = bodies.filter((row) => row.fp.startsWith("read:")).length;
       const headerBody = bodies.length > 1 && readCount === bodies.length ? `Read ${readCount} files` : header;
+      const anyError = bodies.some((row) => row.error);
+      if (profile.minimal) {
+        const summary =
+          headerBody.trim() && bodies.length === 1
+            ? minimalToolSummary(headerBody, bodies[0]?.body ?? "")
+            : headerBody || bodies[0]?.body || "Tool";
+        return [
+          formatRowLine(theme, width, {
+            body: summary,
+            live: headerLive,
+            error: anyError,
+            fadeKey: `act:${gid}`,
+            right: headerLive ? elapsedSuffix(activityStartedAt) : "",
+            mark: headerLive ? undefined : "●",
+          }),
+        ];
+      }
+      const lines: string[] = [];
       if (headerBody.trim()) {
         lines.push(
           formatRowLine(theme, width, {
@@ -832,25 +860,46 @@ function paintGroup(theme: unknown, gid: string): Container {
           }),
         );
       }
+      let terminalError: string | undefined;
       for (const [idx, row] of rows.entries()) {
         const live = rowIsLive(row.fp);
         const isThought = row.fp.startsWith("thought:");
-        lines.push(
-          formatRowLine(theme, width, {
-            body: row.body,
-            indent: true,
-            tree: idx === rows.length - 1 ? "last" : "mid",
-            live,
-            error: row.error,
-            fadeKey: row.fp,
-            right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
-          }),
-        );
+        const rowLine = formatRowLine(theme, width, {
+          body: row.body,
+          indent: true,
+          tree: idx === rows.length - 1 && row.details.length === 0 ? "last" : "mid",
+          live,
+          error: row.error,
+          fadeKey: row.fp,
+          right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
+        });
+        lines.push(rowLine);
+        if (row.error) terminalError = rowLine;
         if (isThought && row.live) {
           lines.push(...thinkingRailLines(theme, width, thoughtText, true));
         }
+        for (const [detailIndex, detail] of row.details.entries()) {
+          lines.push(
+            formatRowLine(theme, width, {
+              body: `  ${detail}`,
+              indent: true,
+              tree: detailIndex === row.details.length - 1 && idx === rows.length - 1 ? "last" : "mid",
+              error: row.error,
+              fadeKey: `${row.fp}:detail:${detailIndex}`,
+            }),
+          );
+        }
       }
-      return lines;
+      if (!profile.standard) return lines;
+      const hasOutput = bodies.some((row) => row.details.length > 0);
+      const maxRows = standardRowLimit(hasOutput);
+      const hiddenRows = Math.max(1, lines.length - maxRows + 1);
+      const overflow = formatRowLine(theme, width, {
+        body: `… ${hiddenRows} more rows`,
+        indent: true,
+        tree: "last",
+      });
+      return capRenderedRows(lines, maxRows, overflow, terminalError);
     },
   });
   markFlush?.(c);
@@ -859,10 +908,23 @@ function paintGroup(theme: unknown, gid: string): Container {
 
 // Core inserts a blank line between every tool block. Paint the whole nested
 // group inside the lead tool and return an empty framed block for siblings.
+function groupedOutputLines(result: unknown): string[] {
+  const text = stashedOrResultText(result).trim();
+  if (!text) return [];
+  return text.split(/\r?\n/u);
+}
+
 function renderToolVisual(
   theme: unknown,
   fp: string,
-  opts: { body: string; live: boolean; error: boolean; right?: string },
+  opts: {
+    body: string;
+    live: boolean;
+    error: boolean;
+    right?: string;
+    details?: string[];
+    detail?: DetailProfile;
+  },
   frozen?: { gid: string; label: string },
 ): Container {
   const gid = upsertGroupRow(
@@ -873,6 +935,8 @@ function renderToolVisual(
       error: opts.error,
       right: opts.right ?? "",
       startedAt: Date.now(),
+      details: opts.details ?? [],
+      detail: opts.detail,
     },
     frozen,
   );
@@ -1109,6 +1173,8 @@ export default function (pi: ExtensionAPI) {
   let kickAlertPump = (): void => {};
   const disposeNativeToolCardSkin = installNativeToolCardSkin(Container, {
     enabled: () => runtimeOwner.owns() && nativeToolCardSkinActive(),
+    genericEnabled: (toolName) =>
+      runtimeOwner.owns() && enabled && (!toolName || !isWrappedTool(toolName) || wrapTool(toolName)),
     theme: () => readGroupTheme,
     pump: () => kickAlertPump(),
     parentLabel: (toolCallId, fingerprint, result) => parentLabelForToolCall(toolCallId, fingerprint, result),
@@ -1128,7 +1194,7 @@ export default function (pi: ExtensionAPI) {
     paintCard: (width, expanded) => {
       const state = peekTodoState();
       if (!state || state.items.length === 0) return [];
-      return renderTodoHeader(readGroupTheme, width, state, !expanded, todoAnim());
+      return renderDensityTodoHeader(readGroupTheme, width, state, expanded, todoAnim());
     },
     onHud: () => syncTodoHeaderFromSession(),
     onTodoDetails: (details) => {
@@ -1427,6 +1493,8 @@ export default function (pi: ExtensionAPI) {
             body: toolActionLabel(name, args),
             live: cardIsPartial(options),
             error: false,
+            details: [],
+            detail: detailProfile(options),
           });
         },
         renderResult(result, options, theme, args) {
@@ -1443,6 +1511,8 @@ export default function (pi: ExtensionAPI) {
               live: false,
               error: isToolError(result, options),
               right: durationSuffix(result),
+              details: groupedOutputLines(result),
+              detail: detailProfile(options),
             },
             frozenGroupOf(result),
           );

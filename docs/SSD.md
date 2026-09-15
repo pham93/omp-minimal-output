@@ -3,7 +3,7 @@
 Display-only output skin for `omp`. Same tools, same execution. Smaller rows.
 
 > Usage stays in `README.md`. This file is design only.
-> Approved detail-level design (not implemented) lives in `DETAIL_LEVELS.md`.
+> The implemented detail-level contract lives in `DETAIL_LEVELS.md`.
 > Examples live in `EXAMPLES.md`.
 
 ## 1. Purpose and scope

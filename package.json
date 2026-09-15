@@ -27,6 +27,48 @@
         "default": "diamond",
         "description": "Live/settled row mark: diamond (\u25c8\u25c9\u25ce\u25cb/\u25c6), dot (\u25cf\u25cb\u25c9\u25cb/\u25cf), none (space)."
       },
+      "detailLevel": {
+        "type": "enum",
+        "values": [
+          "minimal",
+          "standard",
+          "detailed"
+        ],
+        "default": "standard",
+        "description": "Transcript density. Minimal is one row, Standard uses bounded previews, Detailed matches Ctrl+O."
+      },
+      "standardMaxRows": {
+        "type": "number",
+        "default": 3,
+        "min": 1,
+        "max": 20,
+        "step": 1,
+        "description": "Total Standard rows for tools without output and the Todo widget."
+      },
+      "standardOutputMaxRows": {
+        "type": "number",
+        "default": 4,
+        "min": 1,
+        "max": 30,
+        "step": 1,
+        "description": "Total Standard rows for tools with output."
+      },
+      "standardEditRowsPerFile": {
+        "type": "number",
+        "default": 10,
+        "min": 1,
+        "max": 50,
+        "step": 1,
+        "description": "Diff and context rows retained per file in Standard Edit cards."
+      },
+      "standardWriteMaxRows": {
+        "type": "number",
+        "default": 10,
+        "min": 1,
+        "max": 50,
+        "step": 1,
+        "description": "Total rows retained in Standard Write cards."
+      },
       "indicatorAnimation": {
         "type": "boolean",
         "default": true,
@@ -143,6 +185,8 @@
     "loaders.ts",
     "edit-card.ts",
     "eval-card.ts",
+    "density.ts",
+    "write-card.ts",
     "web-search-card.ts",
     "card-primitives.ts",
     "task-card.ts",

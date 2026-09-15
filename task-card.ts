@@ -2,14 +2,16 @@
 import { Container } from "@oh-my-pi/pi-tui";
 import {
   cardDetailLine,
-  parentCardHeaderLines,
   cardLifecycle,
   cardTitleLine,
   compactCardText,
   conciseErrorText,
+  minimalCardHeaderLine,
+  parentCardHeaderLines,
   resultDetails,
+  type ParentCardLabel,
 } from "./card-primitives.ts";
-import type { ParentCardLabel } from "./card-primitives.ts";
+import { capRenderedRows, standardRowLimit } from "./density.ts";
 import { getPluginConfig } from "./config.ts";
 import { markFlush } from "./loaders.ts";
 
@@ -249,48 +251,64 @@ export function renderTaskCardLines(
   fingerprint?: string,
   parentLabel?: ParentCardLabel,
 ): readonly string[] | undefined {
-  const maxAgents = getPluginConfig().taskMaxAgents;
-  const data = taskData(args, result, maxAgents);
+  const initialLifecycle = cardLifecycle(result, options);
+  const rowBudget = initialLifecycle.detail.detailed ? Number.MAX_SAFE_INTEGER : getPluginConfig().taskMaxAgents;
+  const data = taskData(args, result, rowBudget);
   if (!data) return undefined;
   const lifecycle = cardLifecycle(result, options, { error: data.failure });
+  const body = taskHeader(data, lifecycle.running);
+  if (lifecycle.detail.minimal) {
+    return [
+      minimalCardHeaderLine(theme, width, {
+        body,
+        lifecycle,
+        right: data.duration,
+        fingerprint,
+        settledMark: "●",
+        parentLabel,
+      }),
+    ];
+  }
   const lines = parentCardHeaderLines(theme, width, {
-    body: taskHeader(data, lifecycle.running),
+    body,
     lifecycle,
     right: data.duration,
     fingerprint,
     settledMark: "●",
     parentLabel,
   });
-  if (!lifecycle.expanded) return lines;
-  if (data.rows.length === 0) {
-    if (lifecycle.error) {
-      lines.push(
-        cardTitleLine(
-          theme,
-          width,
-          conciseErrorText(result, {
-            fallback: "Task failed",
-            skipPattern: /^●?\s*Task\b/i,
-          }),
-          true,
-        ),
-      );
-    }
-    return lines;
+  let terminalError: string | undefined;
+  if (data.rows.length === 0 && lifecycle.error) {
+    terminalError = cardTitleLine(
+      theme,
+      width,
+      conciseErrorText(result, {
+        fallback: "Task failed",
+        skipPattern: /^●?\s*Task\b/iu,
+      }),
+      true,
+    );
+    lines.push(terminalError);
   }
-  const visible = data.rows.slice(0, maxAgents);
-  for (const row of visible) {
+  for (const row of data.rows) {
     lines.push(cardTitleLine(theme, width, `${row.agent} — ${row.status}`, row.failed));
     if (row.task) lines.push(cardDetailLine(theme, width, `task: ${row.task}`));
     if (row.output) lines.push(cardDetailLine(theme, width, `output: ${row.output}`));
-    if (row.error) lines.push(cardDetailLine(theme, width, `error: ${row.error}`));
+    if (row.error) {
+      terminalError = cardDetailLine(theme, width, `error: ${row.error}`);
+      lines.push(terminalError);
+    }
     if (row.artifact) lines.push(cardDetailLine(theme, width, `artifact: ${row.artifact}`));
   }
-  const hidden = Math.max(0, data.rowCount - visible.length);
-  if (hidden > 0) {
-    lines.push(cardDetailLine(theme, width, `… ${hidden} more ${hidden === 1 ? "agent" : "agents"}`));
+  const hiddenAgents = Math.max(0, data.rowCount - data.rows.length);
+  if (hiddenAgents > 0) {
+    lines.push(cardDetailLine(theme, width, `… ${hiddenAgents} more ${hiddenAgents === 1 ? "agent" : "agents"}`));
   }
-  return lines;
+  if (!lifecycle.detail.standard) return lines;
+  const maxRows = standardRowLimit(data.rowCount > 0 || lifecycle.error);
+  const hiddenRows = Math.max(1, lines.length - maxRows + 1);
+  const overflow = cardDetailLine(theme, width, `… ${hiddenRows} more rows`);
+  return capRenderedRows(lines, maxRows, overflow, terminalError);
 }
 
 export function renderTaskCard(

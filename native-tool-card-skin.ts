@@ -1,9 +1,11 @@
 // Display-only skin for native ToolExecutionComponent instances. It never registers or executes tools.
 
 import { compactCardText } from "./card-primitives.ts";
+import { capRenderedRows, detailProfile, standardRowLimit } from "./density.ts";
 import { isHubCardData, renderHubCardLines } from "./hub-card.ts";
-import { fingerprintForToolCall, identityForToolCall, toolFingerprint, toolFpBase } from "./results.ts";
-import { isTaskCardData, renderTaskCardLines } from "./task-card.ts";
+import { fingerprintForToolCall, identityForToolCall, isToolError, toolFingerprint, toolFpBase } from "./results.ts";
+import { renderTaskCardLines, isTaskCardData } from "./task-card.ts";
+import { formatRowLine } from "./theme.ts";
 
 export const NATIVE_TOOL_CARD_KIND = {
   hub: "hub",
@@ -24,6 +26,7 @@ interface CapturedToolExecutionState {
 
 export interface NativeToolCardSkinDeps {
   enabled: (kind: NativeToolCardKind) => boolean;
+  genericEnabled?: (toolName?: string) => boolean;
   theme: () => unknown;
   pump?: () => void;
   active?: () => boolean;
@@ -128,6 +131,25 @@ export function resetNativeToolCardPump(): void {
 }
 let skinned = new WeakSet<object>();
 let installed = false;
+export function applyNativeDensityRows(
+  theme: unknown,
+  width: number,
+  native: readonly string[],
+  result: unknown,
+  options?: { expanded?: boolean },
+): readonly string[] {
+  const profile = detailProfile(options);
+  if (profile.detailed || native.length <= 1) return native;
+  if (profile.minimal) return native.slice(0, 1);
+  const maxRows = standardRowLimit(result !== undefined);
+  const hiddenRows = Math.max(1, native.length - maxRows + 1);
+  const overflow = formatRowLine(theme, width, {
+    body: `… ${hiddenRows} more rows`,
+    indent: true,
+  });
+  const terminal = isToolError(result) ? native[native.length - 1] : undefined;
+  return capRenderedRows(native, maxRows, overflow, terminal);
+}
 
 function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
   if (skinned.has(child)) return;
@@ -212,16 +234,25 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
         return native;
       };
     }
+
     component["render"] = (...args: unknown[]): unknown => {
       const native = render.apply(child, args);
       try {
         const selected = selectedCard(state, native);
         state.kind = selected?.kind;
         syncPartialPump(state, deps);
-        if (!selected || !deps.enabled(selected.kind)) return native;
-        if (state.sealed && (state.result === undefined || state.partial)) return native;
         const width = args[0];
         if (typeof width !== "number") return native;
+        if (!selected || !deps.enabled(selected.kind)) {
+          const identity = state.toolCallId ? identityForToolCall(state.toolCallId) : undefined;
+          if (!deps.genericEnabled?.(identity?.toolName)) return native;
+          return Array.isArray(native) && native.every((line) => typeof line === "string")
+            ? applyNativeDensityRows(deps.theme(), width, native, state.result, {
+                expanded: state.expanded,
+              })
+            : native;
+        }
+        if (state.sealed && (state.result === undefined || state.partial)) return native;
         const options = { expanded: state.expanded, isPartial: state.partial };
         const fingerprint = skinFingerprint(selected.kind, selected.args, state);
         const parentLabel = deps.parentLabel?.(state.toolCallId, fingerprint, state.result);

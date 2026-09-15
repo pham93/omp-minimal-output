@@ -353,10 +353,11 @@ export interface PrettyRow {
   text: string;
 }
 
-export function selectPrettyRows(hunks: ParsedDiffHunk[], opts: { expanded?: boolean }): PrettyRow[] {
+export function selectPrettyRows(hunks: ParsedDiffHunk[], opts: { expanded?: boolean; maxRows?: number }): PrettyRow[] {
   try {
     if (!Array.isArray(hunks) || hunks.length === 0) return [];
-    const cap = opts?.expanded === true ? 60 : 10;
+    const cap =
+      typeof opts?.maxRows === "number" ? Math.max(0, Math.floor(opts.maxRows)) : opts?.expanded === true ? 60 : 10;
     const sections: PrettyRow[][] = [];
     const headers: ({ oldStart: number; oldCount: number } | null)[] = [];
     for (const hunk of hunks) {

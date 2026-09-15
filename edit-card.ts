@@ -3,10 +3,16 @@
 
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import { isAbsolute, relative } from "node:path";
-import { resolveParentCardLabel, type ParentCardLabel } from "./card-primitives.ts";
+import {
+  cardLifecycle,
+  minimalCardHeaderLine,
+  resolveParentCardLabel,
+  type ParentCardLabel,
+} from "./card-primitives.ts";
 import { diffStat, parsePipeDiff, parseUnifiedDiff, selectPrettyRows } from "./filters.ts";
 import type { PrettyRow } from "./filters.ts";
 import { markFlush } from "./loaders.ts";
+import { detailProfile, standardEditRowsPerFile } from "./density.ts";
 import { durationSuffix, isToolError, toolResultText } from "./results.ts";
 import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "./theme.ts";
 import { shortPathText, showWhitespace, truncatePlain } from "./text.ts";
@@ -160,7 +166,7 @@ export function collectPrettyEdit(
   const detailsRaw = (result as { details?: unknown } | null | undefined)?.details;
   const details = typeof detailsRaw === "object" && detailsRaw !== null ? (detailsRaw as Record<string, unknown>) : {};
   const argsFields = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
-  const expanded = (options as { expanded?: boolean } | null | undefined)?.expanded === true;
+  const detail = detailProfile(options);
   const error = isToolError(result, options);
   const argsEdits = argsFields["edits"];
   const editPaths: string[] = [];
@@ -223,13 +229,16 @@ export function collectPrettyEdit(
     let rows: PrettyRow[] = [];
     if (entry.diff.trim()) {
       const hunks = parseUnifiedDiff(entry.diff);
-      rows = selectPrettyRows(hunks.length > 0 ? hunks : parsePipeDiff(entry.diff), { expanded });
-      if (rows.length === 0) {
+      const cap = detail.detailed ? Number.POSITIVE_INFINITY : detail.standard ? standardEditRowsPerFile() : 0;
+      rows = selectPrettyRows(hunks.length > 0 ? hunks : parsePipeDiff(entry.diff), {
+        maxRows: cap,
+      });
+      if (rows.length === 0 && cap > 0) {
         const rawLines = entry.diff.split("\n");
-        const cap = expanded ? 60 : 10;
-        rows = rawLines.slice(0, cap).map((text) => ({ kind: " " as const, num: null, text }));
-        if (rawLines.length > cap) {
-          rows.push({ kind: "|" as const, num: null, text: `… (${rawLines.length - cap} more lines)` });
+        const rawCap = Number.isFinite(cap) ? cap : rawLines.length;
+        rows = rawLines.slice(0, rawCap).map((text) => ({ kind: " " as const, num: null, text }));
+        if (rawLines.length > rawCap) {
+          rows.push({ kind: "|" as const, num: null, text: `… (${rawLines.length - rawCap} more lines)` });
         }
       }
     }
@@ -290,12 +299,22 @@ export function renderPrettyEditCard(
   try {
     const data = collectPrettyEdit(args, result, options);
     const error = !live && data.error;
-    const expanded = (options as { expanded?: boolean } | null | undefined)?.expanded === true;
+    const lifecycle = cardLifecycle(result, options, { error });
     const c = new Container();
     c.addChild({
       render: (width: number): readonly string[] => {
         try {
           const parent = editParentStatus(parentLabel);
+          if (lifecycle.detail.minimal) {
+            return [
+              minimalCardHeaderLine(theme, width, {
+                body: paintHeaderStat(theme, error ? `${data.header} — failed` : data.header),
+                lifecycle,
+                right: live ? "" : data.right,
+                parentLabel: editParentStatus(parentLabel),
+              }),
+            ];
+          }
           const lines = parent
             ? [
                 formatRowLine(theme, width, { body: parent, live, error }),
@@ -315,7 +334,7 @@ export function renderPrettyEditCard(
                 }),
               ];
           const childIndent = parent ? EDIT_FILE_INDENT : TOOL_INDENT;
-          if (live || error || !expanded) {
+          if (live || error) {
             if (error) {
               const errorWidth = Math.max(
                 1,

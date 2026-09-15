@@ -1,5 +1,6 @@
 // Small shared mechanics for card renderers. Tool-specific parsing stays local.
 import { getPluginConfig } from "./config.ts";
+import { detailProfile, minimalToolSummary, type DetailProfile } from "./density.ts";
 import { isToolError, toolResultText } from "./results.ts";
 import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, isSettling, paintAt } from "./theme.ts";
 import { truncatePlain } from "./text.ts";
@@ -23,6 +24,7 @@ export interface CardLifecycle {
   running: boolean;
   settled: boolean;
   error: boolean;
+  detail: DetailProfile;
 }
 
 export type ParentCardLabel = string | (() => string);
@@ -138,12 +140,13 @@ export function cardLifecycle(result: unknown, options: unknown, input?: CardLif
   const running = result === undefined || partial;
   const settled = !running;
   const error = settled && (input?.error === true || isToolError(result, options));
+  const detail = detailProfile(options);
   const state = running
     ? CARD_LIFECYCLE_STATE.running
     : error
       ? CARD_LIFECYCLE_STATE.error
       : CARD_LIFECYCLE_STATE.success;
-  return { state, partial, expanded: cardIsExpanded(options), running, settled, error };
+  return { state, partial, expanded: detail.detailed, running, settled, error, detail };
 }
 
 export function cardHeaderLine(theme: unknown, width: number, options: CardHeaderOptions): string {
@@ -155,6 +158,17 @@ export function cardHeaderLine(theme: unknown, width: number, options: CardHeade
     right: options.right,
     fadeKey: options.fingerprint,
     mark: options.lifecycle.running || settling ? undefined : options.settledMark,
+  });
+}
+
+export function minimalCardHeaderLine(theme: unknown, width: number, options: ParentCardHeaderOptions): string {
+  const parentLabel = resolveParentCardLabel(options.parentLabel);
+  return cardHeaderLine(theme, width, {
+    body: minimalToolSummary(parentLabel, options.body),
+    lifecycle: options.lifecycle,
+    right: options.right,
+    fingerprint: options.fingerprint,
+    settledMark: options.settledMark,
   });
 }
 export function resolveParentCardLabel(parentLabel: ParentCardLabel | undefined): string {

@@ -42,10 +42,22 @@ export const INDICATOR = {
 } as const;
 export type IndicatorId = keyof typeof INDICATOR;
 
+export const DETAIL_LEVEL = {
+  minimal: "minimal",
+  standard: "standard",
+  detailed: "detailed",
+} as const;
+export type DetailLevel = (typeof DETAIL_LEVEL)[keyof typeof DETAIL_LEVEL];
+
 export interface PluginConfig extends WrappedToolSettings {
   opacity: number;
   indicator: IndicatorId;
   indicatorAnimation: boolean;
+  detailLevel: DetailLevel;
+  standardMaxRows: number;
+  standardOutputMaxRows: number;
+  standardEditRowsPerFile: number;
+  standardWriteMaxRows: number;
   nativeTask: boolean;
   taskMaxAgents: number;
   nativeHub: boolean;
@@ -62,6 +74,11 @@ export const DEFAULT_CONFIG: PluginConfig = {
   opacity: 0.5,
   indicator: "diamond",
   indicatorAnimation: true,
+  detailLevel: DETAIL_LEVEL.standard,
+  standardMaxRows: 3,
+  standardOutputMaxRows: 4,
+  standardEditRowsPerFile: 10,
+  standardWriteMaxRows: 10,
   nativeBash: false,
   nativeRead: false,
   nativeGrep: false,
@@ -138,6 +155,39 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         const v = src[key];
         if (typeof v === "string" && v in INDICATOR) {
           next.indicator = v as IndicatorId;
+        }
+        continue;
+      }
+      if (key === "detailLevel") {
+        const v = src[key];
+        if (typeof v === "string" && v in DETAIL_LEVEL) next.detailLevel = v as DetailLevel;
+        continue;
+      }
+      if (key === "standardMaxRows") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.standardMaxRows = Math.min(20, Math.max(1, Math.floor(v)));
+        }
+        continue;
+      }
+      if (key === "standardOutputMaxRows") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.standardOutputMaxRows = Math.min(30, Math.max(1, Math.floor(v)));
+        }
+        continue;
+      }
+      if (key === "standardEditRowsPerFile") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.standardEditRowsPerFile = Math.min(50, Math.max(1, Math.floor(v)));
+        }
+        continue;
+      }
+      if (key === "standardWriteMaxRows") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.standardWriteMaxRows = Math.min(50, Math.max(1, Math.floor(v)));
         }
         continue;
       }
