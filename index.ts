@@ -43,6 +43,13 @@ import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
 import { renderSearchCard, SEARCH_CARD_KIND } from "./search-card.ts";
+import {
+  CARD_GALLERY_CARD,
+  CARD_GALLERY_STATE,
+  isCardGalleryState,
+  renderNamedCardGallery,
+  type CardGalleryCard,
+} from "./card-gallery.ts";
 import { cardIsPartial } from "./card-primitives.ts";
 import { installReadGroupSkin } from "./read-group.ts";
 import {
@@ -162,6 +169,36 @@ let todosWidgetOn = false;
 const TODOS_WIDGET_KEY = "minimal-todos";
 const THOUGHT_PREVIEW_LINES = 3;
 const THOUGHT_WIDGET_KEY = "minimal-thinking";
+const GALLERY_WIDGET_KEY = "minimal-card-gallery";
+const GALLERY_CARD_ALIASES: Record<string, CardGalleryCard> = {
+  all: CARD_GALLERY_CARD.all,
+  ast: CARD_GALLERY_CARD.astGrep,
+  "ast-grep": CARD_GALLERY_CARD.astGrep,
+  ast_grep: CARD_GALLERY_CARD.astGrep,
+  debug: CARD_GALLERY_CARD.debug,
+  grep: CARD_GALLERY_CARD.grep,
+  hub: CARD_GALLERY_CARD.hub,
+  lsp: CARD_GALLERY_CARD.lsp,
+  task: CARD_GALLERY_CARD.task,
+  web: CARD_GALLERY_CARD.webSearch,
+  "web-search": CARD_GALLERY_CARD.webSearch,
+  web_search: CARD_GALLERY_CARD.webSearch,
+};
+let galleryCard: CardGalleryCard = CARD_GALLERY_CARD.all;
+let galleryState = CARD_GALLERY_STATE.expanded;
+let galleryRunning = false;
+let galleryUi:
+  | { setWidget?: (key: string, content: unknown, options?: { placement?: string }) => void }
+  | undefined;
+
+function hideCardGallery(): void {
+  try {
+    galleryUi?.setWidget?.(GALLERY_WIDGET_KEY, undefined);
+  } catch {
+    // Gallery is a manual visual aid; session cleanup must remain best-effort.
+  }
+  galleryRunning = false;
+}
 // Tools already re-registered custom card. wrapTool() config.ts decides
 // membership from WRAPPED_TOOL_REGISTRY minus native opt-outs.
 const wrapApplied = new Set<string>();
@@ -1393,6 +1430,7 @@ export default function (pi: ExtensionAPI) {
     if (
       activityLive ||
       thoughtLive ||
+      galleryRunning ||
       liveRuns.size !== 0 ||
       nativeToolCardsNeedPump() ||
       alertSkinActive() ||
@@ -1708,6 +1746,7 @@ export default function (pi: ExtensionAPI) {
       activityLiveSent = false;
       activityLeadFp = "";
       setTodosWidget(false);
+      hideCardGallery();
       resetThought();
       stopSpinTimerIfIdle(ctx);
       setWorking(ctx, undefined);
@@ -1718,7 +1757,77 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     resetNativeToolCardPump();
     setTodosWidget(false);
+    hideCardGallery();
   });
+  pi.registerCommand("minimal-gallery", {
+    description: "Show deterministic minimal card fixtures: [card|all] [running|success|error|expanded|off]",
+    handler: async (args, ctx) => {
+      const tokens = String(args ?? "")
+        .trim()
+        .toLowerCase()
+        .split(/\s+/u)
+        .filter(Boolean);
+      if ([tokens[0], tokens[1]].some((token) => token === "off" || token === "close")) {
+        galleryUi = ctx.ui;
+        hideCardGallery();
+        stopSpinTimerIfIdle(ctx);
+        ctx.ui.notify("Minimal card gallery hidden", "info");
+        return;
+      }
+      let nextCard = CARD_GALLERY_CARD.all;
+      let nextState = CARD_GALLERY_STATE.expanded;
+      let stateToken = tokens[1];
+      const first = tokens[0];
+      if (first && isCardGalleryState(first)) {
+        nextState = first;
+        stateToken = undefined;
+      } else if (first) {
+        const resolved = GALLERY_CARD_ALIASES[first];
+        if (!resolved) {
+          ctx.ui.notify(
+            "Usage: /minimal-gallery [all|web|grep|ast|lsp|debug|task|hub] [running|success|error|expanded|off]",
+            "warning",
+          );
+          return;
+        }
+        nextCard = resolved;
+      }
+      if (stateToken) {
+        if (!isCardGalleryState(stateToken)) {
+          ctx.ui.notify(
+            "Gallery state must be running, success, error, or expanded",
+            "warning",
+          );
+          return;
+        }
+        nextState = stateToken;
+      }
+      if (tokens.length > 2) {
+        ctx.ui.notify(
+          "Usage: /minimal-gallery [card] [running|success|error|expanded]",
+          "warning",
+        );
+        return;
+      }
+      galleryCard = nextCard;
+      galleryState = nextState;
+      galleryRunning = nextState === CARD_GALLERY_STATE.running;
+      galleryUi = ctx.ui;
+      ctx.ui.setWidget(
+        GALLERY_WIDGET_KEY,
+        (tui: unknown, theme: unknown) => {
+          if (theme !== undefined) readGroupTheme = theme;
+          if (typeof tui === "object" && tui !== null && "requestRender" in tui) spinUi = tui;
+          return renderNamedCardGallery(theme, galleryCard, galleryState);
+        },
+        { placement: "aboveEditor" },
+      );
+      if (galleryRunning) ensureSpinTimer(ctx);
+      else stopSpinTimerIfIdle(ctx);
+      ctx.ui.notify(`Gallery: ${galleryCard} · ${galleryState} — /minimal-gallery off to close`, "info");
+    },
+  });
+
   pi.registerCommand("todos-show", {
     description: "Show the current session todo card",
     handler: async (_args, ctx) => {
