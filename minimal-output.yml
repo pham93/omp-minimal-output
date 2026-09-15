@@ -13,3 +13,4 @@ tui:
   tight: true
 statusLine:
   preset: minimal
+  contextLine: embedded

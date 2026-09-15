@@ -16,9 +16,10 @@ export const NATIVE_TOOL_CARD_KIND = {
 export type NativeToolCardKind = (typeof NATIVE_TOOL_CARD_KIND)[keyof typeof NATIVE_TOOL_CARD_KIND];
 
 export function genericNativeDensityEligible(toolName: string | undefined): boolean {
-  if (!toolName) return true;
-  if (toolName === NATIVE_TOOL_CARD_KIND.task || toolName === NATIVE_TOOL_CARD_KIND.hub) return false;
-  return !isWrappedTool(toolName);
+  if (!toolName) return false;
+  const normalized = toolName.toLowerCase();
+  if (normalized === NATIVE_TOOL_CARD_KIND.task || normalized === NATIVE_TOOL_CARD_KIND.hub) return false;
+  return !isWrappedTool(normalized);
 }
 
 interface CapturedToolExecutionState {

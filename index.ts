@@ -63,6 +63,7 @@ import {
 import { alertSkinActive, installWarningSkin, invalidateLiveAlerts } from "./warning-skin.ts";
 import { installTodoChrome } from "./todo-hud.ts";
 import { acquireRuntimeOwner } from "./runtime-owner.ts";
+import { installMinimalPromptEditor, registerMinimalComposerShapes } from "./composer-shapes.ts";
 import {
   latestTodoDetailsFromEntries,
   parseTodoPhases,
@@ -1166,10 +1167,12 @@ function skillPromptRenderer(message: unknown, options: unknown, theme: unknown)
 }
 
 export default function (pi: ExtensionAPI) {
+  registerMinimalComposerShapes(pi);
   const runtimeOwner = acquireRuntimeOwner();
   runtimeIsActive = runtimeOwner.owns;
   enabled = true;
   let readGroupTheme: unknown;
+  let disposeMinimalPromptEditor = (): void => {};
   // Native grouped reads (ReadToolGroupComponent) bypass the wrapped-read
   // renderers; skin them at addChild time so transcript rebuilds and live
   // grouping repaint through formatRowLine. Before any pi.on registration:
@@ -1628,6 +1631,8 @@ export default function (pi: ExtensionAPI) {
     disposeNativeToolCardSkin();
     disposeAssistantCommentarySkin();
     disposeReadGroupSkin();
+    disposeMinimalPromptEditor();
+    disposeMinimalPromptEditor = (): void => {};
     spinUi = undefined;
     spinCtx = undefined;
     thoughtUi = undefined;
@@ -1658,6 +1663,7 @@ export default function (pi: ExtensionAPI) {
       // formatRowLine degrades to unstyled without a theme.
     }
     wrapAllTools();
+    if (ctx.hasUI) disposeMinimalPromptEditor = installMinimalPromptEditor(ctx.ui, () => ctx.getContextUsage());
     grabTui(ctx);
     ensureSpinTimer(ctx);
     try {

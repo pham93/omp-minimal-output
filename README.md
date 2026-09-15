@@ -12,6 +12,16 @@ Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 
 `detailedMaxRows` defaults to `20` and caps both configured Detailed mode and Ctrl+O expansion.
 
+## Input composer styles
+
+The plugin registers three choices in `/settings` → **Composer Shape**:
+
+- **Minimal Output · Bottom Dock** — rounded transparent prompt with OMP's configured status and context gauge in the bottom rule.
+- **Minimal Output · Top Dock** — the same prompt with status and context gauge in the top rule.
+- **Minimal Output · Filled Dock** — bottom-docked status with the theme's input surface fill.
+
+All three keep OMP's `statusLine.*` segment selection and live values; the plugin only changes the normal folder mark to `⌂`. The host context gauge is promoted to an explicit `[████░░░░] percent/window` bar using live `getContextUsage()` data, while `minimal-output.yml` keeps `statusLine.contextLine: embedded` as the default. The selected shape is stored by OMP in `composer.shape`; the plugin adds no parallel picker.
+
 ## Card settings
 
 | Card       | Native fallback                     | Standard item selection                            |
@@ -99,11 +109,11 @@ Extension generations use one process-global runtime lease. A hot reload dispose
 
 ## Files
 
-- `index.ts` — extension entry: 8 shadows plus display-only commentary, Task/Hub, read-group, warning, and todo skins; lifecycle handlers; `/minimal-on|off|status`. `assistant-commentary-skin.ts` consumes provider phase metadata without adding transcript records; `runtime-owner.ts` owns hot-reload cleanup across module generations.
+- `index.ts` — extension entry: 8 shadows plus display-only commentary, Task/Hub, read-group, warning, todo skins; composer-shape registration and lifecycle handlers; `/minimal-on|off|status`. `composer-shapes.ts` owns the three rounded prompt styles and custom editor frame. `assistant-commentary-skin.ts` consumes provider phase metadata without adding transcript records; `runtime-owner.ts` owns hot-reload cleanup across module generations.
 - `card-primitives.ts` — shared lifecycle, text sanitation, header, detail, error, and limit mechanics. `task-card.ts` and `hub-card.ts` own tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
 - `todos-header.ts` / `todo-hud.ts` — sticky todo widget and native TODO HUD handling. `edit-card.ts`, `eval-card.ts`, and `web-search-card.ts` — dedicated wrapped-tool cards.
 - `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` — pure output filters.
-- `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`.
+- `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`, and embedded context gauge.
 - `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`.
 
 ## Constraints

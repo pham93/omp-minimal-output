@@ -185,6 +185,7 @@
   },
   "files": [
     "index.ts",
+    "composer-shapes.ts",
     "runtime-owner.ts",
     "filters.ts",
     "text.ts",
