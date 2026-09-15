@@ -68,6 +68,7 @@ function detailsHavePhases(result: unknown): boolean {
 
 export interface TodoChromeDeps {
   hideHud: () => boolean;
+  hideCard?: () => boolean;
   skinCard: () => boolean;
   paintCard: (width: number, expanded: boolean) => readonly string[];
   onHud?: () => void;
@@ -124,7 +125,13 @@ function skinTodoCard(child: object, deps: TodoChromeDeps): void {
     return origSetExpanded(next);
   };
   c.render = function (width: number): readonly string[] {
-    if (deps.active?.() === false || !isTodo || !deps.skinCard()) return origRender(width);
+    if (deps.active?.() === false || !isTodo) return origRender(width);
+    try {
+      if (deps.hideCard?.()) return [];
+    } catch {
+      // Native transcript card remains the safe fallback.
+    }
+    if (!deps.skinCard()) return origRender(width);
     try {
       return deps.paintCard(width, expanded);
     } catch {

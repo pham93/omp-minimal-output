@@ -27,11 +27,15 @@ flowchart LR
     exec --> tend["tool_execution_end"]
     tend --> tr["tool_result → collapseToolText"]
     tr --> rr["shadow renderResult\nconfigured mark; web search ●"]
-    intent["assistant intent / tool args"] -.-> aside["aside minimal-activity record\nlive working line"]
-    aside -.-> freeze["agent_end / turn_end\nfreeze settled totals"]
+    intent["literal tool arg i"] -.-> status["AI status header\nindented tool-context rail"]
+    status -.-> settle["tool result\nsettled outcome"]
 ```
 
 Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. `web_search` shows source count/provider and expands to bold titles with dim URLs; `edit` renders a compact gutter diff and `eval` replaces the boxed output panel.
+
+The literal tool argument `i` is never discarded. Generic wrapped tools keep it as the existing grouped parent above tool rows. Native and dedicated-card tools receive one display-only `minimal-activity` pair: animated status plus dim `╰─` context rail while live, then `◆ status — outcome` plus the same rail when settled. Retired live records render empty, so settled rows never duplicate them.
+
+The sticky Todo widget is the single Todo surface after a successful widget mount. Its native transcript card is suppressed only while that widget is active; headless, disabled, or failed widget mounts retain the transcript card as the safe fallback.
 
 Thoughts are fully hidden (`registerAssistantThinkingRenderer` is supplemental-only). Spill files land in `$TMPDIR/omp-minimal-*.log`.
 

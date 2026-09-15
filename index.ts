@@ -100,16 +100,20 @@ let spinStartedAt = 0;
 let activityStartedAt = 0;
 let activityLabel = "";
 let activityLive = false;
-let activityTotal = "";
 // Per-turn mirror identity for the aside-channel records below. The live row
 // is sent once per turn; a settled record goes out on every tool drain.
 // Renderer state freezes in message details so old rows never mirror a later run.
 let activityRunId: string | null = null;
 let activityLiveSent = false;
+let activityContext = "";
+let activityOutcome = "";
+let activityStatusFp = "";
+let activityResultSeen = false;
+let activitySettledSent = false;
+let activityError = false;
 let activityApiDead = false;
 const activityProcessTag = Math.floor(Math.random() * 36 ** 6).toString(36);
 let activityRunSeq = 0;
-const activitySettledTotals = new Map<string, { total: number; label: string }>();
 const liveRuns = new Map<string, { label: string; startedAt: number; fp: string }>();
 let activityLeadFp = "";
 let enabled = true;
@@ -848,23 +852,140 @@ function renderToolVisual(
   return paintGroup(theme, gid);
 }
 
-type ActivityDetails = { kind?: unknown; label?: unknown; startedAt?: unknown; total?: unknown; runId?: unknown };
+function toolUsesGroupedStatus(toolName: string): boolean {
+  if (!wrapApplied.has(toolName)) return false;
+  return CARD_RENDERERS[toolName as WrappedTool] === undefined;
+}
 
-function activityDetailsOf(message: unknown):
-  | {
-      kind: string;
-      label: string;
-      startedAt: number;
-      total: number;
-      runId: string;
-    }
-  | undefined {
+const ACTIVITY_RECORD_KIND = {
+  live: "live",
+  settled: "settled",
+} as const;
+
+type ActivityRecordKind = (typeof ACTIVITY_RECORD_KIND)[keyof typeof ACTIVITY_RECORD_KIND];
+
+const ACTIVITY_TOOL_TITLE = {
+  ast_grep: "AST Grep",
+  debug: "Debug",
+  hub: "Hub",
+  lsp: "LSP",
+  task: "Task",
+  todo: "Todo",
+  web_search: "Search",
+} as const;
+
+interface ActivityDetails {
+  kind?: unknown;
+  label?: unknown;
+  context?: unknown;
+  outcome?: unknown;
+  error?: unknown;
+  startedAt?: unknown;
+  total?: unknown;
+  runId?: unknown;
+}
+
+interface ParsedActivityDetails {
+  kind: ActivityRecordKind;
+  label: string;
+  context: string;
+  outcome: string;
+  error: boolean;
+  startedAt: number;
+  total: number;
+  runId: string;
+}
+
+interface ActivityStatusPaint {
+  label: () => string;
+  context: () => string;
+  outcome: () => string;
+  live: () => boolean;
+  error: () => boolean;
+  visible?: () => boolean;
+  fadeKey: string;
+}
+
+function activityRecordOf(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function firstActivityText(fields: Record<string, unknown> | undefined, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = fields?.[key];
+    if (typeof value === "string" && value.trim()) return value.replace(/\s+/g, " ").trim();
+  }
+  return "";
+}
+
+function activityToolContext(toolName: string, args: unknown): string {
+  const normalized = toolName.trim().toLowerCase();
+  const fields = activityRecordOf(args);
+  const title = ACTIVITY_TOOL_TITLE[normalized as keyof typeof ACTIVITY_TOOL_TITLE] ?? toolActionLabel(toolName, {});
+  const action = firstActivityText(fields, "action", "operation", "op", "method");
+  const target = firstActivityText(
+    fields,
+    "symbol",
+    "file",
+    "path",
+    "query",
+    "target",
+    "program",
+    "task",
+    "name",
+    "to",
+  );
+  if (normalized === "lsp" || normalized === "debug" || normalized === "hub") {
+    const head = action ? `${title} ${action}` : title;
+    return target ? `${head} · ${target}` : head;
+  }
+  if (Object.hasOwn(ACTIVITY_TOOL_TITLE, normalized)) return target ? `${title} · ${target}` : title;
+  const projected = toolActionLabel(toolName, args);
+  return projected || title;
+}
+
+const ACTIVITY_OUTCOME_RANK = {
+  reference: 0,
+  diagnostic: 1,
+  match: 2,
+  source: 3,
+  result: 4,
+  file: 5,
+  item: 6,
+  agent: 7,
+  job: 8,
+  task: 9,
+} as const;
+
+function activityOutcomeOf(result: unknown): string {
+  if (isToolError(result)) return "failed";
+  const text = toolResultText(result).replace(/\x1b\[[0-9;]*m/g, " ").replace(/\s+/g, " ");
+  const counts = text.matchAll(
+    /\b(\d+)\s+(references?|diagnostics?|matches?|sources?|files?|items?|results?|agents?|jobs?|tasks?)\b/gi,
+  );
+  let best: { rank: number; text: string } | undefined;
+  for (const count of counts) {
+    if (!count[1] || !count[2]) continue;
+    const noun = count[2].toLowerCase();
+    const singular = noun.endsWith("s") ? noun.slice(0, -1) : noun;
+    const rank = ACTIVITY_OUTCOME_RANK[singular as keyof typeof ACTIVITY_OUTCOME_RANK] ?? 99;
+    if (!best || rank < best.rank) best = { rank, text: `${count[1]} ${noun}` };
+  }
+  return best?.text ?? "";
+}
+
+function activityDetailsOf(message: unknown): ParsedActivityDetails | undefined {
   try {
     const details = ((message as { details?: unknown })?.details ?? {}) as ActivityDetails;
     if (typeof details.label !== "string" || !details.label) return undefined;
     return {
-      kind: details.kind === "settled" ? "settled" : "live",
+      kind: details.kind === ACTIVITY_RECORD_KIND.settled ? ACTIVITY_RECORD_KIND.settled : ACTIVITY_RECORD_KIND.live,
       label: details.label,
+      context: typeof details.context === "string" ? details.context : "",
+      outcome: typeof details.outcome === "string" ? details.outcome : "",
+      error: details.error === true,
       startedAt: typeof details.startedAt === "number" && Number.isFinite(details.startedAt) ? details.startedAt : 0,
       total:
         typeof details.total === "number" && Number.isFinite(details.total) && details.total >= 0
@@ -877,54 +998,68 @@ function activityDetailsOf(message: unknown):
   }
 }
 
-function activityStaleTail(startedAt: number): string {
-  if (!(startedAt > 0)) return " (…)";
-  const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  if (elapsed > 3600) return " (…)";
-  return ` (${elapsed}s)`;
+function paintActivityStatus(theme: unknown, status: ActivityStatusPaint): Container {
+  const c = new Container();
+  c.addChild({
+    render: (width: number): readonly string[] => {
+      const live = status.live();
+      const error = status.error();
+      const outcome = status.outcome();
+      if (status.visible?.() === false) return [];
+      const label = status.label();
+      const context = status.context();
+      const body = !live && outcome ? `${label} — ${outcome}` : label;
+      const lines = [
+        formatRowLine(theme, width, {
+          body,
+          live,
+          error,
+          fadeKey: status.fadeKey,
+        }),
+      ];
+      if (context) {
+        lines.push(
+          formatRowLine(theme, width, {
+            body: context,
+            indent: true,
+            tree: "last",
+            error,
+          }),
+        );
+      }
+      return lines;
+    },
+  });
+  markFlush?.(c);
+  return c;
 }
 
-// Mirror rows read frozen message details first: settled records are pure
-// functions of their own payload, so rebuilds and resumed sessions can never
-// show a later run's label. Only the current turn's live row follows shared
-// module state (animated frame + latest label + burst elapsed on the 120ms
-// pump repaints); anything retired freezes via the settled-totals map.
-function activityRenderer(_message: unknown, _options: unknown, theme: unknown) {
+// Activity rows supplement native/dedicated cards only. Generic wrapped tools
+// already render the same status header above their grouped child rows.
+function activityRenderer(message: unknown, _options: unknown, theme: unknown): Container {
   if (!runtimeIsActive()) return new Container();
-  const d = activityDetailsOf(_message);
-  if (!d) return new Container();
-  if (d.kind === "settled") {
-    return paintRow(theme, { body: d.label, right: ` (${d.total}s)` });
-  }
-  if (d.runId !== "" && d.runId === activityRunId && activityLive) {
-    const runId = d.runId;
-    const frozenRight = () => {
-      const frozen = activitySettledTotals.get(runId);
-      if (frozen !== undefined) return ` (${frozen.total}s)`;
-      return activityStaleTail(d.startedAt);
-    };
-    return paintRow(theme, {
-      body: () => {
-        if (runId === activityRunId && activityLive) return activityLabel || d.label;
-        return activitySettledTotals.get(runId)?.label || d.label;
-      },
-      live: true,
-      fadeKey: `act:${runId}`,
-      isLive: () => runId === activityRunId && activityLive,
-      liveRight: () => elapsedSuffix(activityStartedAt > 0 ? activityStartedAt : d.startedAt),
-      right: frozenRight,
+  const details = activityDetailsOf(message);
+  if (!details) return new Container();
+  if (details.kind === ACTIVITY_RECORD_KIND.settled) {
+    return paintActivityStatus(theme, {
+      label: () => details.label,
+      context: () => details.context,
+      outcome: () => details.outcome,
+      live: () => false,
+      error: () => details.error,
+      fadeKey: `act:${details.runId}`,
     });
   }
-  const frozen = d.runId ? activitySettledTotals.get(d.runId) : undefined;
-  if (frozen !== undefined) {
-    return paintRow(theme, {
-      body: frozen.label || activityLabel || d.label,
-      right: ` (${frozen.total}s)`,
-    });
-  }
-  return paintRow(theme, {
-    body: d.label,
-    right: activityStaleTail(d.startedAt),
+  if (!details.runId || details.runId !== activityRunId || !activityLive) return new Container();
+  const runId = details.runId;
+  return paintActivityStatus(theme, {
+    label: () => (runId === activityRunId ? activityLabel || details.label : details.label),
+    context: () => (runId === activityRunId ? activityContext || details.context : details.context),
+    outcome: () => "",
+    live: () => runId === activityRunId && activityLive,
+    error: () => false,
+    visible: () => runId === activityRunId && activityLive,
+    fadeKey: `act:${runId}`,
   });
 }
 
@@ -1042,6 +1177,7 @@ export default function (pi: ExtensionAPI) {
   });
   const disposeTodoChrome = installTodoChrome(Container, {
     hideHud: () => runtimeOwner.owns() && enabled && getPluginConfig().todoHud === false,
+    hideCard: () => runtimeOwner.owns() && enabled && todosWidgetOn,
     skinCard: () => runtimeOwner.owns() && enabled,
     active: runtimeOwner.owns,
     paintCard: (width, expanded) => {
@@ -1101,45 +1237,77 @@ export default function (pi: ExtensionAPI) {
       activityApiDead = true;
     }
   };
-  const rememberSettledTotal = (runId: string, total: number, label: string): void => {
-    activitySettledTotals.set(runId, { total, label });
-    if (activitySettledTotals.size > 100) {
-      const oldest = activitySettledTotals.keys().next();
-      if (!oldest.done) activitySettledTotals.delete(oldest.value);
-    }
+  const resetActivityPresentation = (): void => {
+    activityLiveSent = false;
+    activityContext = "";
+    activityOutcome = "";
+    activityStatusFp = "";
+    activityResultSeen = false;
+    activitySettledSent = false;
+    activityError = false;
   };
-  const freezeActivityRun = (): void => {
-    if (activityRunId !== null && !activitySettledTotals.has(activityRunId)) {
-      const base = activityStartedAt > 0 ? activityStartedAt : Date.now();
-      rememberSettledTotal(activityRunId, Math.max(0, Math.floor((Date.now() - base) / 1000)), activityLabel);
-    }
+
+  const maybeSendSettledActivity = (force = false): void => {
+    if (
+      !activityLiveSent ||
+      activitySettledSent ||
+      activityRunId === null ||
+      (activityLive && !force) ||
+      liveRuns.size > 0 ||
+      (!activityResultSeen && !force)
+    )
+      return;
+    const total = Math.max(0, Math.floor((Date.now() - Math.max(1, activityStartedAt)) / 1000));
+    sendActivityRecord({
+      kind: ACTIVITY_RECORD_KIND.settled,
+      label: activityLabel,
+      context: activityContext,
+      outcome: activityOutcome,
+      error: activityError,
+      startedAt: activityStartedAt,
+      total,
+      runId: activityRunId,
+    });
+    activitySettledSent = true;
+    markSettling(`act:${activityRunId}`);
+  };
+
+  const clearActivityRun = (): void => {
+    spinStartedAt = 0;
+    activityStartedAt = 0;
+    activityLabel = "";
+    activityLive = false;
+    activityRunId = null;
+    activityLeadFp = "";
+    resetActivityPresentation();
   };
   const applyIntent = (text: string, startedAt: number): void => {
     if (!text) return;
+    if (activitySettledSent) {
+      activityRunId = null;
+      activityLabel = "";
+      resetActivityPresentation();
+    }
     if (activityRunId !== null && text === activityLabel) {
       activityLive = true;
       return;
     }
-    // Several tools share one status row. While any tool in the group is
-    // live, keep the parent and (optionally) refresh its label in place.
+    // Several grouped tools share one status parent. While any child is
+    // live, refresh the parent label without creating another transcript row.
     if (activityRunId !== null && liveRuns.size > 0) {
       activityLabel = text;
       activityLive = true;
       return;
     }
     if (activityRunId !== null && activityLabel) {
-      freezeActivityRun();
-      activityRunId = `${activityProcessTag}-${activityRunSeq++}`;
-      activityLiveSent = false;
-      activityLeadFp = "";
+      maybeSendSettledActivity(true);
+      activityRunId = null;
+      resetActivityPresentation();
     }
     activityLabel = text;
-    if (activityRunId === null) activityRunId = `${activityProcessTag}-${activityRunSeq++}`;
+    activityRunId = `${activityProcessTag}-${activityRunSeq++}`;
     activityStartedAt = startedAt;
-    if (!activityLiveSent) {
-      activityLiveSent = true;
-      textFades.set(`act:${activityRunId}`, Date.now());
-    }
+    textFades.set(`act:${activityRunId}`, Date.now());
     activityLive = true;
   };
   // Row animation pump. Core only ticks spinner frames for its own
@@ -1284,7 +1452,6 @@ export default function (pi: ExtensionAPI) {
     // merely by extending this registry.
     const approval = "approval" in definition ? definition.approval : undefined;
     const renderer = CARD_RENDERERS[name];
-    wrapApplied.add(name);
     const description = typeof src["description"] === "string" ? src["description"] : name;
     const parameters = src["parameters"];
     try {
@@ -1334,6 +1501,7 @@ export default function (pi: ExtensionAPI) {
           );
         },
       });
+    wrapApplied.add(name);
     } catch {
       // Already registered or host rejected the wrap.
     }
@@ -1409,10 +1577,7 @@ export default function (pi: ExtensionAPI) {
     thoughtLive = false;
     agentRunning = false;
     liveRuns.clear();
-    activitySettledTotals.clear();
-    activityRunId = null;
-    activityLiveSent = false;
-    activityLeadFp = "";
+    clearActivityRun();
     thoughtText = "";
     thoughtSettledLabel = "";
     kickAlertPump = () => {};
@@ -1515,13 +1680,20 @@ export default function (pi: ExtensionAPI) {
           // Stale cache stays; the collapse path below is unaffected.
         }
       }
+      const resultFp = eventFingerprint(event);
+      if (activityLiveSent && resultFp === activityStatusFp) {
+        activityResultSeen = true;
+        activityError = isToolError(event);
+        activityOutcome = activityOutcomeOf(event);
+        maybeSendSettledActivity();
+      }
       const frozen = frozenGroupKeys(event.toolName);
       const withFrozen = (details: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
         if (Object.keys(frozen).length === 0) return details;
         return { ...(details ?? {}), ...frozen };
       };
       const lead =
-        eventFingerprint(event) === activityLeadFp && activityLabel
+        resultFp === activityLeadFp && activityLabel
           ? { minimalActivityLead: true, minimalActivityLabel: activityLabel }
           : undefined;
       const withLead = (details: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
@@ -1572,8 +1744,10 @@ export default function (pi: ExtensionAPI) {
         ? (event as { toolName: string }).toolName
         : "tool";
     const args = (event as { input?: unknown; args?: unknown }).input ?? (event as { args?: unknown }).args;
+    const intent = intentFromEvent(event) ?? (activityLabel || summarizeEvent(event));
+    applyIntent(intent, startedAt);
     liveRuns.set(event.toolCallId, {
-      label: intentFromEvent(event) ?? activityLabel,
+      label: intent,
       startedAt,
       fp,
     });
@@ -1581,20 +1755,9 @@ export default function (pi: ExtensionAPI) {
       spinStartedAt = startedAt;
       activityLeadFp = fp;
     }
-    activityTotal = "";
-    if (activityRunId === null) {
-      const intent = intentFromEvent(event) ?? summarizeEvent(event);
-      applyIntent(intent, startedAt);
-    } else {
-      activityLive = true;
-    }
-    // Task and Hub paint through the native component skin when enabled.
-    if (
-      toolName !== "edit" &&
-      toolName !== "eval" &&
-      toolName !== "web_search" &&
-      !nativeToolCardSkinActive(toolName)
-    ) {
+    tryWrapTool(toolName);
+    const groupedStatus = toolUsesGroupedStatus(toolName);
+    if (groupedStatus) {
       upsertGroupRow(fp, {
         body: toolActionLabel(toolName, args),
         live: true,
@@ -1602,8 +1765,18 @@ export default function (pi: ExtensionAPI) {
         right: "",
         startedAt,
       });
+    } else if (!activityLiveSent && activityRunId !== null) {
+      activityContext = activityToolContext(toolName, args);
+      activityStatusFp = fp;
+      activityLiveSent = true;
+      sendActivityRecord({
+        kind: ACTIVITY_RECORD_KIND.live,
+        label: activityLabel,
+        context: activityContext,
+        startedAt: activityStartedAt,
+        runId: activityRunId,
+      });
     }
-    tryWrapTool(toolName);
     ensureSpinTimer(ctx);
     setThoughtWidget(false);
     requestRepaint();
@@ -1619,14 +1792,10 @@ export default function (pi: ExtensionAPI) {
     liveRuns.delete(event.toolCallId);
     if (ended) markSettling(ended.fp);
     if (liveRuns.size === 0) {
-      const base = activityStartedAt > 0 ? activityStartedAt : Date.now();
-      const total = Math.max(0, Math.floor((Date.now() - base) / 1000));
-      activityTotal = ` (${total}s)`;
-      if (activityRunId !== null) {
-        rememberSettledTotal(activityRunId, total, activityLabel);
-        markSettling(`act:${activityRunId}`);
-      }
+      activityLive = false;
       spinStartedAt = 0;
+      if (activityRunId !== null) markSettling(`act:${activityRunId}`);
+      maybeSendSettledActivity();
     } else {
       let earliest = Number.POSITIVE_INFINITY;
       for (const value of liveRuns.values()) earliest = Math.min(earliest, value.startedAt);
@@ -1667,15 +1836,9 @@ export default function (pi: ExtensionAPI) {
     if (!runtimeOwner.owns()) return;
     liveRuns.clear();
     agentRunning = false;
-    freezeActivityRun();
-    spinStartedAt = 0;
-    activityStartedAt = 0;
-    activityLabel = "";
     activityLive = false;
-    activityTotal = "";
-    activityRunId = null;
-    activityLiveSent = false;
-    activityLeadFp = "";
+    maybeSendSettledActivity(true);
+    clearActivityRun();
     resetThought();
     refreshTodosWidget();
     stopSpinTimerIfIdle(ctx);
@@ -1686,15 +1849,9 @@ export default function (pi: ExtensionAPI) {
     if (!runtimeOwner.owns()) return;
     liveRuns.clear();
     agentRunning = false;
-    freezeActivityRun();
-    spinStartedAt = 0;
-    activityStartedAt = 0;
-    activityLabel = "";
     activityLive = false;
-    activityTotal = "";
-    activityRunId = null;
-    activityLiveSent = false;
-    activityLeadFp = "";
+    maybeSendSettledActivity(true);
+    clearActivityRun();
     resetThought();
     refreshTodosWidget();
     stopSpinTimerIfIdle(ctx);
@@ -1707,8 +1864,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       if (!runtimeOwner.owns()) return;
       enabled = true;
-      activityRunId = null;
-      activityLiveSent = false;
+      clearActivityRun();
       installTodosWidget();
       ctx.ui.notify("Minimal output enabled", "info");
     },
@@ -1718,19 +1874,13 @@ export default function (pi: ExtensionAPI) {
     description: "Disable grok-build-style minimal output",
     handler: async (_args, ctx) => {
       if (!runtimeOwner.owns()) return;
-      enabled = false;
-      resetNativeToolCardPump();
       liveRuns.clear();
       agentRunning = false;
-      freezeActivityRun();
-      spinStartedAt = 0;
-      activityStartedAt = 0;
-      activityLabel = "";
       activityLive = false;
-      activityTotal = "";
-      activityRunId = null;
-      activityLiveSent = false;
-      activityLeadFp = "";
+      maybeSendSettledActivity(true);
+      enabled = false;
+      resetNativeToolCardPump();
+      clearActivityRun();
       setTodosWidget(false);
       resetThought();
       stopSpinTimerIfIdle(ctx);
