@@ -116,25 +116,25 @@ flowchart TD
     T -->|no| OUT["one-liner"]
 ```
 
-Contract: line 1 is always the collapsed row. Dedicated cards (`edit`, `eval`, `web_search`, Task, Hub) expand from stashed text or structured native details, not the one-liner.
+Contract: line 1 is always the collapsed row. Dedicated cards (`write`, `edit`, `eval`, `web_search`, Task, Hub) expand from stashed text or structured native details, not the one-liner; `detailedMaxRows` caps each expanded card.
 
 ## 6. Card catalog
 
-| Card       | Collapsed                                    | Expanded                                          | Limit                 |
-| ---------- | -------------------------------------------- | ------------------------------------------------- | --------------------- |
-| Bash test  | `◆ bash \`cmd\` — Tests: P passed, F failed` | failure lines + summary                           | spill cap             |
-| Bash build | `◆ bash \`cmd\` — E errors, W warnings`      | error lines + head/tail                           | spill cap             |
-| Bash git   | `◆ git sub — stat`                           | kept lines                                        | spill cap             |
-| Read       | `◆ Read path`                                | full text behind `Ctrl+O`                         | spill cap             |
-| Write      | `◆ Write path`                               | full text behind `Ctrl+O`                         | spill cap             |
-| Grep / LSP | `◆ Search \`pat\` — F files, H hits`         | per-file groups, ≤3 lines each                    | spill cap             |
-| Glob       | `◆ Glob \`pat\` — N files`                   | path list                                         | spill cap             |
-| Edit       | `Edit path — +a/−b`                          | gutter diff, syntax-colored                       | 10 rows / 60 expanded |
-| Eval       | `🐍 title / first line`                      | input 3→60, output 5→60                           | see row               |
-| Web search | `Search \`q\` — N sources`                   | bold titles + dim URLs                            | `webSearchMaxResults` |
-| Task       | `Task N agents — completed`                  | agent / status / task / output / error / artifact | `taskMaxAgents`       |
-| Hub        | `Hub op target — summary`                    | peer / job / message rows                         | `hubMaxItems`         |
-| Read group | `◆ Read N files`                             | one row per file                                  | —                     |
+| Card       | Collapsed                                    | Expanded                                      | Limit             |
+| ---------- | -------------------------------------------- | --------------------------------------------- | ----------------- |
+| Bash test  | `◆ bash \`cmd\` — Tests: P passed, F failed` | failure lines + summary                       | spill cap         |
+| Bash build | `◆ bash \`cmd\` — E errors, W warnings`      | error lines + head/tail                       | spill cap         |
+| Bash git   | `◆ git sub — stat`                           | kept lines                                    | spill cap         |
+| Read       | `◆ Read path`                                | bounded content preview                       | `detailedMaxRows` |
+| Write      | `◆ Write path`                               | bounded live syntax-highlighted input preview | `detailedMaxRows` |
+| Grep / LSP | `◆ Search \`pat\` — F files, H hits`         | bounded match groups                          | `detailedMaxRows` |
+| Glob       | `◆ Glob \`pat\` — N files`                   | bounded path list                             | `detailedMaxRows` |
+| Edit       | `Edit path — +a/−b`                          | bounded gutter diff, syntax-colored           | `detailedMaxRows` |
+| Eval       | `🐍 title / first line`                      | bounded input and output                      | `detailedMaxRows` |
+| Web search | `Search \`q\` — N sources`                   | bounded bold titles + dim URLs                | `detailedMaxRows` |
+| Task       | `Task N agents — completed`                  | bounded agent / status / result rows          | `detailedMaxRows` |
+| Hub        | `Hub op target — summary`                    | bounded peer / job / message rows             | `detailedMaxRows` |
+| Read group | `◆ Read N files`                             | bounded file list                             | `detailedMaxRows` |
 
 Running rows replace the summary with `running` + elapsed. Error rows keep the header and add red detail lines. See `EXAMPLES.md` for literal rows.
 
@@ -144,10 +144,11 @@ Running rows replace the summary with `running` + elapsed. Error rows keep the h
 | ----------------------------------------------------- | ----------------- | -------------------------------------------------- |
 | `nativeBash/Read/Grep/Glob/Write/Edit/Eval/WebSearch` | `false`           | `true` restores native renderer per tool           |
 | `nativeTask`                                          | `false`           | `true` restores native Task, result text untouched |
-| `taskMaxAgents`                                       | `4` (`1..8`)      | expanded agent rows                                |
+| `taskMaxAgents`                                       | `4` (`1..8`)      | Standard Task item selection                       |
 | `nativeHub`                                           | `false`           | `true` restores native Hub                         |
-| `hubMaxItems`                                         | `5` (`1..10`)     | expanded Hub rows                                  |
-| `webSearchMaxResults`                                 | `5` (`1..10`)     | expanded sources                                   |
+| `hubMaxItems`                                         | `5` (`1..10`)     | Standard Hub item selection                        |
+| `webSearchMaxResults`                                 | `5` (`1..10`)     | Standard source selection                          |
+| `detailedMaxRows`                                     | `20` (`1..100`)   | Detailed and Ctrl+O total-row ceiling              |
 | `indicator`                                           | `diamond`         | `◈◉◎○` live, `◆` settled                           |
 | `indicatorAnimation`                                  | `true`            | spin pump on/off                                   |
 | `opacity`                                             | `0.5`             | row dim blend                                      |

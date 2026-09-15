@@ -44,10 +44,18 @@ import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
 import { renderWriteCard } from "./write-card.ts";
 import { cardIsPartial, resultDetails, stashedOrResultText } from "./card-primitives.ts";
-import { capRenderedRows, detailProfile, minimalToolSummary, standardRowLimit, type DetailProfile } from "./density.ts";
+import {
+  capRenderedRows,
+  detailedRowLimit,
+  detailProfile,
+  minimalToolSummary,
+  standardRowLimit,
+  type DetailProfile,
+} from "./density.ts";
 import { installReadGroupSkin } from "./read-group.ts";
 import { commentaryStatusFromMessage, installAssistantCommentarySkin } from "./assistant-commentary-skin.ts";
 import {
+  genericNativeDensityEligible,
   installNativeToolCardSkin,
   nativeToolCardsNeedPump,
   resetNativeToolCardPump,
@@ -890,9 +898,8 @@ function paintGroup(theme: unknown, gid: string): Container {
           );
         }
       }
-      if (!profile.standard) return lines;
       const hasOutput = bodies.some((row) => row.details.length > 0);
-      const maxRows = standardRowLimit(hasOutput);
+      const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(hasOutput);
       const hiddenRows = Math.max(1, lines.length - maxRows + 1);
       const overflow = formatRowLine(theme, width, {
         body: `… ${hiddenRows} more rows`,
@@ -908,10 +915,14 @@ function paintGroup(theme: unknown, gid: string): Container {
 
 // Core inserts a blank line between every tool block. Paint the whole nested
 // group inside the lead tool and return an empty framed block for siblings.
-function groupedOutputLines(result: unknown): string[] {
+function groupedOutputLines(result: unknown, options: unknown): string[] {
   const text = stashedOrResultText(result).trim();
   if (!text) return [];
-  return text.split(/\r?\n/u);
+  const rows = text.split(/\r?\n/u);
+  const profile = detailProfile(options);
+  const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(true);
+  if (rows.length <= maxRows) return rows;
+  return [...rows.slice(0, Math.max(0, maxRows - 1)), `… ${rows.length - maxRows + 1} more rows`];
 }
 
 function renderToolVisual(
@@ -1142,7 +1153,13 @@ function skillPromptRenderer(message: unknown, options: unknown, theme: unknown)
   if (opts["expanded"] === true) {
     const body = skillPromptBody(message);
     if (!body) return new Container();
-    return paintRow(theme, { body });
+    const rows = body.split(/\r?\n/u);
+    const maxRows = detailedRowLimit();
+    const visible =
+      rows.length <= maxRows
+        ? rows
+        : [...rows.slice(0, Math.max(0, maxRows - 1)), `… ${rows.length - maxRows + 1} more rows`];
+    return paintRow(theme, { body: visible.join("\n") });
   }
   const oneLiner = userInvoked && args ? `◆ Skill ${name} ${args}` : `◆ Skill ${name}`;
   return paintRow(theme, { body: oneLiner });
@@ -1173,8 +1190,7 @@ export default function (pi: ExtensionAPI) {
   let kickAlertPump = (): void => {};
   const disposeNativeToolCardSkin = installNativeToolCardSkin(Container, {
     enabled: () => runtimeOwner.owns() && nativeToolCardSkinActive(),
-    genericEnabled: (toolName) =>
-      runtimeOwner.owns() && enabled && (!toolName || !isWrappedTool(toolName) || wrapTool(toolName)),
+    genericEnabled: (toolName) => runtimeOwner.owns() && enabled && genericNativeDensityEligible(toolName),
     theme: () => readGroupTheme,
     pump: () => kickAlertPump(),
     parentLabel: (toolCallId, fingerprint, result) => parentLabelForToolCall(toolCallId, fingerprint, result),
@@ -1511,7 +1527,7 @@ export default function (pi: ExtensionAPI) {
               live: false,
               error: isToolError(result, options),
               right: durationSuffix(result),
-              details: groupedOutputLines(result),
+              details: groupedOutputLines(result, options),
               detail: detailProfile(options),
             },
             frozenGroupOf(result),

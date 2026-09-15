@@ -15,7 +15,7 @@ import {
   stashedOrResultText,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, standardRowLimit } from "./density.ts";
+import { capRenderedRows, detailedRowLimit, standardRowLimit } from "./density.ts";
 import { markFlush } from "./loaders.ts";
 import { searchPatternText } from "./text.ts";
 
@@ -124,12 +124,11 @@ export function renderWebSearchCard(
               true,
             );
             lines.push(errorLine);
-            if (!lifecycle.detail.standard) return lines;
-            return capRenderedRows(lines, standardRowLimit(true), errorLine, errorLine);
+            const maxRows = lifecycle.detail.detailed ? detailedRowLimit() : standardRowLimit(true);
+            return capRenderedRows(lines, maxRows, errorLine, errorLine);
           }
-          const visibleSources = lifecycle.detail.standard
-            ? sources.slice(0, getPluginConfig().webSearchMaxResults)
-            : sources;
+          const sourceLimit = lifecycle.detail.standard ? getPluginConfig().webSearchMaxResults : detailedRowLimit();
+          const visibleSources = sources.slice(0, sourceLimit);
           for (const source of visibleSources) {
             lines.push(cardTitleLine(theme, width, source.title));
             lines.push(cardDetailLine(theme, width, source.url));
@@ -138,8 +137,7 @@ export function renderWebSearchCard(
           if (hiddenSources > 0) {
             lines.push(cardDetailLine(theme, width, `… ${hiddenSources} more sources`));
           }
-          if (!lifecycle.detail.standard) return lines;
-          const maxRows = standardRowLimit(sources.length > 0);
+          const maxRows = lifecycle.detail.detailed ? detailedRowLimit() : standardRowLimit(sources.length > 0);
           const hiddenRows = Math.max(1, lines.length - maxRows + 1);
           const overflow = cardDetailLine(theme, width, `╰─ … ${hiddenRows} more rows`);
           return capRenderedRows(lines, maxRows, overflow);

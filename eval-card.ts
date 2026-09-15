@@ -2,13 +2,11 @@
 // Display-only: execution and delegation stay in index.ts.
 //
 // Replaces the native boxed `Output` panel: one header row, a short input
-// preview (3 lines collapsed, 60 expanded), then stdout in full color but
-// dim-blended to row opacity — indented, no border, no background. A dim
-// labeled rule (`── output ──`) separates input from output, with an accent
-// pulse sweeping it while running. Core re-invokes renderResult with partial
-// results (`isPartial`); the card streams those as a live tail (last 3 lines
-// collapsed, 60 expanded).
-// Full text sits behind Ctrl+O.
+// preview, then stdout in full color but dim-blended to row opacity —
+// indented, no border, no background. A dim labeled rule (`── output ──`)
+// separates input from output, with an accent pulse sweeping it while
+// running. Core re-invokes renderResult with partial results (`isPartial`);
+// Ctrl+O uses the configured Detailed total-row ceiling.
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import {
   cardLifecycle,
@@ -17,7 +15,7 @@ import {
   resolveParentCardLabel,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, standardRowLimit } from "./density.ts";
+import { capRenderedRows, detailedRowLimit, standardRowLimit } from "./density.ts";
 import { markFlush } from "./loaders.ts";
 import { durationSuffix, isToolError, toolResultText } from "./results.ts";
 import {
@@ -34,15 +32,11 @@ import {
 import { evalCell, evalLabelText, truncatePlain } from "./text.ts";
 import { highlightCell } from "./edit-card.ts";
 
-// Collapsed rows stay small: 3 input lines, 5 output lines, 3 streamed
-// lines. Expanded rows match the edit card budget (60/60/60); anything
-// beyond sits behind Ctrl+O.
+// Standard keeps short input/output previews. Detailed and Ctrl+O use the
+// shared total-row ceiling from density.ts.
 const INPUT_COLLAPSED_LINES = 3;
-const INPUT_EXPANDED_LINES = 60;
 const OUTPUT_COLLAPSED_LINES = 5;
-const OUTPUT_EXPANDED_LINES = 60;
 const STREAM_COLLAPSED_LINES = 3;
-const STREAM_EXPANDED_LINES = 60;
 
 function contentWidth(width: number): number {
   return Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - TOOL_INDENT.length);
@@ -128,7 +122,7 @@ export function renderEvalCard(
     const cell = evalCell(args);
     const rawCode = cell.code ? cell.code.split("\n") : [];
     while (rawCode.length > 0 && !stripSgr(rawCode[rawCode.length - 1] ?? "").trim()) rawCode.pop();
-    const inputCap = lifecycle.detail.detailed ? rawCode.length : INPUT_COLLAPSED_LINES;
+    const inputCap = lifecycle.detail.detailed ? detailedRowLimit() : INPUT_COLLAPSED_LINES;
     const input = rawCode.slice(0, inputCap);
     const inputMore = rawCode.length - input.length;
 
@@ -139,18 +133,19 @@ export function renderEvalCard(
     if (result !== undefined) {
       const rawText = evalResultText(result, header);
       if (error) {
-        for (const line of stripSgr(rawText)
-          .split("\n")
-          .map((value) => value.trim())
-          .filter(Boolean)) {
+        const errorCap = detailedRowLimit();
+        for (const value of stripSgr(rawText).split("\n")) {
+          const line = value.trim();
+          if (!line) continue;
           errorLines.push(line);
+          if (errorLines.length >= errorCap) break;
         }
       } else {
         const raw = rawText.split("\n");
         while (raw.length > 0 && !stripSgr(raw[raw.length - 1] ?? "").trim()) raw.pop();
-        const outputCap = lifecycle.detail.detailed ? raw.length : OUTPUT_COLLAPSED_LINES;
+        const outputCap = lifecycle.detail.detailed ? detailedRowLimit() : OUTPUT_COLLAPSED_LINES;
         if (lifecycle.partial) {
-          output = lifecycle.detail.detailed ? raw : raw.slice(-STREAM_COLLAPSED_LINES);
+          output = lifecycle.detail.detailed ? raw.slice(-outputCap) : raw.slice(-STREAM_COLLAPSED_LINES);
           more = raw.length - output.length;
           earlierHint = true;
         } else {
@@ -228,8 +223,7 @@ export function renderEvalCard(
               }
             }
           }
-          if (!lifecycle.detail.standard) return lines;
-          const maxRows = standardRowLimit(result !== undefined);
+          const maxRows = lifecycle.detail.detailed ? detailedRowLimit() : standardRowLimit(result !== undefined);
           const hidden = Math.max(1, lines.length - maxRows + 1);
           const overflow = `${TOOL_INDENT}${paintAt(theme, `… ${hidden} more lines`, "dim", op)}`;
           const terminal =

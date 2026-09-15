@@ -12,7 +12,7 @@ import {
 import { diffStat, parsePipeDiff, parseUnifiedDiff, selectPrettyRows } from "./filters.ts";
 import type { PrettyRow } from "./filters.ts";
 import { markFlush } from "./loaders.ts";
-import { detailProfile, standardEditRowsPerFile } from "./density.ts";
+import { capRenderedRows, detailedRowLimit, detailProfile, standardEditRowsPerFile } from "./density.ts";
 import { durationSuffix, isToolError, toolResultText } from "./results.ts";
 import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "./theme.ts";
 import { shortPathText, showWhitespace, truncatePlain } from "./text.ts";
@@ -53,6 +53,14 @@ export function highlightCell(text: string, lang: string | undefined): string {
     // Tokenizer hiccup: fall through to plain text.
   }
   return text;
+}
+
+export function languageForPath(path: string): string | undefined {
+  try {
+    return coreHighlight?.getLanguageFromPath?.(path) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── edit pretty-diff card (grok-build row grammar, theme-derived only) ──
@@ -229,7 +237,7 @@ export function collectPrettyEdit(
     let rows: PrettyRow[] = [];
     if (entry.diff.trim()) {
       const hunks = parseUnifiedDiff(entry.diff);
-      const cap = detail.detailed ? Number.POSITIVE_INFINITY : detail.standard ? standardEditRowsPerFile() : 0;
+      const cap = detail.detailed ? detailedRowLimit() : detail.standard ? standardEditRowsPerFile() : 0;
       rows = selectPrettyRows(hunks.length > 0 ? hunks : parsePipeDiff(entry.diff), {
         maxRows: cap,
       });
@@ -365,12 +373,14 @@ export function renderPrettyEditCard(
               );
             }
 
-            const contentPrefix = data.multi ? `${EDIT_FILE_INDENT}${lastSection ? "   " : "│  "}` : childIndent;
+            const contentPrefix = data.multi
+              ? `${EDIT_FILE_INDENT}${lastSection ? "   " : `${paintAt(theme, "│", "dim", 0.7)}  `}`
+              : childIndent;
             let gutterWidth = 0;
             for (const row of section.rows) {
               if (row.num !== null) gutterWidth = Math.max(gutterWidth, String(row.num).length);
             }
-            const codeBudget = Math.max(1, rowWidth - contentPrefix.length - gutterWidth - 3);
+            const codeBudget = Math.max(1, rowWidth - visibleWidth(contentPrefix) - gutterWidth - 3);
             const bandWidth = Math.max(0, codeBudget);
             for (const [rowIndex, row] of section.rows.entries()) {
               const cell = truncatePlain(section.cells[rowIndex] ?? row.text, codeBudget);
@@ -395,7 +405,14 @@ export function renderPrettyEditCard(
             }
             if (data.multi && !lastSection) lines.push(`${EDIT_FILE_INDENT}${paintAt(theme, "│", "dim", 0.7)}`);
           }
-          return lines;
+          if (!lifecycle.detail.detailed) return lines;
+          const maxRows = detailedRowLimit();
+          const hiddenRows = Math.max(1, lines.length - maxRows + 1);
+          const overflow = formatRowLine(theme, width, {
+            body: `… ${hiddenRows} more rows`,
+            indent: true,
+          });
+          return capRenderedRows(lines, maxRows, overflow);
         } catch {
           return [formatRowLine(theme, width, { body: paintHeaderStat(theme, data.header), live, error })];
         }

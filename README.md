@@ -1,6 +1,6 @@
 # omp-minimal-output
 
-Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
+Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally with a configurable 20-row default ceiling. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
@@ -9,6 +9,8 @@ Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-outpu
 Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
 
 Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
+
+`detailedMaxRows` defaults to `20` and caps both configured Detailed mode and Ctrl+O expansion.
 
 ## Card settings
 
@@ -36,9 +38,9 @@ flowchart LR
 
 Provider-tagged commentary (`textSignature.phase = "commentary"`) wins over literal tool argument `i`, which wins over generated labels. `assistant-commentary-skin.ts` blanks the original native display block because OMP splits tool calls into separate timeline components; the label is projected into the owning tool surface while agent context and persisted message content remain verbatim.
 
-The sticky Todo widget hydrates collapsed on session start only when the current session already has a nonempty todo list. Empty new sessions keep the widget absent until a todo tool result creates work.
+The sticky Todo widget hydrates as one collapsed summary row on session start only when the current session already has a nonempty todo list. Expanding it shows the full retained list; `standardMaxRows` does not apply to Todo. Empty new sessions keep the widget absent until a todo tool result creates work.
 
-Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. `web_search` shows source count/provider and expands to bold titles with dim URLs; expanded `edit` cards use project-relative file branches, per-file stats, continuation rails, explicit diff markers, and hunk separators; `eval` replaces the boxed output panel.
+Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. Write shows a bounded, path-aware syntax-highlighted input preview while running and settled; `web_search` shows source count/provider and expands to bold titles with dim URLs; expanded `edit` cards use project-relative file branches, per-file stats, continuation rails, explicit diff markers, and hunk separators; `eval` replaces the boxed output panel.
 
 The literal tool argument `i` is never discarded. Generic wrapped tools (`bash`, `read`, `grep`, `glob`) keep the grouped status parent and tool children. Dedicated/native cards (`write`, `edit`, `eval`, `web_search`, Task, Hub) render the AI status as a parent and the named card as its indicator-free `╰─` child. Todo settles into the sticky widget or native fallback. Live `minimal-activity` records remain only for surfaces without an owning group/card; the plugin emits no second settled activity row.
 

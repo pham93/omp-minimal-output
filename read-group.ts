@@ -5,7 +5,7 @@
 // at Container.addChild time repaints the card with formatRowLine while
 // leaving execution, grouping, and Ctrl+O behavior untouched.
 
-import { capRenderedRows, detailProfile, standardRowLimit } from "./density.ts";
+import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "./density.ts";
 import { tildePath } from "./text.ts";
 import { formatRowLine } from "./theme.ts";
 
@@ -50,19 +50,20 @@ export function paintReadGroupLines(
     }),
   ];
   let terminalError: string | undefined;
-  entries.forEach((entry, index) => {
+  const entryLimit = profile.detailed ? detailedRowLimit() : standardRowLimit(false);
+  const visibleEntries = entries.slice(0, entryLimit);
+  visibleEntries.forEach((entry, index) => {
     const line = formatRowLine(theme, width, {
       body: entry.path,
-      tree: index === entries.length - 1 ? "last" : "mid",
+      tree: index === visibleEntries.length - 1 ? "last" : "mid",
       live: entry.pending,
       error: entry.error,
     });
     lines.push(line);
     if (entry.error) terminalError = line;
   });
-  if (!profile.standard) return lines;
-  const maxRows = standardRowLimit(false);
-  const hiddenRows = Math.max(1, lines.length - maxRows + 1);
+  const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(false);
+  const hiddenRows = Math.max(1, entries.length - maxRows + 2);
   const overflow = formatRowLine(theme, width, {
     body: `… ${hiddenRows} more files`,
     tree: "last",

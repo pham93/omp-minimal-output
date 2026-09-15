@@ -11,7 +11,7 @@ import {
   resultDetails,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, standardRowLimit } from "./density.ts";
+import { capRenderedRows, detailedRowLimit, standardRowLimit } from "./density.ts";
 import { getPluginConfig } from "./config.ts";
 import { markFlush } from "./loaders.ts";
 
@@ -252,7 +252,7 @@ export function renderTaskCardLines(
   parentLabel?: ParentCardLabel,
 ): readonly string[] | undefined {
   const initialLifecycle = cardLifecycle(result, options);
-  const rowBudget = initialLifecycle.detail.detailed ? Number.MAX_SAFE_INTEGER : getPluginConfig().taskMaxAgents;
+  const rowBudget = initialLifecycle.detail.detailed ? detailedRowLimit() : getPluginConfig().taskMaxAgents;
   const data = taskData(args, result, rowBudget);
   if (!data) return undefined;
   const lifecycle = cardLifecycle(result, options, { error: data.failure });
@@ -304,8 +304,9 @@ export function renderTaskCardLines(
   if (hiddenAgents > 0) {
     lines.push(cardDetailLine(theme, width, `… ${hiddenAgents} more ${hiddenAgents === 1 ? "agent" : "agents"}`));
   }
-  if (!lifecycle.detail.standard) return lines;
-  const maxRows = standardRowLimit(data.rowCount > 0 || lifecycle.error);
+  const maxRows = lifecycle.detail.detailed
+    ? detailedRowLimit()
+    : standardRowLimit(data.rowCount > 0 || lifecycle.error);
   const hiddenRows = Math.max(1, lines.length - maxRows + 1);
   const overflow = cardDetailLine(theme, width, `… ${hiddenRows} more rows`);
   return capRenderedRows(lines, maxRows, overflow, terminalError);

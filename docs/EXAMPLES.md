@@ -2,9 +2,9 @@
 
 Literal row shapes per card. Color/paint omitted — structure only.
 
-> Design rationale lives in `SSD.md`. The approved, not-yet-implemented detail-level contract lives in `DETAIL_LEVELS.md`. Usage lives in `README.md`.
+> Design rationale lives in `SSD.md`. The implemented detail-level contract lives in `DETAIL_LEVELS.md`. Usage lives in `README.md`.
 > `◈◉◎○` = running spin. `◆` = settled shadow row. `●` = settled Task / Hub / web-search / read-group row. Red = error.
-> `Ctrl+O` toggles collapsed ↔ expanded globally. No per-row click.
+> `Ctrl+O` toggles collapsed ↔ expanded globally; expanded cards default to at most 20 rows. No per-row click.
 
 ## Bash
 
@@ -40,9 +40,15 @@ Literal row shapes per card. Color/paint omitted — structure only.
 
 ```text
 ◆ Read src/index.ts
-◆ Write src/index.ts
+◈ Write src/index.ts — 42 lines
+    1 │ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+    2 │
+    3 │ export default function register(pi: ExtensionAPI) {
+      ╰─ … 39 more lines
 ◆ Skill my-skill — SKILL.md
 ```
+
+Write content is available in the tool call, so the syntax-highlighted preview appears while running. Native Write does not emit incremental text chunks.
 
 Grouped reads (native group skinned):
 

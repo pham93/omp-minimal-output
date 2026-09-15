@@ -2,7 +2,7 @@
 // no I/O, no module state — all state lives in index.ts. Reuses only
 // formatRowLine (theme.ts) and truncatePlain (text.ts).
 import { currentIndicatorFrame, formatRowLine, paintAt, paintBold, LINE_WIDTH_RATIO } from "./theme.ts";
-import { capRenderedRows, detailProfile, standardRowLimit } from "./density.ts";
+import { capRenderedRows, detailedRowLimit } from "./density.ts";
 import { truncatePlain } from "./text.ts";
 
 export type TodoStatus = "done" | "active" | "open" | "blocked" | "dropped";
@@ -387,21 +387,12 @@ export function renderDensityTodoHeader(
   theme: unknown,
   width: number,
   state: TodoHeaderState,
-  manualExpanded: boolean,
+  expanded: boolean,
   anim?: TodoAnim,
 ): string[] {
-  const profile = detailProfile({ expanded: manualExpanded });
-  if (profile.minimal) return renderTodoHeader(theme, width, state, true, anim);
-  const lines = renderTodoHeader(
-    theme,
-    width,
-    state,
-    false,
-    anim,
-    profile.detailed ? Number.POSITIVE_INFINITY : TODO_PHASE_TASK_LIMIT,
-  );
-  if (!profile.standard) return lines;
-  const maxRows = standardRowLimit(false);
+  if (!expanded) return renderTodoHeader(theme, width, state, true, anim);
+  const maxRows = detailedRowLimit();
+  const lines = renderTodoHeader(theme, width, state, false, anim, maxRows);
   const hiddenRows = Math.max(1, lines.length - maxRows + 1);
   const overflow = formatRowLine(theme, width, {
     body: `Todos — … ${hiddenRows} more rows`,

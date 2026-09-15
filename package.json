@@ -43,7 +43,7 @@
         "min": 1,
         "max": 20,
         "step": 1,
-        "description": "Total Standard rows for tools without output and the Todo widget."
+        "description": "Total Standard rows for tools without output."
       },
       "standardOutputMaxRows": {
         "type": "number",
@@ -68,6 +68,14 @@
         "max": 50,
         "step": 1,
         "description": "Total rows retained in Standard Write cards."
+      },
+      "detailedMaxRows": {
+        "type": "number",
+        "default": 20,
+        "min": 1,
+        "max": 100,
+        "step": 1,
+        "description": "Maximum total rows for Detailed mode and Ctrl+O."
       },
       "indicatorAnimation": {
         "type": "boolean",

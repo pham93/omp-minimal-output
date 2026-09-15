@@ -1,7 +1,8 @@
 // Display-only skin for native ToolExecutionComponent instances. It never registers or executes tools.
 
 import { compactCardText } from "./card-primitives.ts";
-import { capRenderedRows, detailProfile, standardRowLimit } from "./density.ts";
+import { isWrappedTool } from "./config.ts";
+import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "./density.ts";
 import { isHubCardData, renderHubCardLines } from "./hub-card.ts";
 import { fingerprintForToolCall, identityForToolCall, isToolError, toolFingerprint, toolFpBase } from "./results.ts";
 import { renderTaskCardLines, isTaskCardData } from "./task-card.ts";
@@ -13,6 +14,12 @@ export const NATIVE_TOOL_CARD_KIND = {
 } as const;
 
 export type NativeToolCardKind = (typeof NATIVE_TOOL_CARD_KIND)[keyof typeof NATIVE_TOOL_CARD_KIND];
+
+export function genericNativeDensityEligible(toolName: string | undefined): boolean {
+  if (!toolName) return true;
+  if (toolName === NATIVE_TOOL_CARD_KIND.task || toolName === NATIVE_TOOL_CARD_KIND.hub) return false;
+  return !isWrappedTool(toolName);
+}
 
 interface CapturedToolExecutionState {
   args: unknown;
@@ -139,9 +146,9 @@ export function applyNativeDensityRows(
   options?: { expanded?: boolean },
 ): readonly string[] {
   const profile = detailProfile(options);
-  if (profile.detailed || native.length <= 1) return native;
+  if (native.length <= 1) return native;
   if (profile.minimal) return native.slice(0, 1);
-  const maxRows = standardRowLimit(result !== undefined);
+  const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(result !== undefined);
   const hiddenRows = Math.max(1, native.length - maxRows + 1);
   const overflow = formatRowLine(theme, width, {
     body: `… ${hiddenRows} more rows`,

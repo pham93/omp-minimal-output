@@ -58,6 +58,7 @@ export interface PluginConfig extends WrappedToolSettings {
   standardOutputMaxRows: number;
   standardEditRowsPerFile: number;
   standardWriteMaxRows: number;
+  detailedMaxRows: number;
   nativeTask: boolean;
   taskMaxAgents: number;
   nativeHub: boolean;
@@ -79,6 +80,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   standardOutputMaxRows: 4,
   standardEditRowsPerFile: 10,
   standardWriteMaxRows: 10,
+  detailedMaxRows: 20,
   nativeBash: false,
   nativeRead: false,
   nativeGrep: false,
@@ -188,6 +190,13 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         const v = src[key];
         if (typeof v === "number" && Number.isFinite(v)) {
           next.standardWriteMaxRows = Math.min(50, Math.max(1, Math.floor(v)));
+        }
+        continue;
+      }
+      if (key === "detailedMaxRows") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.detailedMaxRows = Math.min(100, Math.max(1, Math.floor(v)));
         }
         continue;
       }

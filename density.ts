@@ -37,6 +37,18 @@ export function standardWriteMaxRows(config: PluginConfig = getPluginConfig()): 
   return config.standardWriteMaxRows;
 }
 
+export function detailedRowLimit(config: PluginConfig = getPluginConfig()): number {
+  return config.detailedMaxRows;
+}
+
+export function profileRowLimit(
+  profile: DetailProfile,
+  standardMaxRows: number,
+  config: PluginConfig = getPluginConfig(),
+): number {
+  return profile.detailed ? config.detailedMaxRows : standardMaxRows;
+}
+
 export function minimalToolSummary(status: string, tool: string): string {
   const parent = status.trim();
   const child = tool.trim();
