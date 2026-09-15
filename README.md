@@ -6,7 +6,7 @@ Wrapped Grep merges call and result into one row. AST Grep, LSP, Debug, Task, an
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
-Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/minimal-gallery`.
+Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
 
 ## Card settings
 
@@ -21,23 +21,6 @@ Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/minimal-gallery`.
 | Hub | `nativeHub` (default `false`) | `hubMaxItems` (default `5`, range `1..10`) |
 
 Each fallback is independent. Native fallbacks restore the host renderer and leave that tool's result text untouched. AST Grep, LSP, Debug, Task, and Hub are never shadow-registered.
-
-## Manual card gallery
-
-`/minimal-gallery` mounts deterministic fixtures above the editor using the real card renderers, current theme, and current terminal width. It does not execute the underlying tools.
-
-```text
-/minimal-gallery                         # every card, expanded state
-/minimal-gallery all success             # every settled success card
-/minimal-gallery all error               # every failure card
-/minimal-gallery all running             # every animated running card
-/minimal-gallery lsp expanded             # one card
-/minimal-gallery ast error
-/minimal-gallery debug success
-/minimal-gallery off                     # remove the gallery
-```
-
-Cards: `web`, `grep`, `ast`, `lsp`, `debug`, `task`, `hub`. States: `running`, `success`, `error`, `expanded`. The gallery verifies presentation; invoke a real tool separately only when testing host integration or native fallback.
 
 ## Runtime overview
 

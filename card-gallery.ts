@@ -1,6 +1,6 @@
 // Deterministic visual fixtures for card renderers. This module has no plugin
 // registration or timers; callers opt in by importing a fixture renderer.
-import { Container } from "@oh-my-pi/pi-tui";
+import type { Container } from "@oh-my-pi/pi-tui";
 import { renderDebugCard } from "./debug-card.ts";
 import { renderLspCard } from "./lsp-card.ts";
 import { renderSearchCard, SEARCH_CARD_KIND } from "./search-card.ts";
@@ -405,59 +405,4 @@ function renderDebugGalleryFixture(theme: unknown, fixture: CardGalleryFixture):
 
 export function renderDebugGalleryCard(theme: unknown, state: CardGalleryState): Container {
   return renderCardGalleryFixture(renderDebugGalleryFixture, theme, state, DEBUG_GALLERY_FIXTURES);
-}
-
-export const CARD_GALLERY_CARD = {
-  all: "all",
-  astGrep: "ast-grep",
-  debug: "debug",
-  grep: "grep",
-  hub: "hub",
-  lsp: "lsp",
-  task: "task",
-  webSearch: "web-search",
-} as const;
-
-export type CardGalleryCard = (typeof CARD_GALLERY_CARD)[keyof typeof CARD_GALLERY_CARD];
-
-type SingleGalleryCard = Exclude<CardGalleryCard, typeof CARD_GALLERY_CARD.all>;
-
-const CARD_GALLERY_RENDERERS: Record<
-  SingleGalleryCard,
-  (theme: unknown, state: CardGalleryState) => Container
-> = {
-  [CARD_GALLERY_CARD.astGrep]: renderAstGrepGalleryCard,
-  [CARD_GALLERY_CARD.debug]: renderDebugGalleryCard,
-  [CARD_GALLERY_CARD.grep]: renderGrepGalleryCard,
-  [CARD_GALLERY_CARD.hub]: renderHubGalleryCard,
-  [CARD_GALLERY_CARD.lsp]: renderLspGalleryCard,
-  [CARD_GALLERY_CARD.task]: renderTaskGalleryCard,
-  [CARD_GALLERY_CARD.webSearch]: renderWebSearchGalleryCard,
-};
-
-export function isCardGalleryCard(value: unknown): value is CardGalleryCard {
-  return typeof value === "string" && Object.values(CARD_GALLERY_CARD).includes(value as CardGalleryCard);
-}
-
-export function isCardGalleryState(value: unknown): value is CardGalleryState {
-  return typeof value === "string" && Object.values(CARD_GALLERY_STATE).includes(value as CardGalleryState);
-}
-
-export function renderNamedCardGallery(
-  theme: unknown,
-  card: CardGalleryCard,
-  state: CardGalleryState,
-): Container {
-  if (card !== CARD_GALLERY_CARD.all) return CARD_GALLERY_RENDERERS[card](theme, state);
-  const gallery = new Container();
-  const cards = Object.values(CARD_GALLERY_CARD).filter(
-    (value): value is SingleGalleryCard => value !== CARD_GALLERY_CARD.all,
-  );
-  for (let index = 0; index < cards.length; index += 1) {
-    const name = cards[index];
-    if (!name) continue;
-    if (index > 0) gallery.addChild({ render: () => [""] });
-    gallery.addChild(CARD_GALLERY_RENDERERS[name](theme, state));
-  }
-  return gallery;
 }
