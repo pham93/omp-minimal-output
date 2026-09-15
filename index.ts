@@ -44,6 +44,11 @@ import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
 import { cardIsPartial } from "./card-primitives.ts";
 import { installReadGroupSkin } from "./read-group.ts";
+import {
+  installNativeToolCardSkin,
+  nativeToolCardsNeedPump,
+  resetNativeToolCardPump,
+} from "./native-tool-card-skin.ts";
 import { alertSkinActive, installWarningSkin, invalidateLiveAlerts } from "./warning-skin.ts";
 import { installTodoChrome } from "./todo-hud.ts";
 import {
@@ -247,8 +252,17 @@ function pruneMcpEnvelopes(list: TextItem[], anchor: TextItem, raw: string): Tex
   );
 }
 
+function nativeToolCardSkinActive(toolName: string): boolean {
+  if (!enabled) return false;
+  const cfg = getPluginConfig();
+  return (toolName === "task" && cfg.nativeTask !== true) || (toolName === "hub" && cfg.nativeHub !== true);
+}
+
 function isCollapseTarget(event: ToolResultEvent): boolean {
   if (event.toolName === "web_search" && !wrapTool("web_search")) return false;
+  if ((event.toolName === "task" || event.toolName === "hub") && !nativeToolCardSkinActive(event.toolName)) {
+    return false;
+  }
   return (
     event.type === "tool_result" &&
     ([
@@ -1002,6 +1016,11 @@ export default function (pi: ExtensionAPI) {
   // ensureSpinTimer exists; addChild-time skinning kicks it so fade/breathe
   // run even when no tool is live.
   let kickAlertPump = (): void => {};
+  installNativeToolCardSkin(Container, {
+    enabled: nativeToolCardSkinActive,
+    theme: () => readGroupTheme,
+    pump: () => kickAlertPump(),
+  });
   installWarningSkin(Container, {
     enabled: () => enabled && getPluginConfig().todoReminderOneLine !== false,
     theme: () => readGroupTheme,
@@ -1327,6 +1346,7 @@ export default function (pi: ExtensionAPI) {
       activityLive ||
       thoughtLive ||
       liveRuns.size !== 0 ||
+      nativeToolCardsNeedPump() ||
       alertSkinActive() ||
       anySettling() ||
       todoNeedsPump(todoHeaderState, todoCompletingAt, agentRunning) ||
@@ -1357,6 +1377,7 @@ export default function (pi: ExtensionAPI) {
     }
   }
   pi.on("session_start", async (_event, ctx) => {
+    resetNativeToolCardPump();
     if (loaded) return;
     loaded = true;
     resetTodoSessionState();
@@ -1503,7 +1524,13 @@ export default function (pi: ExtensionAPI) {
     } else {
       activityLive = true;
     }
-    if (toolName !== "edit" && toolName !== "eval" && toolName !== "web_search") {
+    // Task and Hub paint through the native component skin when enabled.
+    if (
+      toolName !== "edit" &&
+      toolName !== "eval" &&
+      toolName !== "web_search" &&
+      !nativeToolCardSkinActive(toolName)
+    ) {
       upsertGroupRow(fp, {
         body: toolActionLabel(toolName, args),
         live: true,
@@ -1622,6 +1649,7 @@ export default function (pi: ExtensionAPI) {
     description: "Disable grok-build-style minimal output",
     handler: async (_args, ctx) => {
       enabled = false;
+      resetNativeToolCardPump();
       liveRuns.clear();
       agentRunning = false;
       freezeActivityRun();
@@ -1642,6 +1670,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    resetNativeToolCardPump();
     setTodosWidget(false);
   });
   pi.registerCommand("todos-show", {
@@ -1705,8 +1734,10 @@ export default function (pi: ExtensionAPI) {
       if (cfg.nativeEdit) native.push("edit");
       if (cfg.nativeEval) native.push("eval");
       if (cfg.nativeWebSearch) native.push("web_search");
+      if (cfg.nativeTask) native.push("task");
+      if (cfg.nativeHub) native.push("hub");
       ctx.ui.notify(
-        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] searchMax=${cfg.webSearchMaxResults} tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine !== false ? "on" : "off"}`,
+        `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] searchMax=${cfg.webSearchMaxResults} taskMax=${cfg.taskMaxAgents} hubMax=${cfg.hubMaxItems} tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine !== false ? "on" : "off"}`,
         "info",
       );
     },

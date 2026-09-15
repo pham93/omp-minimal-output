@@ -2,6 +2,8 @@
 // registration or timers; callers opt in by importing a fixture renderer.
 import type { Container } from "@oh-my-pi/pi-tui";
 import { renderWebSearchCard } from "./web-search-card.ts";
+import { renderHubCard } from "./hub-card.ts";
+import { renderTaskCard } from "./task-card.ts";
 
 export const CARD_GALLERY_STATE = {
   running: "running",
@@ -84,4 +86,115 @@ function renderWebSearchGalleryFixture(theme: unknown, fixture: CardGalleryFixtu
 
 export function renderWebSearchGalleryCard(theme: unknown, state: CardGalleryState): Container {
   return renderCardGalleryFixture(renderWebSearchGalleryFixture, theme, state, WEB_SEARCH_GALLERY_FIXTURES);
+}
+
+const TASK_AGENTS = ["researcher", "implementer", "reviewer", "tester", "release"] as const;
+
+function taskResults(count: number) {
+  return TASK_AGENTS.slice(0, count).map((agent, index) => ({
+    id: agent,
+    agent: "sonic",
+    task: `Task card fixture ${index + 1}`,
+    status: "completed",
+    output: `Completed ${agent} fixture`,
+    outputPath: `artifact://task-${agent}`,
+    exitCode: 0,
+  }));
+}
+
+export const TASK_GALLERY_FIXTURES = {
+  [CARD_GALLERY_STATE.running]: {
+    args: { task: "Render the Task card", agent: "sonic", name: "implementer" },
+    result: undefined,
+    options: { isPartial: true },
+    fingerprint: "card-gallery:task:running",
+  },
+  [CARD_GALLERY_STATE.success]: {
+    args: { task: "Render the Task card", agent: "sonic", name: "implementer" },
+    result: {
+      content: [{ type: "text", text: "Task completed" }],
+      details: { results: taskResults(1), totalDurationMs: 800, projectAgentsDir: "/tmp/gallery-agents" },
+    },
+    options: {},
+    fingerprint: "card-gallery:task:success",
+  },
+  [CARD_GALLERY_STATE.error]: {
+    args: { task: "Render the Task card", agent: "sonic", name: "implementer" },
+    result: {
+      isError: true,
+      content: [{ type: "text", text: "Task failed" }],
+      details: {
+        results: [{ id: "implementer", task: "Render the Task card", status: "failed", error: "Patch target changed", exitCode: 1 }],
+        totalDurationMs: 800,
+        projectAgentsDir: "/tmp/gallery-agents",
+      },
+    },
+    options: { expanded: true },
+    fingerprint: "card-gallery:task:error",
+  },
+  [CARD_GALLERY_STATE.expanded]: {
+    args: { tasks: TASK_AGENTS.map((agent) => ({ task: `Fixture ${agent}`, agent: "sonic" })), context: "gallery" },
+    result: {
+      content: [{ type: "text", text: "Tasks completed" }],
+      details: { results: taskResults(5), totalDurationMs: 4800, projectAgentsDir: "/tmp/gallery-agents" },
+    },
+    options: { expanded: true },
+    fingerprint: "card-gallery:task:expanded",
+  },
+} as const satisfies CardGalleryFixtures;
+
+function renderTaskGalleryFixture(theme: unknown, fixture: CardGalleryFixture): Container {
+  return renderTaskCard(theme, fixture.args, fixture.result, fixture.options, fixture.fingerprint);
+}
+
+export function renderTaskGalleryCard(theme: unknown, state: CardGalleryState): Container {
+  return renderCardGalleryFixture(renderTaskGalleryFixture, theme, state, TASK_GALLERY_FIXTURES);
+}
+
+const HUB_JOBS = Array.from({ length: 6 }, (_, index) => ({
+  id: `job-${index + 1}`,
+  status: "completed",
+  label: `Hub fixture ${index + 1}`,
+}));
+
+export const HUB_GALLERY_FIXTURES = {
+  [CARD_GALLERY_STATE.running]: {
+    args: { op: "send", to: "Reviewer", message: "Inspect the card." },
+    result: undefined,
+    options: { isPartial: true },
+    fingerprint: "card-gallery:hub:running",
+  },
+  [CARD_GALLERY_STATE.success]: {
+    args: { op: "list" },
+    result: {
+      content: [{ type: "text", text: "Peers listed" }],
+      details: { op: "list", peers: [{ displayName: "Reviewer", status: "idle" }, { displayName: "Builder", status: "running" }] },
+    },
+    options: {},
+    fingerprint: "card-gallery:hub:success",
+  },
+  [CARD_GALLERY_STATE.error]: {
+    args: { op: "send", to: "Reviewer", message: "Inspect the card." },
+    result: {
+      isError: true,
+      content: [{ type: "text", text: "Peer is unavailable" }],
+      details: { op: "send", receipts: [{ to: "Reviewer", status: "failed", error: "Peer is unavailable" }] },
+    },
+    options: { expanded: true },
+    fingerprint: "card-gallery:hub:error",
+  },
+  [CARD_GALLERY_STATE.expanded]: {
+    args: { op: "jobs" },
+    result: { content: [{ type: "text", text: "Jobs listed" }], details: { op: "jobs", jobs: HUB_JOBS } },
+    options: { expanded: true },
+    fingerprint: "card-gallery:hub:expanded",
+  },
+} as const satisfies CardGalleryFixtures;
+
+function renderHubGalleryFixture(theme: unknown, fixture: CardGalleryFixture): Container {
+  return renderHubCard(theme, fixture.args, fixture.result, fixture.options, fixture.fingerprint);
+}
+
+export function renderHubGalleryCard(theme: unknown, state: CardGalleryState): Container {
+  return renderCardGalleryFixture(renderHubGalleryFixture, theme, state, HUB_GALLERY_FIXTURES);
 }

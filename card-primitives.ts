@@ -63,9 +63,48 @@ export function stashedOrResultText(result: unknown): string {
   return stashedResultText(result) || toolResultText(result);
 }
 
+function sanitizeCardText(value: string): string {
+  let out = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 27) {
+      const marker = value.charCodeAt(index + 1);
+      if (marker === 91) {
+        index += 1;
+        while (index + 1 < value.length) {
+          const next = value.charCodeAt(index + 1);
+          index += 1;
+          if (next >= 64 && next <= 126) break;
+        }
+      } else if (marker === 93) {
+        index += 1;
+        while (index + 1 < value.length) {
+          const next = value.charCodeAt(index + 1);
+          if (next === 7) {
+            index += 1;
+            break;
+          }
+          if (next === 27 && value.charCodeAt(index + 2) === 92) {
+            index += 2;
+            break;
+          }
+          index += 1;
+        }
+      } else if (index + 1 < value.length) {
+        index += 1;
+      }
+      continue;
+    }
+    const control =
+      code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31) || (code >= 127 && code <= 159);
+    out += control ? " " : value[index];
+  }
+  return out;
+}
+
 export function compactCardText(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
-  const one = value.replace(/\s+/g, " ").trim();
+  const one = sanitizeCardText(value).replace(/\s+/gu, " ").trim();
   if (!one) return "";
   return one.length > max ? `${one.slice(0, Math.max(1, max - 1))}…` : one;
 }

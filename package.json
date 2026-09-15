@@ -72,6 +72,32 @@
         "default": false,
         "description": "Leave web_search on the native Ohmypi renderer."
       },
+      "nativeTask": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave Task on the native Ohmypi renderer and leave its result text untouched."
+      },
+      "taskMaxAgents": {
+        "type": "number",
+        "default": 4,
+        "min": 1,
+        "max": 8,
+        "step": 1,
+        "description": "Maximum agents shown in an expanded minimal Task card."
+      },
+      "nativeHub": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave Hub on the native Ohmypi renderer and leave its result text untouched."
+      },
+      "hubMaxItems": {
+        "type": "number",
+        "default": 5,
+        "min": 1,
+        "max": 10,
+        "step": 1,
+        "description": "Maximum items shown in an expanded minimal Hub card."
+      },
       "webSearchMaxResults": {
         "type": "number",
         "default": 5,
@@ -118,6 +144,9 @@
     "eval-card.ts",
     "web-search-card.ts",
     "card-primitives.ts",
+    "task-card.ts",
+    "hub-card.ts",
+    "native-tool-card-skin.ts",
     "card-gallery.ts",
     "read-group.ts",
     "todos-header.ts",

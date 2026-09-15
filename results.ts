@@ -68,6 +68,20 @@ export function toolFingerprint(toolName: string, args: unknown): string {
   return fpsByBase.get(base) ?? base;
 }
 
+export interface ToolCallIdentity {
+  fingerprint: string;
+  toolName: string;
+  args: unknown;
+}
+
+export function identityForToolCall(toolCallId: string): ToolCallIdentity | undefined {
+  return identitiesByCallId.get(toolCallId);
+}
+
+export function fingerprintForToolCall(toolCallId: string): string | undefined {
+  return identityForToolCall(toolCallId)?.fingerprint;
+}
+
 export function eventFingerprint(event: unknown): string {
   const e = event as { toolName?: unknown; toolCallId?: unknown; input?: unknown; args?: unknown };
   const name = typeof e.toolName === "string" ? e.toolName : "";
@@ -76,14 +90,20 @@ export function eventFingerprint(event: unknown): string {
   const id = typeof e.toolCallId === "string" && e.toolCallId ? e.toolCallId : "";
   const fp = id ? `${base}#${id}` : base;
   fpsByBase.set(base, fp);
+  if (id) identitiesByCallId.set(id, { fingerprint: fp, toolName: name, args });
   if (fpsByBase.size > 200) {
     const oldest = fpsByBase.keys().next();
     if (!oldest.done) fpsByBase.delete(oldest.value);
+  }
+  if (identitiesByCallId.size > 200) {
+    const oldest = identitiesByCallId.keys().next();
+    if (!oldest.done) identitiesByCallId.delete(oldest.value);
   }
   return fp;
 }
 
 export const fpsByBase = new Map<string, string>();
+export const identitiesByCallId = new Map<string, ToolCallIdentity>();
 
 export function isToolError(result: unknown, options?: unknown): boolean {
   if (typeof options === "object" && options !== null && "isError" in options) {

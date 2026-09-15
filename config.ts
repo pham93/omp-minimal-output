@@ -46,6 +46,10 @@ export interface PluginConfig extends WrappedToolSettings {
   opacity: number;
   indicator: IndicatorId;
   indicatorAnimation: boolean;
+  nativeTask: boolean;
+  taskMaxAgents: number;
+  nativeHub: boolean;
+  hubMaxItems: number;
   webSearchMaxResults: number;
   todosHeader: boolean;
   todoHud: boolean;
@@ -66,6 +70,10 @@ export const DEFAULT_CONFIG: PluginConfig = {
   nativeEdit: false,
   nativeEval: false,
   nativeWebSearch: false,
+  nativeTask: false,
+  taskMaxAgents: 4,
+  nativeHub: false,
+  hubMaxItems: 5,
   webSearchMaxResults: 5,
   todosHeader: true,
   todoHud: false,
@@ -76,6 +84,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
 
 const BOOLEAN_KEYS: Record<string, true> = {
   indicatorAnimation: true,
+  nativeTask: true,
+  nativeHub: true,
   todosHeader: true,
   todoHud: true,
   todoReminderOneLine: true,
@@ -135,6 +145,20 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         const v = src[key];
         if (typeof v === "number" && Number.isFinite(v)) {
           next.webSearchMaxResults = Math.min(10, Math.max(1, Math.floor(v)));
+        }
+        continue;
+      }
+      if (key === "taskMaxAgents") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.taskMaxAgents = Math.min(8, Math.max(1, Math.floor(v)));
+        }
+        continue;
+      }
+      if (key === "hubMaxItems") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.hubMaxItems = Math.min(10, Math.max(1, Math.floor(v)));
         }
         continue;
       }

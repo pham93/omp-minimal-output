@@ -1,12 +1,22 @@
 # omp-minimal-output
 
-Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
+Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
 
-Single row per tool: shadows set `mergeCallAndResult: true` (same as native single-row tools), so a settled tool replaces its pending call row instead of stacking below it. Web search settles to `●`; other rows retain their configured settled indicator.
+Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
 Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
+
+## Card settings
+
+| Card | Native fallback | Expanded limit |
+| --- | --- | --- |
+| Web search | `nativeWebSearch` (default `false`) | `webSearchMaxResults` (default `5`, range `1..10`) |
+| Task | `nativeTask` (default `false`) | `taskMaxAgents` (default `4`, range `1..8`) |
+| Hub | `nativeHub` (default `false`) | `hubMaxItems` (default `5`, range `1..10`) |
+
+Each fallback is independent. `nativeTask` and `nativeHub` restore the host renderer and leave result text untouched; the plugin never shadow-registers either tool.
 
 ## Runtime overview
 
@@ -21,7 +31,7 @@ flowchart LR
     aside -.-> freeze["agent_end / turn_end\nfreeze settled totals"]
 ```
 
-Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`): native `description` + `parameters` copied verbatim (never hand-written — a lossy schema hides fields from the model; this once broke `write` by dropping `content`), `execute` delegates to the native tool via `ctx.invokeTool`, and custom renderers only change presentation. `web_search` renders an animated query row that settles to `●`, shows source count and provider, and expands to bold `╰─` titles with dim URLs; snippets remain in the stashed raw result. `edit` renders a compact gutter diff and `eval` replaces the native boxed output panel.
+Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. `web_search` shows source count/provider and expands to bold titles with dim URLs; `edit` renders a compact gutter diff and `eval` replaces the boxed output panel.
 
 Thoughts are fully hidden (`registerAssistantThinkingRenderer` is supplemental-only). Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
@@ -51,9 +61,9 @@ flowchart TD
     trunc -->|no| out["line 1: ◆ one-liner\nline 2+: details"]
 ```
 
-Contract: ordinary rewritten results keep a settled one-liner on line 1 and filtered details below it. Dedicated cards (`edit`, `eval`, `web_search`) read the stashed pre-collapse result from `details.minimalFullText` and decide their own collapsed/expanded presentation.
+Contract: ordinary rewritten results keep a settled one-liner on line 1 and filtered details below it. Dedicated cards (`edit`, `eval`, `web_search`, Task, Hub) use stashed text or preserved structured native details for expansion.
 
-Search: `grep` input is `{path, pattern}`, `glob` input is `{path}` (probed live). `web_search` reads structured `details.response.provider` and `details.response.sources`, shows at most `webSearchMaxResults` sources, and retains the complete result in `minimalFullText`; `nativeWebSearch` restores the native renderer. Shadow schemas are the native ones verbatim, so every native option remains visible to the model.
+Task reads native `progress`/`results` and limits expanded rows with `taskMaxAgents`. Hub reads native coordination/process details and limits expanded rows with `hubMaxItems`. `nativeTask` and `nativeHub` keep native result text uncollapsed.
 
 ## Row lifecycle
 
@@ -74,15 +84,16 @@ Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the
 
 ## Files
 
-- `index.ts` — extension entry: 8 shadows, `minimal-activity` + `skill-prompt` message renderers, event handlers (`session_start`, `before_agent_start`, `tool_result`, `tool_execution_start/end`, `message_update`, `agent_end`, `turn_end`), group/activity/thought rows, `/minimal-on|off|status`.
-- `todos-header.ts` — parse/paint live todos for the sticky widget. `todo-hud.ts` — hide the native TODO HUD (`todoHud`, default off) and paint the transcript todo card from the same live snapshot.
-- `text.ts` — pure label/wrap/truncate string helpers. `theme.ts` — theme colors, render clocks, `formatRowLine`. `results.ts` — result-shape readers and fingerprints. `loaders.ts` — lazy core affordances. `edit-card.ts` — compact edit diff card. `eval-card.ts` — borderless eval output card. `web-search-card.ts` — provider-aware source card.
-- `filters.ts` — pure string filters, zero dependencies (`collapseToolText`, per-class aggregators, `MAX_CHARS`/`MAX_LINES` truncation).
+- `index.ts` — extension entry: 8 shadows plus display-only Task/Hub, read-group, warning, and todo skins; lifecycle handlers; `/minimal-on|off|status`.
+- `card-primitives.ts` — shared lifecycle, text sanitation, header, detail, error, and limit mechanics. `task-card.ts` and `hub-card.ts` own tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
+- `todos-header.ts` / `todo-hud.ts` — sticky todo widget and native TODO HUD handling. `edit-card.ts`, `eval-card.ts`, and `web-search-card.ts` — dedicated wrapped-tool cards.
+- `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` — pure output filters.
 - `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`.
 - `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`.
 
 ## Constraints
 
-- `tryWrapTool` allowlist is `bash/read/grep/glob/edit/write/eval/web_search`. Each entry has a verified `ctx.invokeTool` delegation path; never add another tool without proving delegation first, because registering an unsupported shadow replaces the working native tool.
+- `tryWrapTool` allowlist is `bash/read/grep/glob/edit/write/eval/web_search`; never add an unsupported shadow.
+- Task and Hub stay native. Their skin may observe public render lifecycle methods, but must never copy or replace Task's runtime schema or Hub's argument-dependent approval policy.
 - Shadows are transparent delegates: no behavior change to what tools do, only how rows render.
 - Agent rules (`AGENTS.md`): prefer `read`/`grep`/`glob` over shell pipelines; one verification per change; one short intent line per tool call.
