@@ -249,3 +249,90 @@ describe("thought lines during subsequent thinking", () => {
     expect(linesNextFrame).toEqual(linesDuringNewThinking);
   });
 });
+
+describe("thinking widget 4-line placeholder above editor", () => {
+  test("always reserves 4 lines whether idle or thinking to prevent composer jumping", async () => {
+    type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
+    const eventHandlers = new Map<string, EventHandler[]>();
+    const widgets = new Map<string, { factory: (tui: unknown, theme: unknown) => RenderableComponent; placement?: string }>();
+
+    const fakePi = {
+      on: (event: string, handler: EventHandler) => {
+        const list = eventHandlers.get(event) ?? [];
+        list.push(handler);
+        eventHandlers.set(event, list);
+      },
+      registerTool: () => {},
+      registerCommand: () => {},
+      registerShortcut: () => {},
+      registerMessageRenderer: () => {},
+      registerComposerShape: () => {},
+      registerAssistantThinkingRenderer: () => {},
+      getAllTools: () => [],
+      sendMessage: () => {},
+    } as unknown as ExtensionAPI;
+
+    const fakeCtx = {
+      ui: {
+        setWidget: (key: string, factory: ((tui: unknown, theme: unknown) => RenderableComponent) | undefined, options?: { placement?: string }) => {
+          if (factory) {
+            widgets.set(key, { factory, placement: options?.placement });
+          } else {
+            widgets.delete(key);
+          }
+        },
+        requestRender: () => {},
+        notify: () => {},
+      },
+    } as unknown as ExtensionContext;
+
+    registerExtension(fakePi);
+
+    const emit = async (event: string, payload: unknown) => {
+      for (const handler of eventHandlers.get(event) ?? []) {
+        await handler(payload, fakeCtx);
+      }
+    };
+
+    // 1. Session start: widget mounts aboveEditor
+    await emit("session_start", fakeCtx);
+    const thinkingWidget = widgets.get("minimal-thinking");
+    expect(thinkingWidget).toBeDefined();
+    expect(thinkingWidget!.placement).toBe("aboveEditor");
+
+    // 2. Idle / not thinking state: renders exactly 4 empty lines (no rail, no Thinking...)
+    const idleContainer = thinkingWidget!.factory(null, null) as unknown as MockContainer;
+    const idleLines = idleContainer.children[0]?.render?.(80);
+    expect(idleLines).toEqual(["", "", "", ""]);
+    expect(idleLines).toHaveLength(4);
+
+    // 3. Thinking starts: renders 1 header + 3 rail lines = 4 lines total
+    await emit("message_update", {
+      message: {
+        content: [{ type: "thinking", thinking: "Analyzing the solution" }],
+      },
+      assistantMessageEvent: { type: "thinking_start" },
+    });
+
+    const liveContainer = thinkingWidget!.factory(null, null) as unknown as MockContainer;
+    const liveLines = liveContainer.children[0]?.render?.(80) ?? [];
+    expect(liveLines).toHaveLength(4);
+    expect(Bun.stripANSI(liveLines[0])).toContain("Thinking...");
+    // 3 rail lines
+    expect(Bun.stripANSI(liveLines[1])).toContain("│");
+    expect(Bun.stripANSI(liveLines[2])).toContain("│");
+    expect(Bun.stripANSI(liveLines[3])).toContain("│");
+
+    // 4. Tool starts / thinking stops: reverts to 4 empty lines, preserving exact height
+    await emit("tool_execution_start", {
+      toolCallId: "call_2",
+      toolName: "grep",
+      args: { pattern: "test" },
+    });
+
+    const stoppedContainer = thinkingWidget!.factory(null, null) as unknown as MockContainer;
+    const stoppedLines = stoppedContainer.children[0]?.render?.(80);
+    expect(stoppedLines).toEqual(["", "", "", ""]);
+    expect(stoppedLines).toHaveLength(4);
+  });
+});

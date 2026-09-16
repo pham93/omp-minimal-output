@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { collapseToolText } from "./filters.ts";
+import { TextScroller } from "./scrolling-text.ts";
 import { toolActionLabel, wrapLatestLines } from "./text.ts";
 import {
   LINE_WIDTH_RATIO,
@@ -215,6 +216,11 @@ let todosWidgetOn = false;
 const TODOS_WIDGET_KEY = "minimal-todos";
 const THOUGHT_PREVIEW_LINES = 3;
 const THOUGHT_WIDGET_KEY = "minimal-thinking";
+const thoughtScroller = new TextScroller({
+  maxLines: THOUGHT_PREVIEW_LINES,
+  animationSpeed: 250,
+  fillDirection: "bottom-to-top",
+});
 // Tools already re-registered custom card. wrapTool() config.ts decides
 // membership from WRAPPED_TOOL_REGISTRY minus native opt-outs.
 const wrapApplied = new Set<string>();
@@ -491,6 +497,27 @@ function thoughtFadeKey(): string {
   return activityRunId ? `thought:${activityRunId}` : "thought:live";
 }
 
+function animatedThinkingRailLines(theme: unknown, width: number, text: string): string[] {
+  const pad = "  ";
+  const bar = `${pad}│ `;
+  const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
+  thoughtScroller.update(text, innerW);
+  const rendered = thoughtScroller.render();
+  const cfgOp = getPluginConfig().opacity;
+  const lines: string[] = [];
+
+  for (const item of rendered) {
+    if (item.isPlaceholder) {
+      lines.push(paintAt(theme, bar, "accent", cfgOp * 0.35));
+    } else {
+      const effectiveOp = item.opacity * cfgOp;
+      lines.push(`${paintAt(theme, bar, "accent", effectiveOp)}${paintAt(theme, item.text, "toolOutput", effectiveOp)}`);
+    }
+  }
+
+  return lines;
+}
+
 function thinkingRailLines(theme: unknown, width: number, text: string, indent: boolean): string[] {
   if (!text.trim()) return [];
   const pad = indent ? TOOL_INDENT : "  ";
@@ -510,26 +537,51 @@ function paintThinkingVisual(theme: unknown): Container {
     render: (width: number): readonly string[] => {
       if (!runtimeIsActive()) return [];
       const live = thoughtLive;
-      const body = live ? "Thinking..." : thoughtSettledLabel || "Thought";
+      if (!live) {
+        // When the AI is not thinking, don't display Thinking with the rail.
+        // Just empty lines that take up the space (4 lines total: 1 header + 3 rail lines).
+        return ["", "", "", ""];
+      }
       const lines: string[] = [
         formatRowLine(theme, width, {
-          body,
-          live,
+          body: "Thinking...",
+          live: true,
           fadeKey: thoughtFadeKey(),
-          right: live && thoughtStartedAt > 0 ? elapsedSuffix(thoughtStartedAt) : "",
+          right: thoughtStartedAt > 0 ? elapsedSuffix(thoughtStartedAt) : "",
         }),
       ];
-      if (live) lines.push(...thinkingRailLines(theme, width, thoughtText, false));
+      lines.push(...animatedThinkingRailLines(theme, width, thoughtText));
       return lines;
     },
   });
   return c;
 }
 
+function installThoughtWidget(): void {
+  if (!runtimeIsActive()) return;
+  const ui = thoughtUi;
+  if (!ui || typeof ui.setWidget !== "function") return;
+  try {
+    if (thoughtWidgetOn) {
+      if (typeof ui.requestRender === "function") ui.requestRender();
+      return;
+    }
+    ui.setWidget(THOUGHT_WIDGET_KEY, (_tui: unknown, theme: unknown) => paintThinkingVisual(theme), {
+      placement: "aboveEditor",
+    });
+    thoughtWidgetOn = true;
+  } catch {
+    thoughtWidgetOn = false;
+  }
+}
+
 function bindThoughtUi(ctx: unknown): void {
   if (!runtimeIsActive() || typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
   const ui = (ctx as { ui?: typeof thoughtUi }).ui;
-  if (ui) thoughtUi = ui;
+  if (ui) {
+    thoughtUi = ui;
+    installThoughtWidget();
+  }
 }
 
 function setThoughtWidget(show: boolean): void {
@@ -541,15 +593,7 @@ function setThoughtWidget(show: boolean): void {
       thoughtWidgetOn = false;
       return;
     }
-    if (!runtimeIsActive()) return;
-    if (thoughtWidgetOn) {
-      if (typeof ui.requestRender === "function") ui.requestRender();
-      return;
-    }
-    ui.setWidget(THOUGHT_WIDGET_KEY, (_tui: unknown, theme: unknown) => paintThinkingVisual(theme), {
-      placement: "aboveEditor",
-    });
-    thoughtWidgetOn = true;
+    installThoughtWidget();
   } catch {
     thoughtWidgetOn = false;
   }
@@ -760,7 +804,14 @@ function resetThought(): void {
   thoughtStartedAt = 0;
   thoughtText = "";
   thoughtSettledLabel = "";
-  setThoughtWidget(false);
+  thoughtScroller.reset();
+  if (thoughtWidgetOn && thoughtUi && typeof thoughtUi.requestRender === "function") {
+    try {
+      thoughtUi.requestRender();
+    } catch {
+      // Best-effort repaint
+    }
+  }
 }
 
 function paintRow(
@@ -1623,6 +1674,7 @@ export default function (pi: ExtensionAPI) {
     if (
       activityLive ||
       thoughtLive ||
+      thoughtScroller.isAnimating() ||
       liveRuns.size !== 0 ||
       nativeToolCardsNeedPump() ||
       alertSkinActive() ||
@@ -1851,7 +1903,7 @@ export default function (pi: ExtensionAPI) {
       });
     }
     ensureSpinTimer(ctx);
-    setThoughtWidget(false);
+    thoughtLive = false;
     requestRepaint();
   });
 
@@ -1900,15 +1952,16 @@ export default function (pi: ExtensionAPI) {
       if (!activityRunId || (!activityLive && liveRuns.size === 0)) {
         applyIntent("Working", Date.now(), ACTIVITY_LABEL_SOURCE.generated);
       }
+      if (thoughtStartedAt === 0) thoughtStartedAt = Date.now();
       syncThought();
-      setThoughtWidget(liveRuns.size === 0);
+      installThoughtWidget();
       ensureSpinTimer(ctx);
     } else if (thoughtLive) {
       thoughtLive = false;
       syncThought();
-      setThoughtWidget(liveRuns.size === 0 && thoughtSettledLabel !== "");
+      requestRepaint();
     } else if (thoughtWidgetOn) {
-      setThoughtWidget(true);
+      requestRepaint();
     }
     if (activityRunId !== prevRun || activityLabel !== prevLabel) requestRepaint();
   });
