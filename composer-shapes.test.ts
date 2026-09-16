@@ -92,6 +92,10 @@ interface TestPlanStatus {
   paused: boolean;
 }
 
+interface TestWorkingStatus {
+  startedAt: number;
+}
+
 interface FakeEditorTheme {
   symbols: { boxRound: TestComposerBox };
   __borderStyle: string;
@@ -117,6 +121,7 @@ interface ComposerModuleUnderTest {
   updateMinimalPromptEditorProviders: (
     getContextUsage: () => TestContextUsage | undefined,
     getPlanStatus: () => TestPlanStatus | undefined,
+    getWorkingStatus?: () => TestWorkingStatus | undefined,
   ) => void;
 }
 
@@ -233,9 +238,9 @@ const BOX: TestComposerBox = {
   vertical: "│",
 };
 
-function makeChromeContext(topContent: string): TestChromeContext {
+function makeChromeContext(topContent: string, width = 80): TestChromeContext {
   return {
-    width: 80,
+    width,
     paddingX: 0,
     borderColor: (value: string): string => `${GREEN}${value}${RESET}`,
     accentColor: (value: string): string => `${CYAN}${value}${RESET}`,
@@ -338,6 +343,7 @@ const resetProviders = (): void => {
   composer.updateMinimalPromptEditorProviders(
     () => undefined,
     () => undefined,
+    () => undefined,
   );
 };
 
@@ -386,24 +392,36 @@ describe("colorful docks preserve theme colors", () => {
     expect(line).toContain(GREEN);
   });
 
-  test("bottom dock splits project/Git to the top and mode to the bottom", () => {
+  test("bottom dock strips native Plan from both rules", () => {
     resetProviders();
     const top = bottomDock().renderTop(makeChromeContext(STATUS));
     const bottom = bottomDock().renderBottom(makeChromeContext(STATUS));
     expect(top).toContain("myproj");
     expect(top).not.toContain("Plan");
-    expect(bottom).toContain("Plan");
+    expect(stripAnsi(bottom ?? "")).not.toContain("Plan");
+  });
+
+  test("every dock strips duplicate native Plan copies", () => {
+    resetProviders();
+    const duplicated = "Opus ⌂ myproj ⎇ main 🗺 Plan 🗺 Plan ⏸";
+    for (const dock of [bottomDock(), topDock(), grayscaleBottomDock(), grayscaleTopDock()]) {
+      const top = dock.renderTop(makeChromeContext(duplicated)) ?? "";
+      const bottom = dock.renderBottom(makeChromeContext(duplicated)) ?? "";
+      expect(stripAnsi(top)).not.toContain("Plan");
+      expect(stripAnsi(bottom)).not.toContain("Plan");
+    }
   });
 
   test("top dock renders the full status on top and a plain rule below", () => {
     composer.updateMinimalPromptEditorProviders(
       () => undefined,
       () => ({ enabled: true, paused: false }),
+      () => undefined,
     );
     try {
       const top = topDock().renderTop(makeChromeContext(STATUS));
       expect(top).toContain("myproj");
-      expect(top).toContain("Plan");
+      expect(stripAnsi(top ?? "")).not.toContain("Plan");
       const bottom = topDock().renderBottom(makeChromeContext(STATUS)) ?? "";
       const plain = bottom.replace(new RegExp(ANSI_PART, "g"), "");
       expect(plain).not.toContain("Plan");
@@ -412,27 +430,53 @@ describe("colorful docks preserve theme colors", () => {
       resetProviders();
     }
   });
+
+  test("live run prefixes spinner and elapsed ahead of project", () => {
+    composer.updateMinimalPromptEditorProviders(
+      () => undefined,
+      () => undefined,
+      () => ({ startedAt: Date.now() - 12_000 }),
+    );
+    try {
+      const native = "⬢ Muse Spark 1.3 Free  󰚩 Muse Spark 1.3 Free · 󰪥 xhigh ⌂ myproj ⎇ main";
+      const top = stripAnsi(topDock().renderTop(makeChromeContext(native)) ?? "");
+      const bottom = stripAnsi(bottomDock().renderBottom(makeChromeContext(native)) ?? "");
+      for (const plain of [top, bottom]) {
+        expect(plain).toMatch(/\b12s\b/);
+        expect(plain).toMatch(/[◈◉◎○]/);
+      }
+      expect(top).toMatch(/^[^\w]*[◈◉◎○]\s+12s\s+Muse Spark/);
+      resetProviders();
+    } finally {
+    }
+  });
+
+  test("idle session adds no prefix", () => {
+    composer.updateMinimalPromptEditorProviders(
+      () => undefined,
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      const native = "⬢ Muse Spark 1.3 Free  󰚩 Muse Spark 1.3 Free · 󰪥 xhigh ⌂ myproj ⎇ main";
+      const plain = stripAnsi(topDock().renderTop(makeChromeContext(native)) ?? "");
+      expect(plain.match(/Muse Spark 1\.3 Free/gu) ?? []).toHaveLength(1);
+      expect(plain).not.toMatch(/[◈◉◎○]/);
+    } finally {
+      resetProviders();
+    }
+  });
+
 });
 
 describe("grayscale docks collapse color to equal-RGB gray", () => {
-  test("grayscale top dock keeps status text but drops every theme color", () => {
-    resetProviders();
-    const line = grayscaleTopDock().renderTop(makeChromeContext(STATUS)) ?? "";
-    const plain = line.replace(new RegExp(ANSI_PART, "g"), "");
-    expect(plain).toContain("myproj");
-    expect(line).toContain("38;2;142;142;142");
-    expect(line).toContain("38;2;176;176;176");
-    expectNoThemeColors(line);
-    expectGrayscaleOnly(line);
-  });
-
-  test("grayscale bottom dock keeps the split layout without theme colors", () => {
+  test("grayscale bottom dock strips native Plan without theme colors", () => {
     resetProviders();
     const top = grayscaleBottomDock().renderTop(makeChromeContext(STATUS)) ?? "";
     const bottom = grayscaleBottomDock().renderBottom(makeChromeContext(STATUS)) ?? "";
     expect(top).toContain("myproj");
     expect(top).not.toContain("Plan");
-    expect(bottom).toContain("Plan");
+    expect(stripAnsi(bottom)).not.toContain("Plan");
     expectNoThemeColors(top);
     expectNoThemeColors(bottom);
     expectGrayscaleOnly(top);
@@ -449,25 +493,92 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
     expectGrayscaleOnly(gray[0] ?? "");
   });
 
+  test("subagent job chunk does not remove the context gauge", () => {
+    composer.updateMinimalPromptEditorProviders(
+      () => ({ percent: 50, contextWindow: 200_000 }),
+      () => ({ enabled: true, paused: false }),
+      () => ({ startedAt: Date.now() - 12_000 }),
+    );
+    try {
+      // Native unshifts `⚙ N` onto the right segments when agents run; the
+      // squeezed middle fill can collapse so no caps/% anchor survives.
+      const squeezed = `Opus ⚡ 2 ◇ myproj ⎇ main`;
+      for (const dock of [topDock(), bottomDock(), grayscaleTopDock(), grayscaleBottomDock()]) {
+        const top = stripAnsi(dock.renderTop(makeChromeContext(squeezed)) ?? "");
+        const bottom = stripAnsi(dock.renderBottom(makeChromeContext(squeezed)) ?? "");
+        expect(`${top} ${bottom}`).toContain("50%/200K");
+      }
+    } finally {
+      resetProviders();
+    }
+  });
+
+  test("worktree project icon is recognized and keeps gauge in both docks", () => {
+    composer.updateMinimalPromptEditorProviders(
+      () => ({ percent: 50, contextWindow: 200_000 }),
+      () => ({ enabled: true, paused: false }),
+      () => ({ startedAt: Date.now() - 12_000 }),
+    );
+    try {
+      const worktreeStatus = "󰚩 Muse Spark 1.3 Free · 󰪥 xhigh > 5h 10% ─────50%─────────200K── 👥 1 <  fix-composer <  fix_composer <  Plan";
+      for (const dock of [topDock(), bottomDock(), grayscaleTopDock(), grayscaleBottomDock()]) {
+        const top = stripAnsi(dock.renderTop(makeChromeContext(worktreeStatus, 140)) ?? "");
+        const bottom = stripAnsi(dock.renderBottom(makeChromeContext(worktreeStatus, 140)) ?? "");
+        expect(`${top} ${bottom}`).toContain("50%/200K");
+        expect(`${top} ${bottom}`).toContain("fix-composer");
+      }
+    } finally {
+      resetProviders();
+    }
+  });
+
+  test("renderers fail open without throwing on malformed or empty context", () => {
+    resetProviders();
+    const emptyCtx = makeChromeContext("", 40);
+    for (const dock of [topDock(), bottomDock(), grayscaleTopDock(), grayscaleBottomDock()]) {
+      expect(() => dock.renderTop(emptyCtx)).not.toThrow();
+      expect(() => dock.renderBottom(emptyCtx)).not.toThrow();
+    }
+  });
+
+  test("narrow width keeps the gauge ahead of tail content", () => {
+    composer.updateMinimalPromptEditorProviders(
+      () => ({ percent: 50, contextWindow: 200_000 }),
+      () => ({ enabled: true, paused: false }),
+      () => ({ startedAt: Date.now() - 12_000 }),
+    );
+    try {
+      const squeezed = `Opus ⚡ 2 ◇ myproj ⎇ main with-a-very-long-tail-that-must-truncate`;
+      const narrow = { ...makeChromeContext(squeezed), width: 40 };
+      expect(stripAnsi(topDock().renderTop(narrow) ?? "")).toContain("50%/200K");
+      expect(stripAnsi(bottomDock().renderBottom(narrow) ?? "")).toContain("50%/200K");
+    } finally {
+      resetProviders();
+    }
+  });
+
   test("grayscale context gauge keeps its label but loses accent and frame colors", () => {
     composer.updateMinimalPromptEditorProviders(
       () => ({ percent: 50, contextWindow: 200_000 }),
       () => ({ enabled: true, paused: false }),
+      () => undefined,
     );
     try {
       const content = `Opus ▶────────────────────◀ ⌂ myproj ⎇ main 🗺 Plan`;
       const colorful = topDock().renderTop(makeChromeContext(content)) ?? "";
       expect(colorful).toContain(CYAN);
       expect(colorful).toContain("50%/200K");
+      expect(stripAnsi(colorful)).not.toContain("Plan");
       const gray = grayscaleTopDock().renderTop(makeChromeContext(content)) ?? "";
       expect(gray).toContain("50%/200K");
-      expect(gray).toContain("Plan");
+      expect(stripAnsi(gray)).not.toContain("Plan");
       expectNoThemeColors(gray);
       expectGrayscaleOnly(gray);
     } finally {
       resetProviders();
     }
   });
+
 });
 
 describe("grayscale editor frame", () => {
@@ -523,15 +634,16 @@ describe("composer layout is presented correctly", () => {
     composer.updateMinimalPromptEditorProviders(
       () => undefined,
       () => ({ enabled: true, paused: false }),
+      () => undefined,
     );
     try {
       const width = 80;
       const line = topDock().renderTop(makeChromeContext(STATUS)) ?? "";
-      // Full status stays on one visible row: project, Git, and pinned mode.
+      // Full status stays on one visible row: project and Git, with native Plan stripped.
       const plain = stripAnsi(line);
       expect(plain).toContain("myproj");
       expect(plain).toContain("main");
-      expect(plain).toContain("Plan");
+      expect(plain).not.toContain("Plan");
       expectChromeLayout(line, width, plain.slice(2, -2));
     } finally {
       resetProviders();
@@ -545,10 +657,10 @@ describe("composer layout is presented correctly", () => {
     const bottom = bottomDock().renderBottom(makeChromeContext(STATUS)) ?? "";
     const topPlain = stripAnsi(top);
     const bottomPlain = stripAnsi(bottom);
-    // Top keeps project/Git right-docked; bottom keeps mode right-pinned.
+    // Top keeps project/Git right-docked; native Plan appears in neither rule.
     expect(topPlain).toContain("myproj");
     expect(topPlain).not.toContain("Plan");
-    expect(bottomPlain).toContain("Plan");
+    expect(bottomPlain).not.toContain("Plan");
     expect(mockVisibleWidth(top)).toBe(width);
     expect(mockVisibleWidth(bottom)).toBe(width);
     // Both rows share the frame: corners outside, one-cell padding inside.

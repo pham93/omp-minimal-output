@@ -69,6 +69,7 @@ import {
   registerMinimalComposerShapes,
   updateMinimalPromptEditorProviders,
   type MinimalPlanStatus,
+  type MinimalWorkingStatus,
 } from "./composer-shapes.ts";
 import {
   latestTodoDetailsFromEntries,
@@ -700,6 +701,20 @@ function bindTodoSource(ctx: unknown): void {
     }
   };
 }
+
+function createWorkingStatusProvider(): () => MinimalWorkingStatus | undefined {
+  return () => {
+    try {
+      const live =
+        activityRunId !== null && (activityLive || liveRuns.size > 0) && activityStartedAt > 0;
+      if (!live) return undefined;
+      return { startedAt: activityStartedAt };
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 function createPlanStatusProvider(ctx: ExtensionContext): () => MinimalPlanStatus | undefined {
   let cachedLeafId: string | null | undefined;
   let cachedStatus: MinimalPlanStatus | undefined;
@@ -1746,11 +1761,17 @@ export default function (pi: ExtensionAPI) {
     if (ctx.hasUI) {
       disposeMinimalPromptEditor = installMinimalPromptEditor(
         ctx.ui,
-        () => ctx.getContextUsage(),
+        () => {
+          try {
+            return ctx.getContextUsage();
+          } catch {
+            return undefined;
+          }
+        },
         createPlanStatusProvider(ctx),
+        createWorkingStatusProvider(),
       );
     }
-    grabTui(ctx);
     ensureSpinTimer(ctx);
     try {
       if (enabled && ctx.hasUI) ctx.ui.notify("Minimal output active (grok-build style)", "info");
@@ -1766,10 +1787,19 @@ export default function (pi: ExtensionAPI) {
     bindTodoSource(ctx);
     todoSessionVisible = true;
     syncTodoHeaderFromSession(ctx);
-    updateMinimalPromptEditorProviders(() => ctx.getContextUsage(), createPlanStatusProvider(ctx));
+    updateMinimalPromptEditorProviders(
+      () => {
+        try {
+          return ctx.getContextUsage();
+        } catch {
+          return undefined;
+        }
+      },
+      createPlanStatusProvider(ctx),
+      createWorkingStatusProvider(),
+    );
     stopSpinTimerIfIdle(ctx);
   });
-
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!runtimeOwner.owns()) return;
     agentRunning = true;
@@ -1784,6 +1814,17 @@ export default function (pi: ExtensionAPI) {
       // Missing lockfile; timer establishes the baseline.
     }
     wrapAllTools();
+    updateMinimalPromptEditorProviders(
+      () => {
+        try {
+          return ctx.getContextUsage();
+        } catch {
+          return undefined;
+        }
+      },
+      createPlanStatusProvider(ctx),
+      createWorkingStatusProvider(),
+    );
   });
 
   pi.on("tool_result", async (event, ctx) => {
