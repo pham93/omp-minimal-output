@@ -115,9 +115,7 @@ interface ComposerModuleUnderTest {
     theme: FakeEditorTheme,
     keybindings: unknown,
   ) => { render: (width: number) => string[] };
-  registerMinimalComposerShapes: (pi: {
-    registerComposerShape: (shape: TestComposerShape) => void;
-  }) => void;
+  registerMinimalComposerShapes: (pi: { registerComposerShape: (shape: TestComposerShape) => void }) => void;
   updateMinimalPromptEditorProviders: (
     getContextUsage: () => TestContextUsage | undefined,
     getPlanStatus: () => TestPlanStatus | undefined,
@@ -140,8 +138,7 @@ function tokenize(value: string): AnsiToken[] {
   return tokens;
 }
 
-const mockVisibleWidth = (value: string): number =>
-  tokenize(value).filter((token) => !token.ansi).length;
+const mockVisibleWidth = (value: string): number => tokenize(value).filter((token) => !token.ansi).length;
 
 const mockPadding = (width: number): string => " ".repeat(Math.max(0, width));
 
@@ -287,10 +284,8 @@ function styleById(id: string): TestComposerStyle {
 
 const bottomDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.bottomDock);
 const topDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.topDock);
-const grayscaleBottomDock = (): TestComposerStyle =>
-  styleById(composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock);
-const grayscaleTopDock = (): TestComposerStyle =>
-  styleById(composer.MINIMAL_COMPOSER_STYLE.grayscaleTopDock);
+const grayscaleBottomDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock);
+const grayscaleTopDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.grayscaleTopDock);
 
 const STATUS = "Opus ⌂ myproj ⎇ main 🗺 Plan";
 
@@ -338,7 +333,6 @@ function expectChromeLayout(line: string, width: number, expectedInner: string):
   if (mode >= 0) expect(plain.slice(mode)).toBe(plain.slice(mode).trimStart());
 }
 
-
 const resetProviders = (): void => {
   composer.updateMinimalPromptEditorProviders(
     () => undefined,
@@ -358,10 +352,7 @@ describe("composer shape registration", () => {
   });
 
   test("grayscale ids are distinct and labelled as grayscale", () => {
-    const colorful = new Set([
-      composer.MINIMAL_COMPOSER_STYLE.bottomDock,
-      composer.MINIMAL_COMPOSER_STYLE.topDock,
-    ]);
+    const colorful = new Set([composer.MINIMAL_COMPOSER_STYLE.bottomDock, composer.MINIMAL_COMPOSER_STYLE.topDock]);
     for (const shape of registered) {
       const isGrayscale =
         shape.style.id === composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock ||
@@ -381,6 +372,37 @@ describe("composer shape registration", () => {
       expect(typeof shape.style.renderBottom).toBe("function");
     }
   });
+});
+
+test("all docks pin one mode indicator through build, plan, and paused transitions", () => {
+  let status = { enabled: false, paused: false };
+  composer.updateMinimalPromptEditorProviders(
+    () => undefined,
+    () => status,
+  );
+  try {
+    const ctx = makeChromeContext("Opus  myproj  main  Plan  Plan ", 100);
+    for (const dock of [bottomDock(), topDock(), grayscaleBottomDock(), grayscaleTopDock()]) {
+      const render = () => stripAnsi(`${dock.renderTop(ctx) ?? ""}\n${dock.renderBottom(ctx) ?? ""}`);
+      status = { enabled: false, paused: false };
+      expect(render().match(/build/g)).toHaveLength(1);
+      expect(render()).not.toContain("Plan");
+      status = { enabled: true, paused: false };
+      expect(render().match(/Plan/g)).toHaveLength(1);
+      expect(render()).toContain(" Plan");
+      expect(render()).not.toContain("build");
+      expect(render()).not.toContain("");
+      status = { enabled: false, paused: true };
+      expect(render().match(/Plan/g)).toHaveLength(1);
+      expect(render()).toContain(" Plan ");
+      expect(render()).not.toContain("build");
+      status = { enabled: false, paused: false };
+      expect(render()).not.toContain("Plan");
+      expect(render().match(/build/g)).toHaveLength(1);
+    }
+  } finally {
+    resetProviders();
+  }
 });
 
 describe("colorful docks preserve theme colors", () => {
@@ -421,7 +443,6 @@ describe("colorful docks preserve theme colors", () => {
     try {
       const top = topDock().renderTop(makeChromeContext(STATUS));
       expect(top).toContain("myproj");
-      expect(stripAnsi(top ?? "")).not.toContain("Plan");
       const bottom = topDock().renderBottom(makeChromeContext(STATUS)) ?? "";
       const plain = bottom.replace(new RegExp(ANSI_PART, "g"), "");
       expect(plain).not.toContain("Plan");
@@ -466,7 +487,6 @@ describe("colorful docks preserve theme colors", () => {
       resetProviders();
     }
   });
-
 });
 
 describe("grayscale docks collapse color to equal-RGB gray", () => {
@@ -520,7 +540,8 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
       () => ({ startedAt: Date.now() - 12_000 }),
     );
     try {
-      const worktreeStatus = "󰚩 Muse Spark 1.3 Free · 󰪥 xhigh > 5h 10% ─────50%─────────200K── 👥 1 <  fix-composer <  fix_composer <  Plan";
+      const worktreeStatus =
+        "󰚩 Muse Spark 1.3 Free · 󰪥 xhigh > 5h 10% ─────50%─────────200K── 👥 1 <  fix-composer <  fix_composer <  Plan";
       for (const dock of [topDock(), bottomDock(), grayscaleTopDock(), grayscaleBottomDock()]) {
         const top = stripAnsi(dock.renderTop(makeChromeContext(worktreeStatus, 140)) ?? "");
         const bottom = stripAnsi(dock.renderBottom(makeChromeContext(worktreeStatus, 140)) ?? "");
@@ -568,17 +589,14 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
       const colorful = topDock().renderTop(makeChromeContext(content)) ?? "";
       expect(colorful).toContain(CYAN);
       expect(colorful).toContain("50%/200K");
-      expect(stripAnsi(colorful)).not.toContain("Plan");
       const gray = grayscaleTopDock().renderTop(makeChromeContext(content)) ?? "";
       expect(gray).toContain("50%/200K");
-      expect(stripAnsi(gray)).not.toContain("Plan");
       expectNoThemeColors(gray);
       expectGrayscaleOnly(gray);
     } finally {
       resetProviders();
     }
   });
-
 });
 
 describe("grayscale editor frame", () => {
@@ -643,7 +661,6 @@ describe("composer layout is presented correctly", () => {
       const plain = stripAnsi(line);
       expect(plain).toContain("myproj");
       expect(plain).toContain("main");
-      expect(plain).not.toContain("Plan");
       expectChromeLayout(line, width, plain.slice(2, -2));
     } finally {
       resetProviders();
@@ -706,11 +723,7 @@ describe("composer layout is presented correctly", () => {
       composer.MINIMAL_COMPOSER_STYLE.bottomDock,
       composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock,
     ]) {
-      const editor = new composer.MinimalPromptEditor(
-        {},
-        makeEditorTheme(styleId, frameInner(36)),
-        {},
-      );
+      const editor = new composer.MinimalPromptEditor({}, makeEditorTheme(styleId, frameInner(36)), {});
       const rows = editor.render(40);
       expect(rows).toHaveLength(3);
       const plain = rows.map(stripAnsi);
@@ -792,4 +805,3 @@ describe("thinking effort expansion", () => {
     expect(rows.some((row) => stripAnsi(row).includes("xhigh"))).toBe(true);
   });
 });
-

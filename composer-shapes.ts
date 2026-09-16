@@ -81,6 +81,8 @@ const ANSI_SEQUENCE_RE = /^(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b
 const STATUS_COLOR = {
   project: "statusLinePath",
   build: "statusLineModel",
+  planActive: "accent",
+  planPaused: "warning",
   working: "statusLineModel",
   gitClean: "statusLineGitClean",
   gitDirty: "statusLineGitDirty",
@@ -268,12 +270,7 @@ function contextGaugeLabel(usage: ContextUsage): string {
   return `${formatContextPercent(usage.percent)}/${formatContextWindow(usage.contextWindow)}`;
 }
 
-function ensureGaugeVisible(
-  text: string,
-  body: string,
-  bodyWidth: number,
-  ctx: ComposerChromeContext,
-): string {
+function ensureGaugeVisible(text: string, body: string, bodyWidth: number, ctx: ComposerChromeContext): string {
   try {
     const usage = contextUsageProvider();
     if (!usage || usage.contextWindow <= 0 || bodyWidth <= 0) return body;
@@ -324,11 +321,19 @@ function statusColor(color: StatusColor, text: string, fallback: (value: string)
 function fallbackModeStatus(content: string, ctx: ComposerChromeContext): string {
   const status = planStatusProvider();
   if (!status) return "";
-  if (status.enabled || status.paused) return "";
 
   const plain = Bun.stripANSI(content);
   const nerd = plain.includes(" ");
   const unicode = plain.includes("⌂ ");
+  if (status.enabled || status.paused) {
+    const plan = nerd ? " Plan" : unicode ? "🗺 Plan" : "Plan";
+    const pause = status.paused ? (nerd ? " " : unicode ? " ⏸" : " (paused)") : "";
+    return statusColor(
+      status.paused ? STATUS_COLOR.planPaused : STATUS_COLOR.planActive,
+      plan + pause,
+      ctx.borderColor,
+    );
+  }
   const build = nerd
     ? BUILD_STATUS_VARIANTS.nerd
     : unicode
@@ -602,7 +607,9 @@ function chromeBody(ctx: ComposerChromeContext, part: ChromeStatusPart): string 
     if (part === CHROME_STATUS_PART.full) {
       const separated = splitProjectGitStatus(decorated, ctx);
       const prefix = workingPrefix(ctx);
-      const prefixed = prefix ? `${prefix} ${separated.leadingThroughProjectGit}`.trim() : separated.leadingThroughProjectGit;
+      const prefixed = prefix
+        ? `${prefix} ${separated.leadingThroughProjectGit}`.trim()
+        : separated.leadingThroughProjectGit;
       const statusBody = prefixed;
       const modeStatus = fallbackModeStatus(decorated, ctx);
       const modeGap = modeStatus ? 1 : 0;
@@ -661,11 +668,7 @@ function innerRow(ctx: ComposerRowContext, grayscale: boolean): string[] {
   return [`${gutter}${ctx.text}${ctx.pad}`];
 }
 
-function composerStyle(
-  id: MinimalComposerStyleId,
-  statusEdge: "top" | "bottom",
-  grayscale = false,
-): ComposerStyle {
+function composerStyle(id: MinimalComposerStyleId, statusEdge: "top" | "bottom", grayscale = false): ComposerStyle {
   return {
     id,
     filledSurface: false,
