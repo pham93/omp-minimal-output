@@ -7,7 +7,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
 }));
 
-const { TextScroller, createTextScroller, defaultSlotOpacities } = await import("./scrolling-text.ts");
+const { TextScroller, createTextScroller, defaultSlotOpacities, formatSettledThought } = await import("./scrolling-text.ts");
 
 describe("defaultSlotOpacities", () => {
   test("returns empty array for 0 lines", () => {
@@ -197,5 +197,74 @@ describe("TextScroller basic operations", () => {
     expect(settled[0].text).toBe("L3");
     expect(settled[1].text).toBe("L4");
     expect(settled[2].text).toBe("L5");
+  });
+});
+
+describe("formatSettledThought", () => {
+  test("returns empty array for empty or whitespace text", () => {
+    expect(formatSettledThought("", { maxLines: 5, width: 80 })).toEqual([]);
+    expect(formatSettledThought("   \n  \n  ", { maxLines: 5, width: 80 })).toEqual([]);
+  });
+
+  test("renders short thoughts without previous lines hint", () => {
+    const text = "Line one\nLine two\nLine three";
+    const lines = formatSettledThought(text, { maxLines: 5, width: 80 }).map(Bun.stripANSI);
+    expect(lines).toHaveLength(4);
+    expect(lines[3]).toBe("");
+    expect(lines[0]).toContain("│ Line one");
+    expect(lines[1]).toContain("│ Line two");
+    expect(lines[2]).toContain("│ Line three");
+    // No line number gutter
+    expect(lines[0]).not.toMatch(/\d+\s*│/);
+    // No previous lines hint
+    expect(lines.some((l: string) => l.includes("previous lines"))).toBe(false);
+  });
+
+  test("standard mode truncates to maxLines and prepends (...N previous lines)", () => {
+    // 15 lines of thought, maxLines = 5
+    const thought = Array.from({ length: 15 }, (_, i) => `Thought step ${i + 1}`).join("\n");
+    const lines = formatSettledThought(thought, { maxLines: 5, width: 80 }).map(Bun.stripANSI);
+
+    // 1 hint line + 5 visible lines = 6 lines
+    expect(lines).toHaveLength(7);
+    expect(lines[6]).toBe("");
+    expect(lines[0]).toContain("│ (...10 previous lines)");
+    expect(lines[1]).toContain("│ Thought step 11");
+    expect(lines[2]).toContain("│ Thought step 12");
+    expect(lines[3]).toContain("│ Thought step 13");
+    expect(lines[4]).toContain("│ Thought step 14");
+    expect(lines[5]).toContain("│ Thought step 15");
+
+    // No line numbers like "1 │ "
+    for (const l of lines) {
+      expect(l).not.toMatch(/^\s*\d+\s*│/);
+    }
+  });
+
+  test("minimal mode displays exactly 1 line with truncation hint", () => {
+    const thought = "Step A\nStep B\nStep C\nStep D";
+    const lines = formatSettledThought(thought, { maxLines: 1, width: 80 }).map(Bun.stripANSI);
+    expect(lines).toHaveLength(3);
+    expect(lines[2]).toBe("");
+    expect(lines[0]).toContain("│ (...3 previous lines)");
+    expect(lines[1]).toContain("│ Step D");
+  });
+
+  test("detailed mode displays up to detailedMaxRows (20 lines)", () => {
+    const thought = Array.from({ length: 25 }, (_, i) => `Step ${i + 1}`).join("\n");
+    const lines = formatSettledThought(thought, { maxLines: 20, width: 80 }).map(Bun.stripANSI);
+    expect(lines).toHaveLength(22);
+    expect(lines[21]).toBe("");
+    expect(lines[0]).toContain("│ (...5 previous lines)");
+    expect(lines[1]).toContain("│ Step 6");
+    expect(lines[20]).toContain("│ Step 25");
+  });
+
+  test("custom indentation is applied to rail bar", () => {
+    const text = "Single thought line";
+    const lines = formatSettledThought(text, { maxLines: 5, width: 80, indent: "    " }).map(Bun.stripANSI);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe("");
+    expect(lines[0]).toBe("    │ Single thought line");
   });
 });

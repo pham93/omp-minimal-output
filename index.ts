@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { collapseToolText } from "./filters.ts";
-import { TextScroller } from "./scrolling-text.ts";
+import { formatSettledThought, TextScroller } from "./scrolling-text.ts";
+import { detailProfile, thoughtRowLimit } from "./density.ts";
 import { toolActionLabel, wrapLatestLines } from "./text.ts";
 import {
   LINE_WIDTH_RATIO,
@@ -20,6 +21,7 @@ import {
 } from "./theme.ts";
 import {
   getPluginConfig,
+  isHideThinkingBlock,
   isWrappedTool,
   lockfilePath,
   projectOverridePaths,
@@ -508,10 +510,11 @@ function animatedThinkingRailLines(theme: unknown, width: number, text: string):
 
   for (const item of rendered) {
     if (item.isPlaceholder) {
-      lines.push(paintAt(theme, bar, "accent", cfgOp * 0.35));
+      lines.push(paintAt(theme, bar, "toolOutput", Math.max(0.05, cfgOp - 0.25) * 0.35));
     } else {
       const effectiveOp = item.opacity * cfgOp;
-      lines.push(`${paintAt(theme, bar, "accent", effectiveOp)}${paintAt(theme, item.text, "toolOutput", effectiveOp)}`);
+      const barOp = Math.max(0.05, effectiveOp - 0.25);
+      lines.push(`${paintAt(theme, bar, "toolOutput", barOp)}${paintAt(theme, item.text, "toolOutput", effectiveOp)}`);
     }
   }
 
@@ -525,8 +528,9 @@ function thinkingRailLines(theme: unknown, width: number, text: string, indent: 
   const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
   const lines: string[] = [];
   const op = getPluginConfig().opacity;
+  const barOp = Math.max(0.05, op - 0.25);
   for (const preview of wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES)) {
-    lines.push(`${paintAt(theme, bar, "accent", op)}${paintAt(theme, preview, "toolOutput", op)}`);
+    lines.push(`${paintAt(theme, bar, "toolOutput", barOp)}${paintAt(theme, preview, "toolOutput", op)}`);
   }
   return lines;
 }
@@ -575,7 +579,16 @@ function installThoughtWidget(): void {
   }
 }
 
+let currentSessionContext: unknown;
+
+function setSessionContext(ctx: unknown): void {
+  if (ctx && typeof ctx === "object") {
+    currentSessionContext = ctx;
+  }
+}
+
 function bindThoughtUi(ctx: unknown): void {
+  setSessionContext(ctx);
   if (!runtimeIsActive() || typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
   const ui = (ctx as { ui?: typeof thoughtUi }).ui;
   if (ui) {
@@ -955,6 +968,7 @@ function paintGroup(theme: unknown, gid: string): Container {
       for (const [idx, row] of rows.entries()) {
         const live = rowIsLive(row.fp);
         const isThought = row.fp.startsWith("thought:");
+        if (isThought && isHideThinkingBlock(currentSessionContext)) continue;
         const rowLine = formatRowLine(theme, width, {
           body: row.body,
           indent: true,
@@ -966,8 +980,14 @@ function paintGroup(theme: unknown, gid: string): Container {
         });
         lines.push(rowLine);
         if (row.error) terminalError = rowLine;
-        if (isThought && live) {
-          lines.push(...thinkingRailLines(theme, width, thoughtText, true));
+        if (isThought) {
+          if (live) {
+            lines.push(...thinkingRailLines(theme, width, thoughtText, true));
+          } else {
+            const text = typeof row.detail === "string" && row.detail ? row.detail : thoughtText;
+            const maxLines = thoughtRowLimit(profile);
+            lines.push(...formatSettledThought(text, { maxLines, width, theme, indent: true }));
+          }
         }
         for (const [detailIndex, detail] of row.details.entries()) {
           lines.push(
@@ -982,7 +1002,10 @@ function paintGroup(theme: unknown, gid: string): Container {
         }
       }
       const hasOutput = bodies.some((row) => row.details.length > 0);
-      const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(hasOutput);
+      const toolLimit = profile.detailed ? detailedRowLimit() : standardRowLimit(hasOutput);
+      const thoughtRowsCount = rows.filter((r) => r.fp.startsWith("thought:")).length;
+      const thoughtAllowance = thoughtRowsCount > 0 ? (thoughtRowLimit(profile) + 2) * thoughtRowsCount : 0;
+      const maxRows = toolLimit + thoughtAllowance;
       const hiddenRows = Math.max(1, lines.length - maxRows + 1);
       const overflow = formatRowLine(theme, width, {
         body: `… ${hiddenRows} more rows`,
@@ -1537,6 +1560,7 @@ export default function (pi: ExtensionAPI) {
       error: false,
       right: sec > 0 ? ` (${sec}s)` : "",
       startedAt: thoughtStartedAt > 0 ? thoughtStartedAt : Date.now(),
+      detail: thoughtText,
     });
     thoughtStartedAt = 0;
   }

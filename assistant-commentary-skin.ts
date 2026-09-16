@@ -1,4 +1,10 @@
-// Display-only bridge for provider-tagged assistant commentary that precedes tool calls.
+// Display-only bridge for provider-tagged assistant commentary that precedes tool calls,
+// and transcript thought blocks for standalone assistant messages.
+
+import { getPluginConfig, isHideThinkingBlock } from "./config.ts";
+import { detailProfile, thoughtRowLimit } from "./density.ts";
+import { formatSettledThought } from "./scrolling-text.ts";
+import { formatRowLine } from "./theme.ts";
 
 export const ASSISTANT_TEXT_PHASE = {
   commentary: "commentary",
@@ -98,21 +104,104 @@ export function commentaryStatusFromMessage(message: unknown): string | undefine
   return hasToolCall ? commentary : undefined;
 }
 
+export function messageHasToolCall(message: unknown): boolean {
+  const content = contentOf(message);
+  if (!content) return false;
+  return content.some(isToolCall);
+}
+
+export function extractThinkingFromMessage(message: unknown): string | undefined {
+  const content = contentOf(message);
+  if (!content) return undefined;
+  for (const block of content) {
+    if (typeof block === "object" && block !== null) {
+      const b = block as Record<string, unknown>;
+      const kind = b["type"];
+      if (
+        (kind === "thinking" || kind === "reasoning" || kind === "redactedThinking") &&
+        typeof b["thinking"] === "string"
+      ) {
+        const t = b["thinking"].trim();
+        if (t) return t;
+      }
+      if ((kind === "thinking" || kind === "reasoning") && typeof b["text"] === "string") {
+        const t = b["text"].trim();
+        if (t) return t;
+      }
+    }
+  }
+  return undefined;
+}
+
+const THOUGHT_SLOT_KEY = Symbol("minimalOutputThoughtSlot");
+
+interface ThoughtSlotState {
+  thinkingText?: string;
+  options?: unknown;
+}
+
+function createThoughtSlot(target: object): {
+  render: (width: number) => readonly string[];
+  setThought: (text: string | undefined, hasToolCall: boolean, options?: unknown) => void;
+} {
+  let state: ThoughtSlotState = {};
+  return {
+    setThought(text, hasToolCall, options) {
+      if (hasToolCall || !text) {
+        state = {};
+      } else {
+        state = { thinkingText: text, options };
+      }
+    },
+    render(width: number): readonly string[] {
+      if (!state.thinkingText) return [];
+      if (isHideThinkingBlock(target)) return [];
+      const cfg = getPluginConfig();
+      const profile = detailProfile(state.options, cfg);
+      const maxLines = thoughtRowLimit(profile, cfg);
+      const lines: string[] = [
+        formatRowLine(null, width, {
+          body: "Thought",
+          live: false,
+        }),
+      ];
+      lines.push(
+        ...formatSettledThought(state.thinkingText, {
+          maxLines,
+          width,
+          indent: false,
+        }),
+      );
+      return lines;
+    },
+  };
+}
+
 /**
- * Builds the content view consumed by the native assistant renderer. The source
- * message and its blocks stay unchanged; every provider-tagged commentary block
- * is blanked while content indexes remain stable for thinking renderers.
+ * Builds the content view consumed by the native assistant renderer.
+ * Provider-tagged commentary blocks are blanked, and native thinking blocks are
+ * blanked so Ohmypi's native raw markdown dump is replaced by our formatted thought block.
  */
-export function contentWithoutCommentary(message: unknown): unknown[] | undefined {
+export function contentWithoutCommentary(message: unknown, hideNativeThinking = true): unknown[] | undefined {
   const content = contentOf(message);
   if (!content) return undefined;
 
   let displayContent: unknown[] | undefined;
   for (let index = 0; index < content.length; index++) {
     const block = content[index];
-    if (!commentaryText(block)) continue;
-    displayContent ??= content.slice();
-    displayContent[index] = { ...(block as Record<string, unknown>), text: "" };
+    if (typeof block === "object" && block !== null) {
+      const b = block as Record<string, unknown>;
+      if (commentaryText(block)) {
+        displayContent ??= content.slice();
+        displayContent[index] = { ...b, text: "" };
+        continue;
+      }
+      if (hideNativeThinking && (b["type"] === "thinking" || b["type"] === "reasoning")) {
+        displayContent ??= content.slice();
+        displayContent[index] = { ...b, thinking: "", text: "" };
+        continue;
+      }
+    }
   }
   return displayContent;
 }
@@ -130,18 +219,36 @@ export function isAssistantMessageComponentLike(value: unknown): value is object
   );
 }
 
-function skinAssistantMessageComponent(target: object, deps: AssistantCommentarySkinDeps): void {
+export function skinAssistantMessageComponent(target: object, deps: AssistantCommentarySkinDeps): void {
   if (skinned.has(target)) return;
   const component = target as Record<string, unknown>;
   const nativeUpdate = methodOf(component, "updateContent");
   if (!nativeUpdate) return;
 
+  const targetRecord = target as Record<symbol, ReturnType<typeof createThoughtSlot>>;
+  let thoughtSlot = targetRecord[THOUGHT_SLOT_KEY];
+  if (!thoughtSlot) {
+    thoughtSlot = createThoughtSlot(target);
+    targetRecord[THOUGHT_SLOT_KEY] = thoughtSlot;
+    const children = (target as { children?: unknown[] }).children;
+    if (Array.isArray(children)) {
+      children.unshift(thoughtSlot);
+    } else if (typeof (target as { addChild?: (c: unknown) => void }).addChild === "function") {
+      (target as { addChild: (c: unknown) => void }).addChild(thoughtSlot);
+    }
+  }
+
   const patchedUpdate = function (this: unknown, message: unknown, options?: unknown): unknown {
+    const thinking = extractThinkingFromMessage(message);
+    const hasToolCall = messageHasToolCall(message);
+    thoughtSlot.setThought(thinking, hasToolCall, options);
+
     if (deps.active?.() === false || !deps.enabled()) {
       return nativeUpdate.call(this, message, options);
     }
 
-    const displayContent = contentWithoutCommentary(message);
+    const hideNativeThinking = !isHideThinkingBlock(target);
+    const displayContent = contentWithoutCommentary(message, hideNativeThinking);
     if (!displayContent || typeof message !== "object" || message === null) {
       return nativeUpdate.call(this, message, options);
     }

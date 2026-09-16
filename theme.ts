@@ -41,6 +41,43 @@ export function parseHexRgb(hex: string): [number, number, number] | undefined {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+const NAMED_HEX_RGB: Record<string, [number, number, number]> = {
+  gray: [128, 128, 128],
+  grey: [128, 128, 128],
+  dimgray: [105, 105, 105],
+  dimgrey: [105, 105, 105],
+  lightgray: [211, 211, 211],
+  lightgrey: [211, 211, 211],
+  white: [255, 255, 255],
+  black: [0, 0, 0],
+  cyan: [0, 255, 255],
+  green: [0, 205, 0],
+  red: [205, 0, 0],
+  yellow: [205, 205, 0],
+  magenta: [205, 0, 205],
+  blue: [0, 0, 238],
+};
+
+export function tokenFallbackRgb(token: string): [number, number, number] {
+  switch (token) {
+    case "accent":
+      return [0, 180, 216];
+    case "dim":
+      return [120, 120, 120];
+    case "toolOutput":
+    case "thinkingText":
+      return [175, 175, 175];
+    case "success":
+      return [63, 185, 80];
+    case "error":
+      return [248, 81, 73];
+    case "warning":
+      return [227, 179, 65];
+    default:
+      return [180, 180, 180];
+  }
+}
+
 export function themeTokenRgb(theme: unknown, token: string): [number, number, number] | undefined {
   if (typeof theme === "object" && theme !== null && "getColorHex" in theme) {
     const fn = (theme as { getColorHex: unknown }).getColorHex;
@@ -50,6 +87,8 @@ export function themeTokenRgb(theme: unknown, token: string): [number, number, n
         if (typeof hex === "string") {
           const rgb = parseHexRgb(hex);
           if (rgb) return rgb;
+          const named = NAMED_HEX_RGB[hex.toLowerCase()];
+          if (named) return named;
         }
       } catch {
         // Token missing or theme without a hex map.
@@ -59,9 +98,17 @@ export function themeTokenRgb(theme: unknown, token: string): [number, number, n
   if (isMinimalTheme(theme)) {
     try {
       const sample = theme.fg(token, " ");
-      const m = /38;2;(\d+);(\d+);(\d+)/.exec(sample);
-      if (m?.[1] !== undefined && m[2] !== undefined && m[3] !== undefined) {
-        return [Number(m[1]), Number(m[2]), Number(m[3])];
+      const m24 = /38;2;(\d+);(\d+);(\d+)/.exec(sample);
+      if (m24?.[1] !== undefined && m24[2] !== undefined && m24[3] !== undefined) {
+        return [Number(m24[1]), Number(m24[2]), Number(m24[3])];
+      }
+      const m256 = /38;5;(\d+)/.exec(sample);
+      if (m256?.[1] !== undefined) {
+        return ansi256Rgb(Number(m256[1]));
+      }
+      const mBasic = /(?:^|[;[])(3[0-7]|9[0-7])m/.exec(sample);
+      if (mBasic?.[1] !== undefined) {
+        return BASIC_FG_RGB[Number(mBasic[1])];
       }
     } catch {
       // Unstyleable.
@@ -109,17 +156,7 @@ export function paintMark(theme: unknown, mark: string, token: string): string {
 export function paintAt(theme: unknown, text: string, token: string, opacity: number): string {
   if (!text) return text;
   const a = Math.min(1, Math.max(0, opacity));
-  const fg = themeTokenRgb(theme, token);
-  if (!fg) {
-    if (isMinimalTheme(theme)) {
-      try {
-        return theme.fg(token, text);
-      } catch {
-        return text;
-      }
-    }
-    return text;
-  }
+  const fg = themeTokenRgb(theme, token) ?? tokenFallbackRgb(token);
   const bg = themeBgRgb(theme);
   const r = Math.round(bg[0] + (fg[0] - bg[0]) * a);
   const g = Math.round(bg[1] + (fg[1] - bg[1]) * a);

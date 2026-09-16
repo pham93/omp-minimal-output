@@ -130,6 +130,8 @@ describe("thought lines during subsequent thinking", () => {
         requestRender: () => {},
         notify: () => {},
       },
+      hideThinkingBlock: false,
+      settings: { get: (k: string) => (k === "hideThinkingBlock" ? false : undefined) },
     } as unknown as ExtensionContext;
 
     registerExtension(fakePi);
@@ -334,5 +336,240 @@ describe("thinking widget 4-line placeholder above editor", () => {
     const stoppedLines = stoppedContainer.children[0]?.render?.(80);
     expect(stoppedLines).toEqual(["", "", "", ""]);
     expect(stoppedLines).toHaveLength(4);
+  });
+
+  test("thinking widget above composer is still present even when hideThinkingBlock is true", async () => {
+    type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
+    const eventHandlers = new Map<string, EventHandler[]>();
+    const widgets = new Map<string, { factory: (tui: unknown, theme: unknown) => RenderableComponent; placement?: string }>();
+
+    const fakePi = {
+      on: (event: string, handler: EventHandler) => {
+        const list = eventHandlers.get(event) ?? [];
+        list.push(handler);
+        eventHandlers.set(event, list);
+      },
+      registerTool: () => {},
+      registerCommand: () => {},
+      registerShortcut: () => {},
+      registerMessageRenderer: () => {},
+      registerComposerShape: () => {},
+      registerAssistantThinkingRenderer: () => {},
+      getAllTools: () => [],
+      sendMessage: () => {},
+    } as unknown as ExtensionAPI;
+
+    const fakeCtx = {
+      ui: {
+        setWidget: (key: string, factory: ((tui: unknown, theme: unknown) => RenderableComponent) | undefined, options?: { placement?: string }) => {
+          if (factory) {
+            widgets.set(key, { factory, placement: options?.placement });
+          } else {
+            widgets.delete(key);
+          }
+        },
+        requestRender: () => {},
+        notify: () => {},
+      },
+      hideThinkingBlock: true,
+      settings: { get: (k: string) => (k === "hideThinkingBlock" ? true : undefined) },
+    } as unknown as ExtensionContext;
+
+    registerExtension(fakePi);
+
+    const emit = async (event: string, payload: unknown) => {
+      for (const handler of eventHandlers.get(event) ?? []) {
+        await handler(payload, fakeCtx);
+      }
+    };
+
+    // 1. Session start with hideThinkingBlock: true
+    await emit("session_start", fakeCtx);
+    const thinkingWidget = widgets.get("minimal-thinking");
+    expect(thinkingWidget).toBeDefined();
+    expect(thinkingWidget!.placement).toBe("aboveEditor");
+
+    // 2. Idle state: still occupies 4 lines
+    const idleContainer = thinkingWidget!.factory(null, null) as unknown as MockContainer;
+    expect(idleContainer.children[0]?.render?.(80)).toEqual(["", "", "", ""]);
+
+    // 3. Live thinking streaming: still renders the 4-line live thinking block above editor
+    await emit("message_update", {
+      message: {
+        content: [{ type: "thinking", thinking: "Live thoughts above editor" }],
+      },
+      assistantMessageEvent: { type: "thinking_start" },
+    });
+
+    const liveContainer = thinkingWidget!.factory(null, null) as unknown as MockContainer;
+    const liveLines = liveContainer.children[0]?.render?.(80) ?? [];
+    expect(liveLines).toHaveLength(4);
+    expect(Bun.stripANSI(liveLines[0])).toContain("Thinking...");
+    expect(Bun.stripANSI(liveLines[1])).toContain("│");
+    expect(Bun.stripANSI(liveLines[2])).toContain("│");
+    expect(Bun.stripANSI(liveLines[3])).toContain("│");
+  });
+});
+
+describe("transcript settled thought block rendering", () => {
+  test("renders settled thought block in group when thinking block is enabled", async () => {
+    type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
+    const eventHandlers = new Map<string, EventHandler[]>();
+    interface WrappedToolDef {
+      name: string;
+      renderCall: (args: unknown, options: unknown, theme: unknown) => RenderableComponent;
+    }
+    const tools = new Map<string, WrappedToolDef>();
+
+    const fakePi = {
+      on: (event: string, handler: EventHandler) => {
+        const list = eventHandlers.get(event) ?? [];
+        list.push(handler);
+        eventHandlers.set(event, list);
+      },
+      registerTool: (def: WrappedToolDef) => tools.set(def.name, def),
+      registerCommand: () => {},
+      registerShortcut: () => {},
+      registerMessageRenderer: () => {},
+      registerComposerShape: () => {},
+      registerAssistantThinkingRenderer: () => {},
+      getAllTools: () => [{ name: "read", parameters: {} }],
+    } as unknown as ExtensionAPI;
+
+    const fakeCtx = {
+      ui: {
+        setWidget: () => {},
+        requestRender: () => {},
+        notify: () => {},
+      },
+      hideThinkingBlock: false,
+      settings: { get: (k: string) => (k === "hideThinkingBlock" ? false : undefined) },
+    } as unknown as ExtensionContext;
+
+    registerExtension(fakePi);
+
+    const emit = async (event: string, payload: unknown) => {
+      for (const handler of eventHandlers.get(event) ?? []) {
+        await handler(payload, fakeCtx);
+      }
+    };
+
+    await emit("session_start", fakeCtx);
+
+    // Generate 10 lines of thinking
+    const thoughtLines = Array.from({ length: 10 }, (_, i) => `Thought reason ${i + 1}`).join("\n");
+
+    await emit("message_update", {
+      message: {
+        content: [{ type: "thinking", thinking: thoughtLines }],
+      },
+      assistantMessageEvent: { type: "thinking_start" },
+    });
+
+    await emit("message_update", {
+      message: {
+        content: [
+          { type: "thinking", thinking: thoughtLines },
+          { type: "toolCall", toolCallId: "call_t1", toolName: "read", args: { path: "abc.ts" } },
+        ],
+      },
+      assistantMessageEvent: { type: "toolcall_start" },
+    });
+
+    await emit("tool_execution_start", {
+      toolCallId: "call_t1",
+      toolName: "read",
+      args: { path: "abc.ts" },
+    });
+
+    await emit("tool_execution_end", {
+      toolCallId: "call_t1",
+      toolName: "read",
+      args: { path: "abc.ts" },
+    });
+
+    settleAt.clear();
+
+    const readTool = tools.get("read");
+    expect(readTool).toBeDefined();
+
+    const callContainer = readTool!.renderCall({ path: "abc.ts" }, {}, null) as unknown as MockContainer;
+    const groupRender = callContainer.children[0]?.render;
+    expect(groupRender).toBeDefined();
+    const renderedLines = groupRender!(80).map((l: string) => Bun.stripANSI(l));
+    // Contains Thought header
+    expect(renderedLines.some((l: string) => l.includes("Thought"))).toBe(true);
+
+    // Contains previous lines hint (...N previous lines) for standardMaxRows (default 3)
+    // 10 lines - 3 lines = 7 hidden lines
+    const hintLine = renderedLines.find((l: string) => l.includes("previous lines"));
+    expect(hintLine).toBeDefined();
+    expect(hintLine).toContain("(...7 previous lines)");
+
+    // Contains last thinking lines with rail
+    expect(renderedLines.some((l: string) => l.includes("│ Thought reason 10"))).toBe(true);
+    expect(renderedLines.some((l: string) => l.includes("│ Thought reason 9"))).toBe(true);
+    expect(renderedLines.some((l: string) => l.includes("│ Thought reason 8"))).toBe(true);
+
+    // No line number gutter like "1 │ "
+    for (const line of renderedLines) {
+      expect(line).not.toMatch(/^\s*\d+\s*│/);
+    }
+  });
+
+  test("hideThinkingBlock suppresses thought from transcript group", async () => {
+    const { applyOverlay, DEFAULT_CONFIG } = await import("./config.ts");
+    const cfg = applyOverlay(DEFAULT_CONFIG, { hideThinkingBlock: true });
+    expect(cfg.hideThinkingBlock).toBe(true);
+  });
+
+  test("standalone assistant message with thinking renders thought block", async () => {
+    const { skinAssistantMessageComponent } = await import("./assistant-commentary-skin.ts");
+
+    class FakeAssistantMessageComponent {
+      transcriptBlockMode = "appendOnly" as const;
+      hideThinkingBlock = false;
+      children: Array<{ render?: (w: number) => readonly string[] }> = [];
+      addChild(c: { render?: (w: number) => readonly string[] }) {
+        this.children.push(c);
+      }
+      updateContent(msg: unknown, opts?: unknown) {}
+      setTextColorTransform() {}
+      setLinkTargets() {}
+      setCacheInvalidation() {}
+      render(w: number): readonly string[] {
+        const lines: string[] = [];
+        for (const child of this.children) {
+          if (child.render) lines.push(...child.render(w));
+        }
+        return lines;
+      }
+    }
+
+    const component = new FakeAssistantMessageComponent();
+    skinAssistantMessageComponent(component, {
+      enabled: () => true,
+      active: () => true,
+    });
+    const textContainer = {
+      render: () => ["Here is the answer."],
+    };
+    component.addChild(textContainer);
+
+    const thinking = Array.from({ length: 8 }, (_, i) => `Standalone thought ${i + 1}`).join("\n");
+    component.updateContent({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking },
+        { type: "text", text: "Here is the answer." },
+      ],
+    });
+
+    const rendered = component.render(80).map((l: string) => Bun.stripANSI(l));
+    expect(rendered.some((l: string) => l.includes("Thought"))).toBe(true);
+    expect(rendered.some((l: string) => l.includes("previous lines"))).toBe(true);
+    expect(rendered.some((l: string) => l.includes("Standalone thought 8"))).toBe(true);
+    expect(rendered.some((l: string) => l.includes("Here is the answer."))).toBe(true);
+
   });
 });

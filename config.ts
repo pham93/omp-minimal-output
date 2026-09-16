@@ -69,6 +69,7 @@ export interface PluginConfig extends WrappedToolSettings {
   todoReminderOneLine: boolean;
   editShowTabs: boolean;
   editShowSpaces: boolean;
+  hideThinkingBlock?: boolean;
 }
 
 export const DEFAULT_CONFIG: PluginConfig = {
@@ -110,6 +111,7 @@ const BOOLEAN_KEYS: Record<string, true> = {
   todoReminderOneLine: true,
   editShowTabs: true,
   editShowSpaces: true,
+  hideThinkingBlock: true,
 };
 for (const definition of Object.values(WRAPPED_TOOL_REGISTRY)) {
   BOOLEAN_KEYS[definition.nativeKey] = true;
@@ -283,4 +285,41 @@ export function indicatorSettled(cfg: PluginConfig = getPluginConfig()): string 
 }
 
 // Prime the cache at import so tool_result works before session_start fires.
+
+function readYamlFlag(filePath: string, key: string): boolean | undefined {
+  try {
+    const raw = readFileSync(filePath, "utf8");
+    const m = new RegExp(`^\\s*${key}:\\s*(true|false)`, "m").exec(raw);
+    if (m) return m[1] === "true";
+  } catch {
+    // File missing or unreadable.
+  }
+  return undefined;
+}
+
+export function isHideThinkingBlock(ctx?: unknown, config = getPluginConfig()): boolean {
+  if (typeof ctx === "object" && ctx !== null) {
+    const rec = ctx as Record<string, unknown>;
+    if (typeof rec["hideThinkingBlock"] === "boolean") return rec["hideThinkingBlock"] as boolean;
+    if (typeof rec["effectiveHideThinkingBlock"] === "boolean") return rec["effectiveHideThinkingBlock"] as boolean;
+    const settings = (ctx as { settings?: { get?: (k: string) => unknown } }).settings;
+    if (typeof settings?.get === "function") {
+      const v = settings.get("hideThinkingBlock");
+      if (typeof v === "boolean") return v;
+    }
+  }
+
+  if (typeof config.hideThinkingBlock === "boolean") {
+    return config.hideThinkingBlock;
+  }
+  // Check minimal-output.yml in working directory
+  const localYml = readYamlFlag(join(process.cwd(), "minimal-output.yml"), "hideThinkingBlock");
+  if (localYml !== undefined) return localYml;
+
+  // Check ~/.omp/agent/config.yml
+  const agentConfig = readYamlFlag(join(homedir(), ".omp", "agent", "config.yml"), "hideThinkingBlock");
+  if (agentConfig !== undefined) return agentConfig;
+
+  return false;
+}
 loadPluginConfig();

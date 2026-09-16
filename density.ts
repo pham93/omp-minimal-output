@@ -49,6 +49,12 @@ export function profileRowLimit(
   return profile.detailed ? config.detailedMaxRows : standardMaxRows;
 }
 
+export function thoughtRowLimit(profile: DetailProfile, config: PluginConfig = getPluginConfig()): number {
+  if (profile.minimal) return 1;
+  if (profile.detailed) return config.detailedMaxRows;
+  return config.standardMaxRows;
+}
+
 export function minimalToolSummary(status: string, tool: string): string {
   const parent = status.trim();
   const child = tool.trim();

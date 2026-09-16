@@ -1,4 +1,7 @@
+import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { getPluginConfig } from "./config.ts";
 import { wrapToWidth } from "./text.ts";
+import { LINE_WIDTH_RATIO, TOOL_INDENT, paintAt } from "./theme.ts";
 
 export interface TextScrollerOptions {
   /** Maximum number of visible lines (default: 3) */
@@ -266,4 +269,54 @@ export class TextScroller {
  */
 export function createTextScroller(options?: TextScrollerOptions): TextScroller {
   return new TextScroller(options);
+}
+
+export interface SettledThoughtOptions {
+  /** Maximum number of thinking lines to show (minimal: 1, standard: standardMaxRows, detailed: detailedMaxRows) */
+  maxLines: number;
+  /** Available viewport width for wrapping */
+  width: number;
+  /** Theme object for token coloring */
+  theme?: unknown;
+  /** Indent prefix before rail (default: "  " or TOOL_INDENT) */
+  indent?: boolean | string;
+  /** Opacity multiplier (defaults to plugin config opacity) */
+  opacity?: number;
+  /** Custom rail bar string if specified */
+  bar?: string;
+}
+
+/**
+ * Formats settled thought text for transcript display according to the minimal output standard:
+ * - Wraps to available column width.
+ * - If lines exceed maxLines, prepends `(...N previous lines)` in dim.
+ * - Returns the last maxLines lines styled with the vertical rail (no line number gutter).
+ */
+export function formatSettledThought(text: string, options: SettledThoughtOptions): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+
+  const pad = typeof options.indent === "string" ? options.indent : options.indent ? TOOL_INDENT : "  ";
+  const bar = options.bar ?? `${pad}│ `;
+  const innerW = Math.max(8, Math.floor((Math.floor(options.width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
+  const allLines = wrapToWidth(trimmed, innerW);
+  if (allLines.length === 0) return [];
+
+  const maxLines = Math.max(1, Math.floor(options.maxLines));
+  const op = options.opacity ?? getPluginConfig().opacity;
+  const barOp = Math.max(0.05, op - 0.25);
+  const result: string[] = [];
+
+  if (allLines.length > maxLines) {
+    const hidden = allLines.length - maxLines;
+    const hint = `(...${hidden} previous lines)`;
+    result.push(`${paintAt(options.theme, bar, "toolOutput", barOp)}${paintAt(options.theme, hint, "dim", op)}`);
+  }
+
+  const visible = allLines.slice(-maxLines);
+  for (const line of visible) {
+    result.push(`${paintAt(options.theme, bar, "toolOutput", barOp)}${paintAt(options.theme, line, "toolOutput", op)}`);
+  }
+  result.push("");
+  return result;
 }
