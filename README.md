@@ -4,6 +4,8 @@ Grok-build-style minimal console output for omp. Collapsed rows use theme-derive
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
+Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools retain a settled `●` indicator. Trailing blank output rows are removed; interior blanks and source indentation are preserved. One group-level cap counts headers and output together and reports a single omission total.
+
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
 Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
@@ -106,7 +108,7 @@ sequenceDiagram
 
 Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the group, siblings return empty framed blocks). Settled records freeze `label/total/runId` in message details so rebuilds and resumed sessions never mirror a later run; only the current turn's live row follows shared module state.
 
-Extension generations use one process-global runtime lease. A hot reload disposes the previous generation's widgets, timer, and prototype skins before the replacement registers callbacks; stale renderers remain fail-open and cannot hide core transcript input.
+The interactive extension uses one process-global runtime lease, acquired only when `session_start` reports `hasUI`. Headless subagent, print, and JSON sessions retain native tool behavior and never acquire the lease, install skins/widgets, or mutate the parent's presentation state. A replacement UI session disposes the previous generation's widgets, timer, editor, and prototype skins before activating its own callbacks; wrapped tools are registered afresh for the replacement.
 
 ## Files
 
