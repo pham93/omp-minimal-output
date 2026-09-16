@@ -1,5 +1,6 @@
 import type { ContextUsage, ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
 import { CustomEditor } from "@oh-my-pi/pi-coding-agent/modes/components/custom-editor";
+import { theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import {
   padding,
   sliceByColumn,
@@ -17,12 +18,37 @@ import {
 export const MINIMAL_COMPOSER_STYLE = {
   bottomDock: "minimal-bottom-dock",
   topDock: "minimal-top-dock",
-  bottomFill: "minimal-bottom-fill",
+  grayscaleBottomDock: "minimal-grayscale-bottom-dock",
+  grayscaleTopDock: "minimal-grayscale-top-dock",
 } as const;
 
 export type MinimalComposerStyleId = (typeof MINIMAL_COMPOSER_STYLE)[keyof typeof MINIMAL_COMPOSER_STYLE];
 
 const MINIMAL_COMPOSER_STYLE_IDS = new Set<string>(Object.values(MINIMAL_COMPOSER_STYLE));
+const GRAYSCALE_COMPOSER_STYLE_IDS = new Set<string>([
+  MINIMAL_COMPOSER_STYLE.grayscaleBottomDock,
+  MINIMAL_COMPOSER_STYLE.grayscaleTopDock,
+]);
+const GRAYSCALE_FRAME_RGB = "\x1b[38;2;142;142;142m";
+const GRAYSCALE_STATUS_RGB = "\x1b[38;2;176;176;176m";
+const GRAYSCALE_GUTTER_RGB = "\x1b[38;2;206;206;206m";
+const ANSI_FOREGROUND_RESET = "\x1b[39m";
+
+function grayscaleColor(text: string, color: string): string {
+  return `${color}${text}${ANSI_FOREGROUND_RESET}`;
+}
+
+function grayscaleFrameColor(text: string): string {
+  return grayscaleColor(text, GRAYSCALE_FRAME_RGB);
+}
+
+function grayscaleStatusColor(text: string): string {
+  return grayscaleColor(text, GRAYSCALE_STATUS_RGB);
+}
+
+function grayscaleGutterColor(text: string): string {
+  return grayscaleColor(text, GRAYSCALE_GUTTER_RGB);
+}
 const PROMPT_GUTTER = "❯ ";
 const EDITOR_FRAME_CHROME = 4;
 const EDITOR_FRAME_MIN_WIDTH = 10;
@@ -35,6 +61,24 @@ const NERD_STATUS_ICON_VARIANTS = [
   { host: "\uec19", replacement: "󰚩" },
   { host: "\uf2d2", replacement: "" },
 ] as const;
+const PLAN_ICON_VARIANTS = ["🗺", "", "\uf2d2", "plan"] as const;
+const PLAN_PAUSE_SUFFIXES = [" \uf04c", " ⏸", " ||", " (paused)"] as const;
+const BUILD_STATUS_VARIANTS = {
+  nerd: "󰣪 build",
+  unicode: "🔨 build",
+  ascii: "build",
+} as const;
+const USAGE_ICON_VARIANTS = ["⏱", "\uf017", "time:"] as const;
+const CONTEXT_GAUGE_MAX_WIDTH = 24;
+const ANSI_SEQUENCE_RE = /^(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\))/u;
+const STATUS_COLOR = {
+  project: "statusLinePath",
+  planActive: "accent",
+  planPaused: "warning",
+  build: "statusLineModel",
+  gitClean: "statusLineGitClean",
+  gitDirty: "statusLineGitDirty",
+} as const;
 const GIT_DETAIL_VARIANTS = [
   { hostBranch: "⑂", branch: "⎇", modified: "Δ" },
   { hostBranch: "\uf126", branch: "\uf126", modified: "\uf044" },
@@ -45,8 +89,33 @@ const CONTEXT_GAUGE_CAPS = [
   { left: "\ue0b0", right: "\ue0b2" },
   { left: ">", right: "<" },
 ] as const;
+const CHROME_STATUS_PART = {
+  none: "none",
+  full: "full",
+  projectGit: "project-git",
+  rest: "rest",
+} as const;
+type ChromeStatusPart = (typeof CHROME_STATUS_PART)[keyof typeof CHROME_STATUS_PART];
+
+interface SplitStatusContent {
+  projectGit: string;
+  rest: string;
+  leadingThroughProjectGit: string;
+}
+
+interface ExtractedPlanContent {
+  body: string;
+  plan: string;
+}
+export interface MinimalPlanStatus {
+  enabled: boolean;
+  paused: boolean;
+}
+
+const NO_PLAN_STATUS = (): MinimalPlanStatus | undefined => undefined;
 const NO_CONTEXT_USAGE = (): ContextUsage | undefined => undefined;
 let contextUsageProvider: () => ContextUsage | undefined = NO_CONTEXT_USAGE;
+let planStatusProvider: () => MinimalPlanStatus | undefined = NO_PLAN_STATUS;
 
 function padToVisible(text: string, width: number): string {
   const current = visibleWidth(text);
@@ -64,7 +133,7 @@ function replaceFolderIcon(content: string): string {
 function replaceNerdStatusIcons(content: string): string {
   let result = content;
   for (const variant of NERD_STATUS_ICON_VARIANTS) {
-    result = result.replace(`${variant.host} `, `${variant.replacement} `);
+    result = result.replaceAll(`${variant.host} `, `${variant.replacement} `);
   }
   return result;
 }
@@ -100,8 +169,9 @@ function formatContextWindow(contextWindow: number): string {
 function explicitContextGauge(ctx: ComposerChromeContext, width: number, usage: ContextUsage): string | undefined {
   const percent = Number.isFinite(usage.percent) ? usage.percent : 0;
   const label = `${formatContextPercent(percent)}/${formatContextWindow(usage.contextWindow)}`;
-  const trackWidth = width - visibleWidth(label) - 3;
-  if (trackWidth < 4) return undefined;
+  const labelWidth = visibleWidth(label);
+  const trackWidth = width - labelWidth - 3;
+  if (trackWidth < 4) return labelWidth <= width ? ctx.accentColor(label) : undefined;
 
   const clamped = Math.min(100, Math.max(0, percent));
   const used = Math.min(trackWidth, Math.max(0, Math.round((clamped / 100) * trackWidth)));
@@ -127,10 +197,11 @@ function embeddedGaugeColumns(content: string): { start: number; end: number } |
   return best ? { start: best.start, end: best.end } : undefined;
 }
 
-function replaceContextGauge(content: string, ctx: ComposerChromeContext): string {
+function replaceContextGauge(content: string, ctx: ComposerChromeContext, widthReduction = 0): string {
   const usage = contextUsageProvider();
   if (!usage || usage.contextWindow <= 0) return content;
 
+  const reduction = Math.max(0, Math.floor(widthReduction));
   for (const caps of CONTEXT_GAUGE_CAPS) {
     const right = content.lastIndexOf(caps.right);
     if (right < 0) continue;
@@ -138,14 +209,19 @@ function replaceContextGauge(content: string, ctx: ComposerChromeContext): strin
     if (left < 0) continue;
 
     const end = right + caps.right.length;
-    const gauge = explicitContextGauge(ctx, visibleWidth(content.slice(left, end)), usage);
-    if (gauge) return `${content.slice(0, left)}${gauge}${content.slice(end)}`;
+    const gaugeWidth = Math.min(
+      CONTEXT_GAUGE_MAX_WIDTH,
+      Math.max(0, visibleWidth(content.slice(left, end)) - reduction),
+    );
+    const gauge = explicitContextGauge(ctx, gaugeWidth, usage);
+    return gauge ? `${content.slice(0, left)}${gauge}${content.slice(end)}` : content;
   }
 
   const columns = embeddedGaugeColumns(content);
   if (!columns) return content;
 
-  const gauge = explicitContextGauge(ctx, columns.end - columns.start, usage);
+  const gaugeWidth = Math.min(CONTEXT_GAUGE_MAX_WIDTH, Math.max(0, columns.end - columns.start - reduction));
+  const gauge = explicitContextGauge(ctx, gaugeWidth, usage);
   if (!gauge) return content;
 
   const totalWidth = visibleWidth(content);
@@ -154,37 +230,310 @@ function replaceContextGauge(content: string, ctx: ComposerChromeContext): strin
   return `${left}${gauge}${right}`;
 }
 
-function decorateStatusContent(content: string, ctx: ComposerChromeContext): string {
+function rawOffsetForPlainIndex(content: string, target: number): number {
+  let rawOffset = 0;
+  let plainOffset = 0;
+  while (rawOffset < content.length && plainOffset < target) {
+    const sequence = ANSI_SEQUENCE_RE.exec(content.slice(rawOffset));
+    if (sequence) {
+      rawOffset += sequence[0].length;
+      continue;
+    }
+    const codePoint = content.codePointAt(rawOffset);
+    if (codePoint === undefined) break;
+    const character = String.fromCodePoint(codePoint);
+    rawOffset += character.length;
+    plainOffset += character.length;
+  }
+  return rawOffset;
+}
+
+function replacePlainRange(content: string, start: number, end: number, replacement: string): string {
+  const rawStart = rawOffsetForPlainIndex(content, start);
+  const rawEnd = rawOffsetForPlainIndex(content, end);
+  return `${content.slice(0, rawStart)}${replacement}${content.slice(rawEnd)}`;
+}
+
+function statusColor(color: StatusColor, text: string, fallback: (value: string) => string): string {
+  try {
+    return theme.fg(color, text);
+  } catch {
+    return fallback(text);
+  }
+}
+function fallbackModeStatus(content: string, ctx: ComposerChromeContext): string {
+  const status = planStatusProvider();
+  if (!status) return "";
+
+  const plain = Bun.stripANSI(content);
+  const nerd = plain.includes(" ");
+  const unicode = plain.includes("⌂ ");
+  if (!status.enabled && !status.paused) {
+    const build = nerd
+      ? BUILD_STATUS_VARIANTS.nerd
+      : unicode
+        ? BUILD_STATUS_VARIANTS.unicode
+        : BUILD_STATUS_VARIANTS.ascii;
+    return statusColor(STATUS_COLOR.build, build, ctx.borderColor);
+  }
+
+  const plan = nerd
+    ? status.paused
+      ? " Plan "
+      : " Plan"
+    : unicode
+      ? status.paused
+        ? "🗺 Plan ⏸"
+        : "🗺 Plan"
+      : status.paused
+        ? "plan Plan (paused)"
+        : "plan Plan";
+  const color = status.paused ? STATUS_COLOR.planPaused : STATUS_COLOR.planActive;
+  return statusColor(color, plan, ctx.borderColor);
+}
+
+function findPlanRange(content: string): { start: number; end: number } | undefined {
+  for (const icon of PLAN_ICON_VARIANTS) {
+    const plan = `${icon} Plan`;
+    const start = content.indexOf(plan);
+    if (start < 0) continue;
+
+    let end = start + plan.length;
+    const pauseSuffix = PLAN_PAUSE_SUFFIXES.find((suffix) => content.startsWith(suffix, end));
+    if (pauseSuffix) end += pauseSuffix.length;
+    return { start, end };
+  }
+
+  for (const match of content.matchAll(/\bPlan\b/gu)) {
+    const labelStart = match.index;
+    let iconEnd = labelStart;
+    while (iconEnd > 0 && /\s/u.test(content[iconEnd - 1] ?? "")) iconEnd -= 1;
+
+    let iconStart = iconEnd;
+    while (iconStart > 0 && !/[\s·|/›»\ue0b3]/u.test(content[iconStart - 1] ?? "")) iconStart -= 1;
+    const start = iconStart < iconEnd ? iconStart : labelStart;
+
+    let end = labelStart + "Plan".length;
+    const pauseSuffix = PLAN_PAUSE_SUFFIXES.find((suffix) => content.startsWith(suffix, end));
+    if (pauseSuffix) end += pauseSuffix.length;
+    return { start, end };
+  }
+
+  return undefined;
+}
+
+function removeUsageTier(content: string): string {
+  const plain = Bun.stripANSI(content);
+  const window = /(?:5h|1d|7d|mo)\s+\d+%/u.exec(plain);
+  if (!window || window.index === undefined) return content;
+
+  let iconEnd = -1;
+  for (const icon of USAGE_ICON_VARIANTS) {
+    const index = plain.lastIndexOf(`${icon} `, window.index);
+    if (index >= 0) iconEnd = Math.max(iconEnd, index + icon.length);
+  }
+  if (iconEnd < 0) return content;
+
+  const between = plain.slice(iconEnd, window.index);
+  if (!between.replace(/[\s·\-|/]/gu, "")) return content;
+  return replacePlainRange(content, iconEnd, window.index, " ");
+}
+function expandThinkingEffort(content: string): string {
+  let result = content;
+  while (true) {
+    const plain = Bun.stripANSI(result);
+    const match = /\bxhi\b/u.exec(plain);
+    if (!match || match.index === undefined) break;
+    const start = match.index;
+    const end = start + match[0].length;
+    result = replacePlainRange(result, start, end, "xhigh");
+  }
+  return result;
+}
+
+
+function recolorPlan(content: string, ctx: ComposerChromeContext): string {
+  const plain = Bun.stripANSI(content);
+  const range = findPlanRange(plain);
+  if (!range) return content;
+
+  const plan = plain.slice(range.start, range.end);
+  const paused = PLAN_PAUSE_SUFFIXES.some((suffix) => plan.endsWith(suffix));
+  const color = paused ? STATUS_COLOR.planPaused : STATUS_COLOR.planActive;
+  return replacePlainRange(content, range.start, range.end, statusColor(color, plan, ctx.borderColor));
+}
+
+function decorateStatusContent(content: string, ctx: ComposerChromeContext, gaugeWidthReduction = 0): string {
   const icons = replaceNerdStatusIcons(replaceFolderIcon(content));
-  const details = replaceGitDetails(icons);
-  return replaceContextGauge(details, ctx);
+  const usage = removeUsageTier(icons);
+  const effort = expandThinkingEffort(usage);
+  const details = replaceGitDetails(effort);
+  const plan = recolorPlan(details, ctx);
+  return replaceContextGauge(plan, ctx, gaugeWidthReduction);
+}
+function splitProjectGitStatus(content: string, ctx: ComposerChromeContext): SplitStatusContent {
+  const plain = Bun.stripANSI(content);
+  let projectStart = -1;
+  let projectIcon = "";
+  for (const variant of PROJECT_ICON_VARIANTS) {
+    const index = plain.indexOf(`${variant.replacement} `);
+    if (index < 0 || (projectStart >= 0 && index >= projectStart)) continue;
+    projectStart = index;
+    projectIcon = variant.replacement;
+  }
+  if (projectStart < 0) return { projectGit: "", rest: content, leadingThroughProjectGit: content };
+
+  const projectValue = /^\s+\S+/u.exec(plain.slice(projectStart + projectIcon.length));
+  if (!projectValue) return { projectGit: "", rest: content, leadingThroughProjectGit: content };
+  const projectEnd = projectStart + projectIcon.length + projectValue[0].length;
+
+  let branchStart = -1;
+  let branchIcon = "";
+  for (const variant of GIT_DETAIL_VARIANTS) {
+    const index = plain.indexOf(`${variant.branch} `, projectEnd);
+    if (index < 0 || (branchStart >= 0 && index >= branchStart)) continue;
+    branchStart = index;
+    branchIcon = variant.branch;
+  }
+
+  let titleEnd = projectEnd;
+  if (branchStart >= 0) {
+    const branchValue = /^\s+\S+/u.exec(plain.slice(branchStart + branchIcon.length));
+    if (branchValue) {
+      titleEnd = branchStart + branchIcon.length + branchValue[0].length;
+      while (true) {
+        const status = /^\s+(?:Δ||~|\+|\?)\d+/u.exec(plain.slice(titleEnd));
+        if (!status) break;
+        titleEnd += status[0].length;
+      }
+    } else {
+      branchStart = -1;
+    }
+  }
+
+  let removalEnd = titleEnd;
+  while (removalEnd < plain.length && /[\s·|/›»\ue0b3]/u.test(plain[removalEnd] ?? "")) removalEnd += 1;
+
+  const projectText = plain.slice(projectStart, projectEnd);
+  let projectGit = statusColor(STATUS_COLOR.project, projectText, ctx.borderColor);
+  if (branchStart >= 0) {
+    const branch = plain.slice(branchStart, titleEnd);
+    const color = /(?:Δ||~|\+|\?)\d+/u.test(branch) ? STATUS_COLOR.gitDirty : STATUS_COLOR.gitClean;
+    projectGit += `${ctx.borderColor(" · ")}${statusColor(color, branch, ctx.borderColor)}`;
+  }
+
+  const rawStart = rawOffsetForPlainIndex(content, projectStart);
+  const rawEnd = rawOffsetForPlainIndex(content, removalEnd);
+  return {
+    projectGit,
+    rest: `${content.slice(0, rawStart)}${content.slice(rawEnd)}`,
+    leadingThroughProjectGit: `${content.slice(0, rawStart)}${projectGit}`,
+  };
 }
 
+function extractPlanStatus(content: string): ExtractedPlanContent {
+  const plain = Bun.stripANSI(content);
+  const range = findPlanRange(plain);
+  if (!range) return { body: content, plan: "" };
 
+  let removalStart = range.start;
+  while (removalStart > 0 && /[\s·|/›»\ue0b3]/u.test(plain[removalStart - 1] ?? "")) removalStart -= 1;
 
-function chromeBody(ctx: ComposerChromeContext, status: boolean): string {
+  let removalEnd = range.end;
+  const trailingPattern = removalStart < range.start ? /\s/u : /[\s·|/›»\ue0b3]/u;
+  while (removalEnd < plain.length && trailingPattern.test(plain[removalEnd] ?? "")) removalEnd += 1;
+
+  const rawRemovalStart = rawOffsetForPlainIndex(content, removalStart);
+  const rawPlanStart = rawOffsetForPlainIndex(content, range.start);
+  const rawPlanEnd = rawOffsetForPlainIndex(content, range.end);
+  const rawEnd = rawOffsetForPlainIndex(content, removalEnd);
+  return {
+    body: `${content.slice(0, rawRemovalStart)}${content.slice(rawEnd)}`,
+    plan: content.slice(rawPlanStart, rawPlanEnd),
+  };
+}
+
+function fitStatusContent(content: string, width: number, preserveRight: boolean): string {
+  const contentWidth = visibleWidth(content);
+  if (contentWidth <= width) return content;
+  if (!preserveRight) return truncateToWidth(content, width, "");
+  return sliceByColumn(content, contentWidth - width, width, true);
+}
+
+function chromeBody(ctx: ComposerChromeContext, part: ChromeStatusPart): string {
   const width = Math.max(0, ctx.width - 2);
-  if (!status || !ctx.topBorder?.content) return ctx.borderColor(ctx.box.horizontal.repeat(width));
+  if (part === CHROME_STATUS_PART.none || !ctx.topBorder?.content || width < 2) {
+    return ctx.borderColor(ctx.box.horizontal.repeat(width));
+  }
 
-  const content = truncateToWidth(decorateStatusContent(ctx.topBorder.content, ctx), width, "");
-  return `${content}${ctx.borderColor(ctx.box.horizontal.repeat(Math.max(0, width - visibleWidth(content))))}`;
+  const pad = ctx.borderColor(" ");
+  const contentWidth = width - 2;
+  const gaugeWidthReduction = part === CHROME_STATUS_PART.rest ? 2 : 0;
+  const decorated = decorateStatusContent(ctx.topBorder.content, ctx, gaugeWidthReduction);
+
+  if (part === CHROME_STATUS_PART.full) {
+    const separated = splitProjectGitStatus(decorated, ctx);
+    let statusBody = separated.leadingThroughProjectGit;
+    if (!separated.projectGit) {
+      for (let index = 0; index < 8; index += 1) {
+        const extracted = extractPlanStatus(statusBody);
+        if (!extracted.plan) break;
+        statusBody = extracted.body;
+      }
+    }
+    const modeStatus = fallbackModeStatus(decorated, ctx);
+    const modeGap = modeStatus ? 1 : 0;
+    const bodyWidth = Math.max(0, contentWidth - visibleWidth(modeStatus) - modeGap);
+    const body = fitStatusContent(statusBody, bodyWidth, false);
+    const fill = ctx.borderColor(ctx.box.horizontal.repeat(Math.max(0, bodyWidth - visibleWidth(body))));
+    const pinnedMode = modeStatus ? `${pad}${modeStatus}` : "";
+    return `${pad}${body}${fill}${pinnedMode}${pad}`;
+  }
+
+  const extracted = extractPlanStatus(decorated);
+  const split = splitProjectGitStatus(extracted.body, ctx);
+  if (part === CHROME_STATUS_PART.projectGit) {
+    const title = fitStatusContent(split.projectGit, contentWidth, true);
+    const fill = ctx.borderColor(ctx.box.horizontal.repeat(Math.max(0, contentWidth - visibleWidth(title))));
+    return `${pad}${fill}${title}${pad}`;
+  }
+
+  const modeStatus = extracted.plan || fallbackModeStatus(decorated, ctx);
+  const modeGap = modeStatus ? 1 : 0;
+  const bodyWidth = Math.max(0, contentWidth - visibleWidth(modeStatus) - modeGap);
+  const body = fitStatusContent(split.rest, bodyWidth, false);
+  const fill = ctx.borderColor(ctx.box.horizontal.repeat(Math.max(0, bodyWidth - visibleWidth(body))));
+  const pinnedMode = modeStatus ? `${pad}${modeStatus}` : "";
+  return `${pad}${body}${fill}${pinnedMode}${pad}`;
 }
 
-function chromeLine(ctx: ComposerChromeContext, edge: "top" | "bottom", status: boolean): string {
+function chromeLine(
+  ctx: ComposerChromeContext,
+  edge: "top" | "bottom",
+  part: ChromeStatusPart,
+  grayscale: boolean,
+): string {
   const left = edge === "top" ? ctx.box.topLeft : ctx.box.bottomLeft;
   const right = edge === "top" ? ctx.box.topRight : ctx.box.bottomRight;
-  return `${ctx.borderColor(left)}${chromeBody(ctx, status)}${ctx.borderColor(right)}`;
+  if (grayscale) {
+    return `${grayscaleFrameColor(left)}${grayscaleStatusColor(Bun.stripANSI(chromeBody(ctx, part)))}${grayscaleFrameColor(right)}`;
+  }
+  return `${ctx.borderColor(left)}${chromeBody(ctx, part)}${ctx.borderColor(right)}`;
 }
 
-function innerRow(ctx: ComposerRowContext, filled: boolean): string[] {
-  const row = `${ctx.gutter}${ctx.text}${ctx.pad}`;
-  return [filled ? ctx.surfaceColor(row) : row];
+function innerRow(ctx: ComposerRowContext, grayscale: boolean): string[] {
+  const gutter = grayscale ? grayscaleGutterColor(Bun.stripANSI(ctx.gutter)) : ctx.gutter;
+  return [`${gutter}${ctx.text}${ctx.pad}`];
 }
 
-function composerStyle(id: MinimalComposerStyleId, statusEdge: "top" | "bottom", filled: boolean): ComposerStyle {
+function composerStyle(
+  id: MinimalComposerStyleId,
+  statusEdge: "top" | "bottom",
+  grayscale = false,
+): ComposerStyle {
   return {
     id,
-    filledSurface: filled,
+    filledSurface: false,
     sideBorders: false,
     verticalChrome: 2,
     statusAttachment: "top-border",
@@ -201,15 +550,17 @@ function composerStyle(id: MinimalComposerStyleId, statusEdge: "top" | "bottom",
     },
 
     renderTop(ctx: ComposerChromeContext): string {
-      return chromeLine(ctx, "top", statusEdge === "top");
+      const part = statusEdge === "top" ? CHROME_STATUS_PART.full : CHROME_STATUS_PART.projectGit;
+      return chromeLine(ctx, "top", part, grayscale);
     },
 
     renderRow(ctx: ComposerRowContext): string[] {
-      return innerRow(ctx, filled);
+      return innerRow(ctx, grayscale);
     },
 
     renderBottom(ctx: ComposerChromeContext): string {
-      return chromeLine(ctx, "bottom", statusEdge === "bottom");
+      const part = statusEdge === "bottom" ? CHROME_STATUS_PART.rest : CHROME_STATUS_PART.none;
+      return chromeLine(ctx, "bottom", part, grayscale);
     },
   };
 }
@@ -218,20 +569,24 @@ const COMPOSER_SHAPES = [
   {
     label: "Minimal Output · Bottom Dock",
     description: "Rounded prompt with the configured OMP status and context gauge in the bottom rule",
-    style: composerStyle(MINIMAL_COMPOSER_STYLE.bottomDock, "bottom", false),
+    style: composerStyle(MINIMAL_COMPOSER_STYLE.bottomDock, "bottom"),
   },
   {
     label: "Minimal Output · Top Dock",
     description: "Rounded prompt with the configured OMP status and context gauge in the top rule",
-    style: composerStyle(MINIMAL_COMPOSER_STYLE.topDock, "top", false),
+    style: composerStyle(MINIMAL_COMPOSER_STYLE.topDock, "top"),
   },
   {
-    label: "Minimal Output · Filled Dock",
-    description: "Rounded filled prompt with the configured OMP status and context gauge in the bottom rule",
-    style: composerStyle(MINIMAL_COMPOSER_STYLE.bottomFill, "bottom", true),
+    label: "Minimal Output · Grayscale Bottom Dock",
+    description: "Neutral grayscale prompt with OMP status and context gauge in the bottom rule",
+    style: composerStyle(MINIMAL_COMPOSER_STYLE.grayscaleBottomDock, "bottom", true),
+  },
+  {
+    label: "Minimal Output · Grayscale Top Dock",
+    description: "Neutral grayscale prompt with OMP status and context gauge in the top rule",
+    style: composerStyle(MINIMAL_COMPOSER_STYLE.grayscaleTopDock, "top", true),
   },
 ] as const;
-
 function framedChrome(
   line: string,
   bodyWidth: number,
@@ -256,11 +611,7 @@ function framedRow(line: string, innerWidth: number, box: ComposerBox, borderCol
 function bottomChromeIndex(lines: readonly string[], innerWidth: number, box: ComposerBox): number {
   for (let index = lines.length - 1; index >= 1; index -= 1) {
     const plain = Bun.stripANSI(lines[index] ?? "");
-    if (
-      visibleWidth(plain) === innerWidth &&
-      plain.startsWith(box.bottomLeft) &&
-      plain.endsWith(box.bottomRight)
-    ) {
+    if (visibleWidth(plain) === innerWidth && plain.startsWith(box.bottomLeft) && plain.endsWith(box.bottomRight)) {
       return index;
     }
   }
@@ -280,6 +631,9 @@ export class MinimalPromptEditor extends CustomEditor {
     if (!MINIMAL_COMPOSER_STYLE_IDS.has(this.getBorderStyle()) || safeWidth < EDITOR_FRAME_MIN_WIDTH) {
       return [...super.render(safeWidth)];
     }
+    const borderColor = GRAYSCALE_COMPOSER_STYLE_IDS.has(this.getBorderStyle())
+      ? grayscaleFrameColor
+      : this.borderColor;
 
     const innerWidth = safeWidth - EDITOR_FRAME_CHROME;
     const inner = [...super.render(innerWidth)];
@@ -294,12 +648,12 @@ export class MinimalPromptEditor extends CustomEditor {
         this.#box.topLeft,
         this.#box.topRight,
         this.#box.horizontal,
-        this.borderColor,
+        borderColor,
       ),
     ];
 
     for (let index = 1; index < bottom; index += 1) {
-      framed.push(framedRow(inner[index] ?? "", innerWidth, this.#box, this.borderColor));
+      framed.push(framedRow(inner[index] ?? "", innerWidth, this.#box, borderColor));
     }
 
     framed.push(
@@ -309,7 +663,7 @@ export class MinimalPromptEditor extends CustomEditor {
         this.#box.bottomLeft,
         this.#box.bottomRight,
         this.#box.horizontal,
-        this.borderColor,
+        borderColor,
       ),
     );
 
@@ -325,17 +679,27 @@ export function registerMinimalComposerShapes(pi: ExtensionAPI): void {
   for (const shape of COMPOSER_SHAPES) pi.registerComposerShape(shape);
 }
 
+export function updateMinimalPromptEditorProviders(
+  getContextUsage: () => ContextUsage | undefined,
+  getPlanStatus: () => MinimalPlanStatus | undefined,
+): void {
+  contextUsageProvider = getContextUsage;
+  planStatusProvider = getPlanStatus;
+}
+
 export function installMinimalPromptEditor(
   ui: ExtensionUIContext,
   getContextUsage: () => ContextUsage | undefined,
+  getPlanStatus: () => MinimalPlanStatus | undefined,
 ): () => void {
-  contextUsageProvider = getContextUsage;
+  updateMinimalPromptEditorProviders(getContextUsage, getPlanStatus);
   ui.setEditorComponent((tui, theme, keybindings) => new MinimalPromptEditor(tui, theme, keybindings));
   let active = true;
   return () => {
     if (!active) return;
     active = false;
-    if (contextUsageProvider === getContextUsage) contextUsageProvider = NO_CONTEXT_USAGE;
+    contextUsageProvider = NO_CONTEXT_USAGE;
+    planStatusProvider = NO_PLAN_STATUS;
     try {
       ui.setEditorComponent(undefined);
     } catch {

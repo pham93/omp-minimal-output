@@ -14,13 +14,14 @@ Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 
 ## Input composer styles
 
-The plugin registers three choices in `/settings` → **Composer Shape**:
+The plugin registers four choices in `/settings` → **Composer Shape**:
 
-- **Minimal Output · Bottom Dock** — rounded transparent prompt with OMP's configured status and context gauge in the bottom rule.
-- **Minimal Output · Top Dock** — the same prompt with status and context gauge in the top rule.
-- **Minimal Output · Filled Dock** — bottom-docked status with the theme's input surface fill.
+- **Minimal Output · Bottom Dock** — project and Git state in the top-right rule; model, provider usage, context gauge, and mode in the bottom rule.
+- **Minimal Output · Top Dock** — the complete configured status line in the top rule (model, effort, usage, context, project, and Git), with all native Plan copies collapsed into exactly one right-pinned Plan or Build indicator.
+- **Minimal Output · Grayscale Bottom Dock** — the Bottom Dock layout with all prompt chrome, status, gauge, and mode colors collapsed to the neutral frame color.
+- **Minimal Output · Grayscale Top Dock** — the Top Dock layout with the same neutral grayscale treatment.
 
-All three keep OMP's `statusLine.*` segment selection and live values; the plugin only changes the normal folder mark to `⌂`. The host context gauge is promoted to an explicit `[████░░░░] percent/window` bar using live `getContextUsage()` data, while `minimal-output.yml` keeps `statusLine.contextLine: embedded` as the default. The selected shape is stored by OMP in `composer.shape`; the plugin adds no parallel picker.
+The original Bottom Dock and Top Dock styles preserve OMP's live `statusLine.*` theme colors. The two Grayscale styles strip inherited ANSI colors from the prompt chrome and repaint the full frame with explicit equal-RGB grays: darker rules, medium status text, and a brighter neutral prompt gutter. Editor text remains unchanged. Bottom Dock uses `statusLinePath` for the project, suppresses provider tier labels, keeps project/Git in the top rule, and pins the active mode to the bottom-right: active Plan uses `accent`, paused Plan uses `warning`, and inactive Plan shows `󰣪 build` using `statusLineModel`. When OMP truncates the native mode segment, the plugin derives the Plan/Build state from the active session's persisted mode state instead. The explicit context bar is capped at 24 cells and collapses to `percent/window` when narrower. ANSI-aware status slicing preserves complete model and effort text around removed segments. Frame rules and one-cell interior padding come from OMP's composer color functions, with no fixed palette or input background. Symbol-preset-aware model, mode, folder, branch, and modified-state icons remain active. OMP stores the selected shape in `composer.shape`; the plugin reads that setting on each render, so shape changes apply without reload.
 
 ## Card settings
 
@@ -109,7 +110,7 @@ Extension generations use one process-global runtime lease. A hot reload dispose
 
 ## Files
 
-- `index.ts` — extension entry: 8 shadows plus display-only commentary, Task/Hub, read-group, warning, todo skins; composer-shape registration and lifecycle handlers; `/minimal-on|off|status`. `composer-shapes.ts` owns the three rounded prompt styles and custom editor frame. `assistant-commentary-skin.ts` consumes provider phase metadata without adding transcript records; `runtime-owner.ts` owns hot-reload cleanup across module generations.
+- `index.ts` — extension entry: 8 shadows plus display-only commentary, Task/Hub, read-group, warning, todo skins; composer-shape registration and lifecycle handlers; `/minimal-on|off|status`. `composer-shapes.ts` owns four rounded prompt styles and the custom editor frame. `assistant-commentary-skin.ts` consumes provider phase metadata without adding transcript records; `runtime-owner.ts` owns hot-reload cleanup across module generations.
 - `card-primitives.ts` — shared lifecycle, text sanitation, header, detail, error, and limit mechanics. `task-card.ts` and `hub-card.ts` own tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
 - `todos-header.ts` / `todo-hud.ts` — sticky todo widget and native TODO HUD handling. `edit-card.ts`, `eval-card.ts`, and `web-search-card.ts` — dedicated wrapped-tool cards.
 - `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` — pure output filters.

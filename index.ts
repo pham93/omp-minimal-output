@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolResultEvent } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolResultEvent } from "@oh-my-pi/pi-coding-agent";
 import type { markFramedBlockComponent } from "@oh-my-pi/pi-coding-agent/tui/output-block";
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import { tmpdir } from "node:os";
@@ -63,7 +63,12 @@ import {
 import { alertSkinActive, installWarningSkin, invalidateLiveAlerts } from "./warning-skin.ts";
 import { installTodoChrome } from "./todo-hud.ts";
 import { acquireRuntimeOwner } from "./runtime-owner.ts";
-import { installMinimalPromptEditor, registerMinimalComposerShapes } from "./composer-shapes.ts";
+import {
+  installMinimalPromptEditor,
+  registerMinimalComposerShapes,
+  updateMinimalPromptEditorProviders,
+  type MinimalPlanStatus,
+} from "./composer-shapes.ts";
 import {
   latestTodoDetailsFromEntries,
   parseTodoPhases,
@@ -651,6 +656,33 @@ function bindTodoSource(ctx: unknown): void {
     }
   };
 }
+function createPlanStatusProvider(ctx: ExtensionContext): () => MinimalPlanStatus | undefined {
+  let cachedLeafId: string | null | undefined;
+  let cachedStatus: MinimalPlanStatus | undefined;
+
+  return () => {
+    try {
+      const leafId = ctx.sessionManager.getLeafId();
+      if (leafId === cachedLeafId) return cachedStatus;
+
+      const branch = ctx.sessionManager.getBranch();
+      let nextStatus: MinimalPlanStatus = { enabled: false, paused: false };
+      for (let index = branch.length - 1; index >= 0; index -= 1) {
+        const entry = branch[index];
+        if (entry?.type !== "mode_change") continue;
+        if (entry.mode === "plan") nextStatus = { enabled: true, paused: false };
+        else if (entry.mode === "plan_paused") nextStatus = { enabled: false, paused: true };
+        break;
+      }
+
+      cachedLeafId = leafId;
+      cachedStatus = nextStatus;
+      return cachedStatus;
+    } catch {
+      return undefined;
+    }
+  };
+}
 
 function todoAnim(): { now: number; completingAt: Map<string, number>; running: boolean } {
   return { now: Date.now(), completingAt: todoCompletingAt, running: agentRunning };
@@ -820,7 +852,6 @@ function isGroupLead(gid: string, fp: string): boolean {
 }
 
 function rowIsLive(fp: string): boolean {
-  if (thoughtLive && fp.startsWith("thought:")) return true;
   for (const value of liveRuns.values()) {
     if (value.fp === fp) return true;
   }
@@ -884,7 +915,7 @@ function paintGroup(theme: unknown, gid: string): Container {
         });
         lines.push(rowLine);
         if (row.error) terminalError = rowLine;
-        if (isThought && row.live) {
+        if (isThought && live) {
           lines.push(...thinkingRailLines(theme, width, thoughtText, true));
         }
         for (const [detailIndex, detail] of row.details.entries()) {
@@ -1312,7 +1343,7 @@ export default function (pi: ExtensionAPI) {
       activityLabelSource = source;
       return;
     }
-    if (activityRunId !== null && text === activityLabel) {
+    if (activityRunId !== null && (activityLive || liveRuns.size > 0) && text === activityLabel) {
       activityLive = true;
       if (sourceRank > currentRank) activityLabelSource = source;
       return;
@@ -1447,19 +1478,16 @@ export default function (pi: ExtensionAPI) {
       });
       return;
     }
-    if (thoughtStartedAt > 0) {
-      const sec = Math.max(0, Math.floor((Date.now() - thoughtStartedAt) / 1000));
-      thoughtSettledLabel = sec > 0 ? `Thought for ${sec}s` : "Thought";
-      upsertGroupRow(fp, {
-        body: "Thought",
-        live: false,
-        error: false,
-        right: sec > 0 ? ` (${sec}s)` : "",
-        startedAt: thoughtStartedAt,
-      });
-      markSettling(fp);
-      thoughtStartedAt = 0;
-    }
+    const sec = thoughtStartedAt > 0 ? Math.max(0, Math.floor((Date.now() - thoughtStartedAt) / 1000)) : 0;
+    thoughtSettledLabel = sec > 0 ? `Thought for ${sec}s` : "Thought";
+    upsertGroupRow(fp, {
+      body: "Thought",
+      live: false,
+      error: false,
+      right: sec > 0 ? ` (${sec}s)` : "",
+      startedAt: thoughtStartedAt > 0 ? thoughtStartedAt : Date.now(),
+    });
+    thoughtStartedAt = 0;
   }
 
   function tryWrapTool(name: string, source?: unknown): void {
@@ -1663,7 +1691,13 @@ export default function (pi: ExtensionAPI) {
       // formatRowLine degrades to unstyled without a theme.
     }
     wrapAllTools();
-    if (ctx.hasUI) disposeMinimalPromptEditor = installMinimalPromptEditor(ctx.ui, () => ctx.getContextUsage());
+    if (ctx.hasUI) {
+      disposeMinimalPromptEditor = installMinimalPromptEditor(
+        ctx.ui,
+        () => ctx.getContextUsage(),
+        createPlanStatusProvider(ctx),
+      );
+    }
     grabTui(ctx);
     ensureSpinTimer(ctx);
     try {
@@ -1680,6 +1714,7 @@ export default function (pi: ExtensionAPI) {
     bindTodoSource(ctx);
     todoSessionVisible = true;
     syncTodoHeaderFromSession(ctx);
+    updateMinimalPromptEditorProviders(() => ctx.getContextUsage(), createPlanStatusProvider(ctx));
     stopSpinTimerIfIdle(ctx);
   });
 
@@ -1862,7 +1897,7 @@ export default function (pi: ExtensionAPI) {
     if (thinking.text) thoughtText = thinking.text;
     if (thinking.live) {
       thoughtLive = true;
-      if (!activityRunId) {
+      if (!activityRunId || (!activityLive && liveRuns.size === 0)) {
         applyIntent("Working", Date.now(), ACTIVITY_LABEL_SOURCE.generated);
       }
       syncThought();
@@ -1883,6 +1918,10 @@ export default function (pi: ExtensionAPI) {
     liveRuns.clear();
     agentRunning = false;
     activityLive = false;
+    if (thoughtLive) {
+      thoughtLive = false;
+      syncThought();
+    }
     maybeSendSettledActivity(true);
     clearActivityRun();
     resetThought();
@@ -1896,6 +1935,10 @@ export default function (pi: ExtensionAPI) {
     liveRuns.clear();
     agentRunning = false;
     activityLive = false;
+    if (thoughtLive) {
+      thoughtLive = false;
+      syncThought();
+    }
     maybeSendSettledActivity(true);
     clearActivityRun();
     resetThought();
