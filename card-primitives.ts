@@ -1,4 +1,5 @@
 // Small shared mechanics for card renderers. Tool-specific parsing stays local.
+import { visibleWidth } from "@oh-my-pi/pi-tui";
 import { getPluginConfig } from "./config.ts";
 import { detailProfile, minimalToolSummary, type DetailProfile } from "./density.ts";
 import { isToolError, toolResultText } from "./results.ts";
@@ -198,12 +199,18 @@ export function cardTitleLine(theme: unknown, width: number, title: string, erro
   return formatRowLine(theme, width, { body: title, indent: true, tree: "last", error });
 }
 
-export function cardDetailLine(theme: unknown, width: number, text: string): string {
+export function cardDetailLine(
+  theme: unknown,
+  width: number,
+  text: string,
+  prefix = `${TOOL_INDENT}   `,
+  error = false,
+): string {
   const cfg = getPluginConfig();
-  const prefix = `${TOOL_INDENT}   `;
   const rowWidth = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
-  const budget = Math.max(1, rowWidth - prefix.length);
-  return `${prefix}${paintAt(theme, truncatePlain(text, budget), "dim", cfg.opacity)}`;
+  const budget = Math.max(0, rowWidth - visibleWidth(prefix));
+  if (budget === 0) return " ".repeat(rowWidth);
+  return `${paintAt(theme, prefix, "dim", cfg.opacity)}${paintAt(theme, truncatePlain(text, budget), error ? "error" : "dim", cfg.opacity)}`;
 }
 
 export function limitCardItems<T>(items: readonly T[], max: number): CardItemLimit<T> {

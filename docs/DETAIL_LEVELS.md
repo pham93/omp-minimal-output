@@ -46,6 +46,7 @@ These settings belong in the existing plugin settings object in `~/.omp/plugins/
 - An error row is never hidden. When a bounded card is full, the error replaces the final preview row rather than exceeding the cap.
 - ANSI styling, wrapped terminal text, and hidden persistence metadata do not change the logical row budget.
 - Running and settled cards use the same configured density. A settled card may replace live content but must not exceed its mode's cap.
+- Generic grouped tool output is capped once, after counting parent headers, tool rows, and output rows. Trailing blank output rows do not count; interior blank rows do. Output continues beneath its tool rather than appearing as sibling tool branches.
 
 Edit is the deliberate exception to a total-card cap in Standard mode:
 

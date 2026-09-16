@@ -6,7 +6,7 @@ import { statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { collapseToolText } from "./filters.ts";
 import { formatSettledThought, TextScroller } from "./scrolling-text.ts";
-import { detailProfile, thoughtRowLimit } from "./density.ts";
+import { thoughtRowLimit } from "./density.ts";
 import { toolActionLabel, wrapLatestLines } from "./text.ts";
 import {
   LINE_WIDTH_RATIO,
@@ -46,7 +46,7 @@ import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
 import { renderWriteCard } from "./write-card.ts";
-import { cardIsPartial, resultDetails, stashedOrResultText } from "./card-primitives.ts";
+import { cardDetailLine, cardIsPartial, resultDetails, stashedOrResultText } from "./card-primitives.ts";
 import {
   capRenderedRows,
   detailedRowLimit,
@@ -71,6 +71,7 @@ import {
   registerMinimalComposerShapes,
   updateMinimalPromptEditorProviders,
   type MinimalPlanStatus,
+  type MinimalWorkingStatus,
 } from "./composer-shapes.ts";
 import {
   latestTodoDetailsFromEntries,
@@ -713,6 +714,19 @@ function bindTodoSource(ctx: unknown): void {
     }
   };
 }
+
+function createWorkingStatusProvider(): () => MinimalWorkingStatus | undefined {
+  return () => {
+    try {
+      const live = activityRunId !== null && (activityLive || liveRuns.size > 0) && activityStartedAt > 0;
+      if (!live) return undefined;
+      return { startedAt: activityStartedAt };
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 function createPlanStatusProvider(ctx: ExtensionContext): () => MinimalPlanStatus | undefined {
   let cachedLeafId: string | null | undefined;
   let cachedStatus: MinimalPlanStatus | undefined;
@@ -964,55 +978,64 @@ function paintGroup(theme: unknown, gid: string): Container {
           }),
         );
       }
+      const hasOutput = bodies.some((row) => row.details.length > 0);
+      const toolLimit = profile.detailed ? detailedRowLimit() : standardRowLimit(hasOutput);
+      const thoughtRowsCount = isHideThinkingBlock(currentSessionContext)
+        ? 0
+        : rows.filter((row) => row.fp.startsWith("thought:")).length;
+      const thoughtAllowance = (thoughtRowLimit(profile) + 2) * thoughtRowsCount;
+      const maxRows = toolLimit + thoughtAllowance;
+      let totalRows = lines.length;
+      const hasHeader = lines.length > 0;
+      const isStandalone = !hasHeader;
       let terminalError: string | undefined;
       for (const [idx, row] of rows.entries()) {
         const live = rowIsLive(row.fp);
         const isThought = row.fp.startsWith("thought:");
         if (isThought && isHideThinkingBlock(currentSessionContext)) continue;
+        const isLastTool = idx === rows.length - 1;
         const rowLine = formatRowLine(theme, width, {
           body: row.body,
-          indent: true,
-          tree: idx === rows.length - 1 && row.details.length === 0 ? "last" : "mid",
+          indent: !isStandalone,
+          tree: isStandalone ? undefined : isLastTool ? "last" : "mid",
           live,
           error: row.error,
           fadeKey: row.fp,
           right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
+          mark: isStandalone && !live ? "●" : undefined,
         });
-        lines.push(rowLine);
+        totalRows += 1;
+        if (lines.length < maxRows) lines.push(rowLine);
         if (row.error) terminalError = rowLine;
         if (isThought) {
-          if (live) {
-            lines.push(...thinkingRailLines(theme, width, thoughtText, true));
-          } else {
-            const text = typeof row.detail === "string" && row.detail ? row.detail : thoughtText;
-            const maxLines = thoughtRowLimit(profile);
-            lines.push(...formatSettledThought(text, { maxLines, width, theme, indent: true }));
-          }
+          const thoughtLines = live
+            ? thinkingRailLines(theme, width, thoughtText, true)
+            : formatSettledThought(typeof row.detail === "string" && row.detail ? row.detail : thoughtText, {
+                maxLines: thoughtRowLimit(profile),
+                width,
+                theme,
+                indent: true,
+              });
+          totalRows += thoughtLines.length;
+          lines.push(...thoughtLines.slice(0, Math.max(0, maxRows - lines.length)));
         }
-        for (const [detailIndex, detail] of row.details.entries()) {
-          lines.push(
-            formatRowLine(theme, width, {
-              body: `  ${detail}`,
-              indent: true,
-              tree: detailIndex === row.details.length - 1 && idx === rows.length - 1 ? "last" : "mid",
-              error: row.error,
-              fadeKey: `${row.fp}:detail:${detailIndex}`,
-            }),
-          );
+        const detailPrefix = isStandalone || isLastTool ? `${TOOL_INDENT}   ` : "│    ";
+        totalRows += row.details.length;
+        const visibleDetails = Math.min(row.details.length, Math.max(0, maxRows - lines.length));
+        for (let detailIndex = 0; detailIndex < visibleDetails; detailIndex += 1) {
+          lines.push(cardDetailLine(theme, width, row.details[detailIndex]!, detailPrefix, row.error));
         }
       }
-      const hasOutput = bodies.some((row) => row.details.length > 0);
-      const toolLimit = profile.detailed ? detailedRowLimit() : standardRowLimit(hasOutput);
-      const thoughtRowsCount = rows.filter((r) => r.fp.startsWith("thought:")).length;
-      const thoughtAllowance = thoughtRowsCount > 0 ? (thoughtRowLimit(profile) + 2) * thoughtRowsCount : 0;
-      const maxRows = toolLimit + thoughtAllowance;
-      const hiddenRows = Math.max(1, lines.length - maxRows + 1);
-      const overflow = formatRowLine(theme, width, {
-        body: `… ${hiddenRows} more rows`,
-        indent: true,
-        tree: "last",
-      });
-      return capRenderedRows(lines, maxRows, overflow, terminalError);
+      if (totalRows <= maxRows) return lines;
+      const hiddenRows = totalRows - maxRows + 1;
+      const overflow = isStandalone
+        ? cardDetailLine(theme, width, `… ${hiddenRows} more rows`)
+        : formatRowLine(theme, width, {
+            body: `… ${hiddenRows} more rows`,
+            indent: true,
+            tree: "last",
+          });
+      return [...lines.slice(0, maxRows - 1), terminalError ?? overflow];
     },
   });
   markFlush?.(c);
@@ -1021,14 +1044,12 @@ function paintGroup(theme: unknown, gid: string): Container {
 
 // Core inserts a blank line between every tool block. Paint the whole nested
 // group inside the lead tool and return an empty framed block for siblings.
-function groupedOutputLines(result: unknown, options: unknown): string[] {
-  const text = stashedOrResultText(result).trim();
+function groupedOutputLines(result: unknown): string[] {
+  const text = stashedOrResultText(result);
   if (!text) return [];
   const rows = text.split(/\r?\n/u);
-  const profile = detailProfile(options);
-  const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(true);
-  if (rows.length <= maxRows) return rows;
-  return [...rows.slice(0, Math.max(0, maxRows - 1)), `… ${rows.length - maxRows + 1} more rows`];
+  while (rows.length > 0 && !Bun.stripANSI(rows[rows.length - 1]!).trim()) rows.pop();
+  return rows;
 }
 
 function renderToolVisual(
@@ -1273,15 +1294,25 @@ function skillPromptRenderer(message: unknown, options: unknown, theme: unknown)
 
 export default function (pi: ExtensionAPI) {
   registerMinimalComposerShapes(pi);
+  // Prepared factories are rebound in-process for headless subagents. Do not
+  // touch shared state, prototype patches, or ownership until this bind has UI.
+  let activated = false;
+  pi.on("session_start", async (_event, ctx) => {
+    if (!ctx.hasUI || activated) return;
+    activated = true;
+    const startSession = activateInteractiveRuntime(pi);
+    await startSession(ctx);
+  });
+}
+
+function activateInteractiveRuntime(pi: ExtensionAPI): (ctx: ExtensionContext) => Promise<void> {
   const runtimeOwner = acquireRuntimeOwner();
   runtimeIsActive = runtimeOwner.owns;
   enabled = true;
+  wrapApplied.clear();
   let readGroupTheme: unknown;
   let disposeMinimalPromptEditor = (): void => {};
-  // Native grouped reads (ReadToolGroupComponent) bypass the wrapped-read
-  // renderers; skin them at addChild time so transcript rebuilds and live
-  // grouping repaint through formatRowLine. Before any pi.on registration:
-  // a rebuild can add the group before session_start fires.
+  // Install before wrapping tools or rebuilding widgets for this UI session.
   const disposeReadGroupSkin = installReadGroupSkin(Container, {
     enabled: () => runtimeOwner.owns() && enabled && wrapTool("read"),
     theme: () => readGroupTheme,
@@ -1633,7 +1664,7 @@ export default function (pi: ExtensionAPI) {
               live: false,
               error: isToolError(result, options),
               right: durationSuffix(result),
-              details: groupedOutputLines(result, options),
+              details: groupedOutputLines(result),
               detail: detailProfile(options),
             },
             frozenGroupOf(result),
@@ -1743,7 +1774,7 @@ export default function (pi: ExtensionAPI) {
     todosUi = undefined;
   });
 
-  pi.on("session_start", async (_event, ctx) => {
+  async function startSession(ctx: ExtensionContext): Promise<void> {
     if (!runtimeOwner.owns()) return;
     resetNativeToolCardPump();
     if (loaded) return;
@@ -1770,18 +1801,24 @@ export default function (pi: ExtensionAPI) {
     if (ctx.hasUI) {
       disposeMinimalPromptEditor = installMinimalPromptEditor(
         ctx.ui,
-        () => ctx.getContextUsage(),
+        () => {
+          try {
+            return ctx.getContextUsage();
+          } catch {
+            return undefined;
+          }
+        },
         createPlanStatusProvider(ctx),
+        createWorkingStatusProvider(),
       );
     }
-    grabTui(ctx);
     ensureSpinTimer(ctx);
     try {
       if (enabled && ctx.hasUI) ctx.ui.notify("Minimal output active (grok-build style)", "info");
     } catch {
       // notify is best-effort chrome.
     }
-  });
+  }
   pi.on("session_switch", async (_event, ctx) => {
     if (!runtimeOwner.owns()) return;
     agentRunning = false;
@@ -1790,10 +1827,19 @@ export default function (pi: ExtensionAPI) {
     bindTodoSource(ctx);
     todoSessionVisible = true;
     syncTodoHeaderFromSession(ctx);
-    updateMinimalPromptEditorProviders(() => ctx.getContextUsage(), createPlanStatusProvider(ctx));
+    updateMinimalPromptEditorProviders(
+      () => {
+        try {
+          return ctx.getContextUsage();
+        } catch {
+          return undefined;
+        }
+      },
+      createPlanStatusProvider(ctx),
+      createWorkingStatusProvider(),
+    );
     stopSpinTimerIfIdle(ctx);
   });
-
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!runtimeOwner.owns()) return;
     agentRunning = true;
@@ -1808,6 +1854,17 @@ export default function (pi: ExtensionAPI) {
       // Missing lockfile; timer establishes the baseline.
     }
     wrapAllTools();
+    updateMinimalPromptEditorProviders(
+      () => {
+        try {
+          return ctx.getContextUsage();
+        } catch {
+          return undefined;
+        }
+      },
+      createPlanStatusProvider(ctx),
+      createWorkingStatusProvider(),
+    );
   });
 
   pi.on("tool_result", async (event, ctx) => {
@@ -2132,4 +2189,5 @@ export default function (pi: ExtensionAPI) {
       );
     },
   });
+  return startSession;
 }

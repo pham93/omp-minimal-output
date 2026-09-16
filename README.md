@@ -4,6 +4,8 @@ Grok-build-style minimal console output for omp. Collapsed rows use theme-derive
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
+Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools retain a settled `●` indicator. Trailing blank output rows are removed; interior blanks and source indentation are preserved. One group-level cap counts headers and output together and reports a single omission total.
+
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
 Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
@@ -16,12 +18,12 @@ Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 
 The plugin registers four choices in `/settings` → **Composer Shape**:
 
-- **Minimal Output · Bottom Dock** — project and Git state in the top-right rule; model, provider usage, context gauge, and mode in the bottom rule.
-- **Minimal Output · Top Dock** — the complete configured status line in the top rule (model, effort, usage, context, project, and Git), with all native Plan copies collapsed into exactly one right-pinned Plan or Build indicator.
+- **Minimal Output · Bottom Dock** — project and Git state in the top-right rule; live spinner and elapsed time plus provider usage and context gauge in the bottom rule, with native Plan stripped from both rules.
+- **Minimal Output · Top Dock** — the complete configured status line in the top rule (live spinner, elapsed time, native model, effort, usage, context, project, and Git), with duplicate native model copies collapsed to one and every native Plan copy stripped.
 - **Minimal Output · Grayscale Bottom Dock** — the Bottom Dock layout with all prompt chrome, status, gauge, and mode colors collapsed to the neutral frame color.
 - **Minimal Output · Grayscale Top Dock** — the Top Dock layout with the same neutral grayscale treatment.
 
-The original Bottom Dock and Top Dock styles preserve OMP's live `statusLine.*` theme colors. The two Grayscale styles strip inherited ANSI colors from the prompt chrome and repaint the full frame with explicit equal-RGB grays: darker rules, medium status text, and a brighter neutral prompt gutter. Editor text remains unchanged. Bottom Dock uses `statusLinePath` for the project, suppresses provider tier labels, keeps project/Git in the top rule, and pins the active mode to the bottom-right: active Plan uses `accent`, paused Plan uses `warning`, and inactive Plan shows `󰣪 build` using `statusLineModel`. When OMP truncates the native mode segment, the plugin derives the Plan/Build state from the active session's persisted mode state instead. The explicit context bar is capped at 24 cells and collapses to `percent/window` when narrower. ANSI-aware status slicing preserves complete model and effort text around removed segments. Frame rules and one-cell interior padding come from OMP's composer color functions, with no fixed palette or input background. Symbol-preset-aware model, mode, folder, branch, and modified-state icons remain active. OMP stores the selected shape in `composer.shape`; the plugin reads that setting on each render, so shape changes apply without reload.
+The original Bottom Dock and Top Dock styles preserve OMP's live `statusLine.*` theme colors. The two Grayscale styles strip inherited ANSI colors from the prompt chrome and repaint the full frame with explicit equal-RGB grays: darker rules, medium status text, and a brighter neutral prompt gutter. Editor text remains unchanged. Both docks prefix the working head ahead of project/Git while a run is active: the configured indicator frame plus elapsed run time (`12s`/`2m`/`3h`), with no prefix when idle. The native model name stays exactly where OMP emits it; only a duplicated second copy is removed, so the model appears once. The spinner reads the shared row-animation frame, so it advances on the existing 120ms repaint pump with no extra timer; the elapsed clock reads `Date.now()` at render time. Bottom Dock uses `statusLinePath` for the project, suppresses provider tier labels, keeps project/Git in the top rule, and strips every native Plan copy from both rules; the persisted session mode state supplies exactly one right-pinned indicator: `build` while inactive, `Plan` while active, and `Plan` with a pause marker while paused. Active Plan uses `accent`, paused Plan uses `warning`, and Build uses `statusLineModel`; grayscale docks retain neutral colors. The explicit context bar is capped at 24 cells and collapses to `percent/window` when narrower; when subagents squeeze the native line so no gauge anchor survives, the bar is re-appended from the reserved width budget instead of disappearing. ANSI-aware status slicing preserves complete model and effort text around removed segments. Frame rules and one-cell interior padding come from OMP's composer color functions, with no fixed palette or input background. Symbol-preset-aware model, mode, folder, branch, and modified-state icons remain active. OMP stores the selected shape in `composer.shape`; the plugin reads that setting on each render, so shape changes apply without reload.
 
 ## Card settings
 
@@ -106,7 +108,7 @@ sequenceDiagram
 
 Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the group, siblings return empty framed blocks). Settled records freeze `label/total/runId` in message details so rebuilds and resumed sessions never mirror a later run; only the current turn's live row follows shared module state.
 
-Extension generations use one process-global runtime lease. A hot reload disposes the previous generation's widgets, timer, and prototype skins before the replacement registers callbacks; stale renderers remain fail-open and cannot hide core transcript input.
+The interactive extension uses one process-global runtime lease, acquired only when `session_start` reports `hasUI`. Headless subagent, print, and JSON sessions retain native tool behavior and never acquire the lease, install skins/widgets, or mutate the parent's presentation state. A replacement UI session disposes the previous generation's widgets, timer, editor, and prototype skins before activating its own callbacks; wrapped tools are registered afresh for the replacement.
 
 ## Files
 
