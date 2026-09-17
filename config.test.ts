@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyOverlay, DEFAULT_CONFIG, getPluginConfig, setPluginConfigForTest } from "./config.ts";
+import { applyOverlay, DEFAULT_CONFIG, getPluginConfig, setPluginConfigForTest } from "./core/config.ts";
 
 describe("composerRefreshInterval config", () => {
   test("defaults to 60 seconds", () => {

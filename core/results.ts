@@ -14,6 +14,21 @@ export function stashFullText(prev: unknown, full: string): Record<string, unkno
   return merged;
 }
 
+export function resultDetails(result: unknown): Record<string, unknown> | undefined {
+  if (typeof result !== "object" || result === null || Array.isArray(result) || !("details" in result)) {
+    return undefined;
+  }
+  const details = result.details;
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
+  const fields = details as Record<string, unknown>;
+  return fields;
+}
+
+export function stashedResultText(result: unknown): string {
+  const stashed = resultDetails(result)?.["minimalFullText"];
+  return typeof stashed === "string" ? stashed : "";
+}
+
 export function toolResultText(result: unknown): string {
   try {
     const r = result as { content?: unknown };

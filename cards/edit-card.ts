@@ -9,14 +9,14 @@ import {
   resolveParentCardLabel,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { diffStat, parsePipeDiff, parseUnifiedDiff, selectPrettyRows } from "./filters.ts";
-import type { PrettyRow } from "./filters.ts";
-import { markFlush } from "./loaders.ts";
-import { capRenderedRows, detailedRowLimit, detailProfile, standardEditRowsPerFile } from "./density.ts";
-import { durationSuffix, isToolError, toolResultText } from "./results.ts";
-import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "./theme.ts";
-import { shortPathText, showWhitespace, truncatePlain } from "./text.ts";
-import { getPluginConfig } from "./config.ts";
+import { diffStat, parsePipeDiff, parseUnifiedDiff, selectPrettyRows } from "../core/filters.ts";
+import type { PrettyRow } from "../core/filters.ts";
+import { markFlush } from "../core/loaders.ts";
+import { capRenderedRows, detailedRowLimit, detailProfile, standardEditRowsPerFile } from "../core/density.ts";
+import { durationSuffix, isToolError, toolResultText } from "../core/results.ts";
+import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "../core/theme.ts";
+import { shortPathText, showWhitespace, truncatePlain } from "../core/text.ts";
+import { getPluginConfig } from "../core/config.ts";
 
 import("@oh-my-pi/pi-coding-agent/modes/theme/theme")
   .then((m) => {

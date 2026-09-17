@@ -1,10 +1,11 @@
 // Small shared mechanics for card renderers. Tool-specific parsing stays local.
 import { visibleWidth } from "@oh-my-pi/pi-tui";
-import { getPluginConfig } from "./config.ts";
-import { detailProfile, minimalToolSummary, type DetailProfile } from "./density.ts";
-import { isToolError, toolResultText } from "./results.ts";
-import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, isSettling, paintAt } from "./theme.ts";
-import { truncatePlain } from "./text.ts";
+import { getPluginConfig } from "../core/config.ts";
+import { detailProfile, minimalToolSummary, type DetailProfile } from "../core/density.ts";
+import { isToolError, toolResultText, resultDetails, stashedResultText } from "../core/results.ts";
+export { resultDetails, stashedResultText };
+import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, isSettling, paintAt } from "../core/theme.ts";
+import { truncatePlain } from "../core/text.ts";
 
 export const CARD_LIFECYCLE_STATE = {
   running: "running",
@@ -52,20 +53,6 @@ export interface CardItemLimit<T> {
   hidden: number;
 }
 
-export function resultDetails(result: unknown): Record<string, unknown> | undefined {
-  if (typeof result !== "object" || result === null || Array.isArray(result) || !("details" in result)) {
-    return undefined;
-  }
-  const details = result.details;
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return undefined;
-  const fields = details as Record<string, unknown>;
-  return fields;
-}
-
-export function stashedResultText(result: unknown): string {
-  const stashed = resultDetails(result)?.["minimalFullText"];
-  return typeof stashed === "string" ? stashed : "";
-}
 
 export function stashedOrResultText(result: unknown): string {
   return stashedResultText(result) || toolResultText(result);

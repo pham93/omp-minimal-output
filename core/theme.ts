@@ -2,7 +2,8 @@
 // Owns the shared mutable render clocks (spin frame, fades, settle marks) so
 // every painter reads one identity. Imports text utils and plugin config.
 
-import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
+import { markFlush } from "./loaders.ts";
 import { stripKindSuffix, truncatePlain } from "./text.ts";
 import { getPluginConfig, indicatorFrames, indicatorSettled } from "./config.ts";
 
@@ -375,4 +376,39 @@ export function advanceSpinFrame(): void {
 export function setSpinFrame(n: number): void {
   const len = Math.max(1, indicatorFrames().length);
   spinFrame = ((Math.floor(n) % len) + len) % len;
+}
+
+export function paintRow(
+  theme: unknown,
+  opts: {
+    body: string | (() => string);
+    indent?: boolean;
+    live?: boolean;
+    error?: boolean;
+    right?: string | (() => string);
+    fadeKey?: string;
+    liveRight?: () => string;
+    isLive?: () => boolean;
+  },
+): Container {
+  const c = new Container();
+  const render = (width: number): readonly string[] => {
+    const live = opts.isLive ? opts.isLive() : opts.live === true;
+    const body = typeof opts.body === "function" ? opts.body() : opts.body;
+    const right =
+      live && opts.liveRight ? opts.liveRight() : typeof opts.right === "function" ? opts.right() : (opts.right ?? "");
+    return [
+      formatRowLine(theme, width, {
+        body,
+        indent: opts.indent,
+        live,
+        error: opts.error,
+        right,
+        fadeKey: opts.fadeKey,
+      }),
+    ];
+  };
+  c.addChild({ render });
+  markFlush?.(c);
+  return c;
 }

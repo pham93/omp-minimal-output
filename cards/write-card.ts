@@ -9,13 +9,13 @@ import {
   resolveParentCardLabel,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { getPluginConfig } from "./config.ts";
-import { capRenderedRows, detailedRowLimit, standardWriteMaxRows } from "./density.ts";
+import { getPluginConfig } from "../core/config.ts";
+import { capRenderedRows, detailedRowLimit, standardWriteMaxRows } from "../core/density.ts";
 import { highlightCell, languageForPath } from "./edit-card.ts";
-import { markFlush } from "./loaders.ts";
-import { durationSuffix } from "./results.ts";
-import { LINE_WIDTH_RATIO, TOOL_INDENT, dimAnsi, isSettling, markSettling, paintAt, stripSgr } from "./theme.ts";
-import { projectPathText, truncatePlain } from "./text.ts";
+import { markFlush } from "../core/loaders.ts";
+import { durationSuffix } from "../core/results.ts";
+import { LINE_WIDTH_RATIO, TOOL_INDENT, dimAnsi, isSettling, markSettling, paintAt, stripSgr } from "../core/theme.ts";
+import { projectPathText, truncatePlain } from "../core/text.ts";
 
 interface WriteData {
   path: string;

@@ -15,9 +15,9 @@ import {
   resolveParentCardLabel,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, detailedRowLimit, standardRowLimit } from "./density.ts";
-import { markFlush } from "./loaders.ts";
-import { durationSuffix, isToolError, toolResultText } from "./results.ts";
+import { capRenderedRows, detailedRowLimit, standardRowLimit } from "../core/density.ts";
+import { markFlush } from "../core/loaders.ts";
+import { durationSuffix, isToolError, toolResultText } from "../core/results.ts";
 import {
   LINE_WIDTH_RATIO,
   TOOL_INDENT,
@@ -28,8 +28,8 @@ import {
   rowOpacity,
   setSpinFrame,
   stripSgr,
-} from "./theme.ts";
-import { evalCell, evalLabelText, truncatePlain } from "./text.ts";
+} from "../core/theme.ts";
+import { evalCell, evalLabelText, truncatePlain } from "../core/text.ts";
 import { highlightCell } from "./edit-card.ts";
 
 // Standard keeps short input/output previews. Detailed and Ctrl+O use the

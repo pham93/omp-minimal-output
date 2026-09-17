@@ -1,10 +1,10 @@
 # omp-minimal-output — Example output
 
-Literal row shapes per card. Color/paint omitted — structure only.
+Schematic row shapes per card. Color/paint omitted — structure only; spacing and omission counts vary with content and terminal width.
 
-> Design rationale lives in `SSD.md`. The implemented detail-level contract lives in `DETAIL_LEVELS.md`. Usage lives in `README.md`.
+> Design rationale lives in [`SSD.md`](SSD.md). The implemented detail-level contract lives in [`DETAIL_LEVELS.md`](DETAIL_LEVELS.md). Usage lives in [`../README.md`](../README.md).
 > `◈◉◎○` = running spin. `◆` = settled shadow row. `●` = settled Task / Hub / web-search / read-group row. Red = error.
-> `Ctrl+O` toggles collapsed ↔ expanded globally; expanded cards default to at most 20 rows. No per-row click.
+> `Ctrl+O` toggles collapsed ↔ expanded globally; expanded cards cap at `detailedMaxRows` (default 20). No per-row click.
 
 ## Bash
 
@@ -41,14 +41,29 @@ Literal row shapes per card. Color/paint omitted — structure only.
 ```text
 ◆ Read src/index.ts
 ◈ Write src/index.ts — 42 lines
-    1 │ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-    2 │
-    3 │ export default function register(pi: ExtensionAPI) {
-      ╰─ … 39 more lines
+    │ (...35 previous lines)
+   36 │ export default function register(pi: ExtensionAPI) {
+   37 │   // latest lines retained; window grows while streaming
+   38 │ }
 ◆ Skill my-skill — SKILL.md
 ```
 
-Write content is available in the tool call, so the syntax-highlighted preview appears while running. Native Write does not emit incremental text chunks.
+Write shows the latest content lines (`standardWriteMaxRows` in Standard) with a `(...N previous lines)` hint above and 1-based new-side gutter numbers; the syntax-highlighted preview appears while running because content is available in the tool call. Native Write does not emit incremental text chunks.
+
+Grouped reads (native group skinned):
+
+```text
+● Read 3 files
+  ├─ src/index.ts
+  ├─ src/theme.ts
+  ╰─ src/text.ts
+```
+
+```text
+● Read src/index.ts
+```
+
+A single grouped read collapses to one row. Standard bounds the list via `standardRowLimit`; Detailed/Ctrl+O use `detailedMaxRows` with a `… N more files` summary.
 
 Grouped reads (native group skinned):
 
@@ -72,7 +87,14 @@ Grouped reads (native group skinned):
 ```text
 ◆ Search `renderCall`
 ◆ Glob `src/**/*.ts` — 12 files
-◆ Lsp references foo.ts
+```
+
+LSP, AST-grep, and Debug keep the native card, density-capped by `applyNativeDensityRows` (`standardOutputMaxRows`, `detailedMaxRows` on expand):
+
+```text
+◆ Lsp references foo.ts — 8 results
+  src/a.ts:12
+  … 6 more rows
 ```
 
 ## Edit

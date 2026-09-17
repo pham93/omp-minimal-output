@@ -5,9 +5,10 @@
 // at Container.addChild time repaints the card with formatRowLine while
 // leaving execution, grouping, and Ctrl+O behavior untouched.
 
-import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "./density.ts";
-import { tildePath } from "./text.ts";
-import { formatRowLine } from "./theme.ts";
+import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "../core/density.ts";
+import { tildePath } from "../core/text.ts";
+import { formatRowLine } from "../core/theme.ts";
+import { getContainerInterceptor } from "../core/container-interceptor.ts";
 
 export type ReadSkinEntry = {
   id: string;
@@ -204,16 +205,13 @@ function skinReadGroup(child: object, deps: ReadGroupSkinDeps): void {
   skinned.add(child);
 }
 
-export function installReadGroupSkin(
-  ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
-  deps: ReadGroupSkinDeps,
-): () => void {
+export function installReadGroupSkin(ContainerCtor: unknown, deps: ReadGroupSkinDeps): () => void {
   if (installed) return () => {};
-  const prototype = ContainerCtor?.prototype;
-  const addChild = prototype?.addChild;
-  if (typeof addChild !== "function") return () => {};
-  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
-    if (deps.active?.() === false) return addChild.apply(this, args);
+  const interceptor = getContainerInterceptor(ContainerCtor);
+  if (!interceptor.isAvailable) return () => {};
+
+  const unregister = interceptor.registerHook((_container, args) => {
+    if (deps.active?.() === false) return;
     for (const arg of args) {
       try {
         if (isReadGroupLike(arg)) skinReadGroup(arg as object, deps);
@@ -221,20 +219,15 @@ export function installReadGroupSkin(
         // One bad child must not break the container.
       }
     }
-    return addChild.apply(this, args);
-  };
-  try {
-    prototype.addChild = patchedAddChild;
-  } catch {
-    return () => {};
-  }
+  });
+  if (!unregister) return () => {};
   installed = true;
+  let active = true;
+
   return () => {
-    try {
-      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
-    } catch {
-      // Another extension may own the current hook; never overwrite it.
-    }
+    if (!active) return;
+    active = false;
+    unregister();
     installed = false;
     skinned = new WeakSet<object>();
   };

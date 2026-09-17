@@ -8,7 +8,7 @@ Generic grouped tools keep output indented beneath each tool, with continuation 
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
-Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`.
+Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/demo-write`; shortcut `ctrl+alt+t` toggles Todo expand/collapse.
 
 Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 
@@ -37,6 +37,8 @@ Each fallback is independent. `nativeTask` and `nativeHub` restore the host rend
 
 ## Runtime overview
 
+Grouped and dedicated wrapped cards dispatch through `cards/card-registry.ts`. Renderer failures use OMP's native fallback rather than hiding the transcript. The five native surface skins share one `core/container-interceptor.ts` hook; `/minimal-off` removes its subscribers and `/minimal-on` reinstalls them. Task and Hub remain native tools.
+
 ```mermaid
 flowchart LR
     call["tool call"] --> rc["shadow renderCall\nlive ◈→◉→◎→○ @ 120ms"]
@@ -49,23 +51,23 @@ flowchart LR
     status -.-> settle["tool result\nsettled outcome"]
 ```
 
-Provider-tagged commentary (`textSignature.phase = "commentary"`) wins over literal tool argument `i`, which wins over generated labels. `assistant-commentary-skin.ts` blanks the original native display block because OMP splits tool calls into separate timeline components; the label is projected into the owning tool surface while agent context and persisted message content remain verbatim.
+Provider-tagged commentary (`textSignature.phase = "commentary"`) wins over literal tool argument `i`, which wins over generated labels. `surfaces/assistant-commentary-skin.ts` blanks the original native display block because OMP splits tool calls into separate timeline components; the label is projected into the owning tool surface while agent context and persisted message content remain verbatim.
 
 The sticky Todo widget hydrates as one collapsed summary row on session start only when the current session already has a nonempty todo list. Expanding it shows the full retained list; `standardMaxRows` does not apply to Todo. Empty new sessions keep the widget absent until a todo tool result creates work.
 
-Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. Write shows a bounded, path-aware syntax-highlighted input preview while running and settled; `web_search` shows source count/provider and expands to bold titles with dim URLs; expanded `edit` cards use project-relative file branches, per-file stats, continuation rails, explicit diff markers, and hunk separators; `eval` replaces the boxed output panel.
+Eight shadows (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`) delegate to native execution with native schemas. Task and Hub are not shadows: `cards/native-tool-card-skin.ts` observes public `ToolExecutionComponent` updates, renders only verified Task/Hub state, and fails open to the native renderer. Write shows a bounded, path-aware syntax-highlighted input preview while running and settled; `web_search` shows source count/provider and expands to bold titles with dim URLs; expanded `edit` cards use project-relative file branches, per-file stats, continuation rails, explicit diff markers, and hunk separators; `eval` replaces the boxed output panel.
 
 The literal tool argument `i` is never discarded. Generic wrapped tools (`bash`, `read`, `grep`, `glob`) keep the grouped status parent and tool children. Dedicated/native cards (`write`, `edit`, `eval`, `web_search`, Task, Hub) render the AI status as a parent and the named card as its indicator-free `╰─` child. Todo settles into the sticky widget or native fallback. Live `minimal-activity` records remain only for surfaces without an owning group/card; the plugin emits no second settled activity row.
 
 The sticky Todo widget is the single Todo surface after a successful widget mount. Its native transcript card is suppressed only while that widget is active; headless, disabled, or failed widget mounts retain the transcript card as the safe fallback.
 
-Thoughts are fully hidden (`registerAssistantThinkingRenderer` is supplemental-only). Spill files land in `$TMPDIR/omp-minimal-*.log`.
+Live reasoning streams in the animated widget above the composer; `registerAssistantThinkingRenderer` is supplemental-only. With `hideThinkingBlock: true` (the shipped `minimal-output.yml`), the native thinking block is hidden and settled thought rows are suppressed from the transcript. Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
 Pulse: working rows cycle `◈ → ◉ → ◎ → ○` at 120 ms via managed `ctx.setInterval` while a tool runs. General rows settle to the configured indicator; web search settles to `●` and uses the error token on failure. `/minimal-off` mid-run stops the pump immediately. `minimal-output.yml` (`shimmer: disabled`, `showProgress: false`) is untouched.
 
 Background: `Container` is a passthrough and `Text` paints no fill unless given a custom bg fn (never called here); core also clears the wrapper bg (`setBgFn(undefined)`) for custom `renderCall`/`renderResult`. The only filled rows were native `grep`/`glob` ones (`toolSuccessBg` via the native renderer) — both are now shadowed to the same single-`Container` shape as `bash`/`read`.
 
-## Collapse pipeline (`filters.ts`)
+## Collapse pipeline (`core/filters.ts`)
 
 ```mermaid
 flowchart TD
@@ -108,16 +110,16 @@ sequenceDiagram
 
 Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the group, siblings return empty framed blocks). Settled records freeze `label/total/runId` in message details so rebuilds and resumed sessions never mirror a later run; only the current turn's live row follows shared module state.
 
-The interactive extension uses one process-global runtime lease, acquired only when `session_start` reports `hasUI`. Headless subagent, print, and JSON sessions retain native tool behavior and never acquire the lease, install skins/widgets, or mutate the parent's presentation state. A replacement UI session disposes the previous generation's widgets, timer, editor, and prototype skins before activating its own callbacks; wrapped tools are registered afresh for the replacement.
+The interactive extension uses one process-global runtime lease, acquired only when `session_start` reports `hasUI`. Headless subagent, print, and JSON sessions retain native tool behavior and never acquire the lease, install skins/widgets, or mutate the parent's presentation state. A replacement UI session disposes the previous generation's widgets, timer, editor, and interceptor subscribers before activating its own callbacks; wrapped tools are registered afresh for the replacement.
 
 ## Files
 
-- `index.ts` — extension entry: 8 shadows plus display-only commentary, Task/Hub, read-group, warning, todo skins; composer-shape registration and lifecycle handlers; `/minimal-on|off|status`. `composer-shapes.ts` owns four rounded prompt styles and the custom editor frame. `assistant-commentary-skin.ts` consumes provider phase metadata without adding transcript records; `runtime-owner.ts` owns hot-reload cleanup across module generations.
-- `card-primitives.ts` — shared lifecycle, text sanitation, header, detail, error, and limit mechanics. `task-card.ts` and `hub-card.ts` own tool-specific projections; `native-tool-card-skin.ts` is their fail-open host bridge; `card-gallery.ts` holds deterministic fixtures.
-- `todos-header.ts` / `todo-hud.ts` — sticky todo widget and native TODO HUD handling. `edit-card.ts`, `eval-card.ts`, and `web-search-card.ts` — dedicated wrapped-tool cards.
-- `text.ts`, `theme.ts`, `results.ts`, `loaders.ts` — string helpers, theme clocks, result identities, and lazy core affordances. `filters.ts` — pure output filters.
+- `index.ts` — extension entry: registration, event orchestration, and top-level lifecycle only; formatting and parsing live in owned modules.
+- `core/` — `tool-wrapper.ts` (native interception, single-pass delegation), `activity-tracker.ts` (intent ranking, parent labels), `animation-pump.ts` (120ms tick, idle detection), `container-interceptor.ts` (single `addChild` seam for all five skins), `config.ts` (settings schema, lockfile + project overrides), `theme.ts`/`text.ts`/`density.ts`/`results.ts`/`loaders.ts`/`filters.ts`/`runtime-owner.ts`.
+- `cards/` — `card-registry.ts` (unified dispatch for grouped and dedicated cards), `grouped-tool-card.ts` (bash/read/grep/glob rows and rails), dedicated cards (`write`, `edit`, `eval`, `web_search`, `task`, `hub`), `native-tool-card-skin.ts` (fail-open Task/Hub bridge), `card-primitives.ts`, `card-gallery.ts`.
+- `surfaces/` — `composer-shapes.ts` (four prompt docks + custom editor, `composerRefreshInterval` polling), `thinking-widget.ts`, `todo-widget.ts`/`todos-header.ts`/`todo-hud.ts`, `commands.ts` (slash commands + shortcut), warning/assistant-commentary/read-group skins, `scrolling-text.ts`.
 - `minimal-output.yml` — `hideThinkingBlock`, `hideToolActivity`, `shimmer: disabled`, `showProgress: false`, `tui.tight`, `statusLine.minimal`, and embedded context gauge.
-- `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`.
+- `package.json` — `@local/omp-minimal-output`, extension entry `./index.ts`, user-facing settings metadata.
 
 ## Constraints
 

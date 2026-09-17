@@ -18,21 +18,32 @@ Prefer boring, explicit code over clever abstractions. Make the smallest coheren
 
 ## Project Map
 
-- `index.ts`: extension registration, event orchestration, tool wrapping, and shared runtime state.
-- `config.ts`: settings schema, defaults, validation, lockfile and project overrides.
-- `card-primitives.ts`: shared card lifecycle and rendering mechanics.
-- `*-card.ts`: tool-specific parsing and card presentation.
-- `native-tool-card-skin.ts`: display skin for supported native tool cards.
-- `filters.ts`: dependency-free output collapsing and diff parsing.
-- `theme.ts`, `text.ts`, `density.ts`: row formatting, text helpers, and detail profiles.
-- `results.ts`, `loaders.ts`: result identity, metadata, and lazy host affordances.
-- `composer-shapes.ts`: prompt composer layouts.
-- `todos-header.ts`, `todo-hud.ts`, `warning-skin.ts`: widget and alert surfaces.
-- `runtime-owner.ts`: process-global ownership and hot-reload cleanup.
+- `index.ts`: extension registration, event orchestration, and top-level lifecycle.
+- `core/`: runtime engine, configuration, state machines, and primitives:
+  - `core/tool-wrapper.ts`: native tool interception and single-pass delegation.
+  - `core/activity-tracker.ts`: active run tracking, intent ranking, and parent label resolution.
+  - `core/animation-pump.ts`: managed 120ms tick, requestRender triggers, and idle detection.
+  - `core/config.ts`: settings schema, defaults, validation, lockfile and project overrides.
+  - `core/theme.ts`, `core/text.ts`, `core/density.ts`: row formatting, ANSI text helpers, and detail profiles.
+  - `core/results.ts`, `core/loaders.ts`: result identity, fingerprints, and lazy host affordances.
+  - `core/filters.ts`: dependency-free output collapsing and diff parsing.
+  - `core/runtime-owner.ts`: process-global ownership and hot-reload cleanup.
+  - `core/container-interceptor.ts`: single `Container.prototype.addChild` seam; five skins subscribe through it.
+- `cards/`: tool-specific presentation, lifecycle, and rendering mechanics:
+  - `cards/card-registry.ts`: tool card renderer dispatch table.
+  - `cards/grouped-tool-card.ts`: grouped tool rows and continuation rails (bash, read, grep, glob).
+  - `cards/*-card.ts`: dedicated tool cards (write, edit, eval, web_search, task, hub).
+  - `cards/native-tool-card-skin.ts`: display skin for native Task and Hub cards.
+- `surfaces/`: prompt chrome, widgets, and alert skins:
+  - `surfaces/composer-shapes.ts`: prompt composer layouts (Bottom Dock, Top Dock, Grayscale).
+  - `surfaces/thinking-widget.ts`: animated reasoning stream widget above editor.
+  - `surfaces/todo-widget.ts`, `surfaces/todos-header.ts`, `surfaces/todo-hud.ts`: sticky Todo widget and status line HUD.
+  - `surfaces/commands.ts`: top-level slash command and shortcut registrations.
+  - `surfaces/warning-skin.ts`, `surfaces/assistant-commentary-skin.ts`, `surfaces/read-group.ts`: overlay skins.
+  - `surfaces/scrolling-text.ts`: TextScroller animation buffer.
 - `*.test.ts`: Bun behavior and regression tests, colocated at repository root.
 - `package.json`: extension manifest, published files, and user-facing settings.
-- `README.md`, `docs/`: public behavior and configuration documentation.
-
+- `README.md`, `docs/`, `CONTEXT.md`: public behavior, domain glossary, and configuration documentation.
 Keep orchestration in `index.ts`; move reusable formatting or parsing into the existing owning module. Do not create a second convention beside an established one.
 
 ## Non-Negotiable Contracts
@@ -87,7 +98,8 @@ Rendering and animation code is hot code:
 
 ## Card and TUI Changes
 
-- Use `card-primitives.ts` for shared lifecycle, headers, limits, errors, and parent labels.
+- Route new tool cards through `cards/card-registry.ts`; renderer failures propagate to the host fallback (returning an undefined component hides output — never do that).
+- Intercept `Container.prototype.addChild` only through `core/container-interceptor.ts`; never patch the prototype from a skin.
 - Keep tool-specific result parsing in the corresponding card module.
 - Cover every relevant lifecycle state: running, partial, success, error, expanded, minimal, standard, and detailed.
 - Preserve the established parent/child tree shape and settled indicators unless the task explicitly redesigns them.
@@ -102,7 +114,7 @@ A setting is incomplete unless all applicable surfaces are updated together:
 
 1. `PluginConfig` type.
 2. `DEFAULT_CONFIG`.
-3. Overlay parsing, type validation, and numeric clamping in `config.ts`.
+3. Overlay parsing, type validation, and numeric clamping in `core/config.ts`.
 4. Boolean-key registration when applicable.
 5. `package.json` under `pi.settings`.
 6. Runtime use of the setting, including live reload behavior.
@@ -146,7 +158,7 @@ Report exactly what was exercised. Do not claim visual verification from unit te
 ## Documentation and Packaging
 
 - Update `README.md` for user-visible commands, defaults, settings, or behavior.
-- Update `docs/DETAIL_LEVELS.md` when density semantics change.
+- Update `docs/DETAIL_LEVELS.md` when density semantics change; keep `docs/SSD.md` and `docs/EXAMPLES.md` aligned with the module layout and row shapes.
 - Update `package.json.files` when adding a runtime module required by the published extension.
 - Keep examples aligned with current indicators, row shapes, and defaults.
 - Do not add generated files, logs, spill files, or local configuration to the repository.

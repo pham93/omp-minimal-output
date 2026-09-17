@@ -2,7 +2,7 @@
 
 Status: implemented.
 
-This document defines the configurable transcript-density contract implemented by `omp-minimal-output` for Minimal, Standard, and Detailed modes.
+This document defines the configurable transcript-density contract implemented by `omp-minimal-output` for Minimal, Standard, and Detailed modes. Row budgets are enforced by `core/density.ts` and dispatched through `cards/card-registry.ts`.
 
 ## Goals
 
@@ -97,16 +97,14 @@ Detailed matches the Ctrl+O-expanded representation but is bounded by `detailedM
 | Read             | Status, file/range header, content preview, omission or error                              | `standardOutputMaxRows`                                                        |
 | Grep             | Status, pattern/count header, first matches, omission or error                             | `standardOutputMaxRows`                                                        |
 | Glob             | Status, pattern/count header, first paths, omission or error                               | `standardOutputMaxRows`                                                        |
-| Write            | Status, file/line-count header, live syntax-highlighted input preview, omission or error   | `standardWriteMaxRows`                                                         |
+| Write            | Status, file/line-count header, latest content lines with `(...N previous lines)` hint     | `standardWriteMaxRows`                                                         |
 | Edit             | Status, aggregate header, every file header, bounded diff rows per file, per-file omission | `standardEditRowsPerFile`                                                      |
 | Eval             | Status, language/input header, input or output preview, omission or error                  | `standardOutputMaxRows`                                                        |
-| Web Search       | Status, query/source-count header, first source title/URL, omission or error               | `standardOutputMaxRows`                                                        |
-| Task             | Status, aggregate agent header, first agent rows, omission or error                        | `standardOutputMaxRows`                                                        |
-| Hub              | Status, operation summary, first peer/job/message rows, omission or error                  | `standardOutputMaxRows`                                                        |
+| Web Search       | Status, query/source-count header, first source title/URL, omission or error               | `webSearchMaxResults` sources inside the `standardOutputMaxRows` card cap      |
+| Task             | Status, aggregate agent header, first agent rows, omission or error                        | `taskMaxAgents` items inside the Standard card cap; `detailedMaxRows` expanded |
+| Hub              | Status, operation summary, first peer/job/message rows, omission or error                  | `hubMaxItems` items inside the Standard card cap; `detailedMaxRows` expanded   |
 | Todo             | One summary row when collapsed; full retained list when expanded                           | Todo expand/collapse state                                                     |
-| LSP              | Status, operation/symbol header, first references or diagnostics, omission or error        | `standardOutputMaxRows`                                                        |
-| AST Grep         | Status, pattern/count header, first structural matches, omission or error                  | `standardOutputMaxRows`                                                        |
-| Debug            | Status, action/thread header, first frames or values, omission or error                    | `standardOutputMaxRows`                                                        |
+| LSP / AST Grep / Debug | Status, header, bounded native rows, omission or error                                | `standardOutputMaxRows` via the generic native density projection             |
 | Other MCP/native | Status, tool/target header, first result rows, omission or error                           | `standardOutputMaxRows` when output exists; otherwise `standardMaxRows`        |
 
 Specialized renderers keep their existing visual grammar. Unsupported native cards use a generic bounded projection and must fail open to the native renderer if their state cannot be read safely.
@@ -147,22 +145,18 @@ Specialized renderers keep their existing visual grammar. Unsupported native car
 
 ### Write — Standard
 
-With the default `standardWriteMaxRows: 10`, the same path-aware syntax-highlighted preview is visible while Write is running and after it settles:
+With the default `standardWriteMaxRows: 10`, the latest content lines are visible while Write is running and after it settles, with a `(...N previous lines)` hint above the retained window:
 
 ```text
 ◆ Creating the detail-level configuration
 ╰─ Write config.ts                                        42 lines
-   1 │ export type DetailLevel =
-   2 │   | "minimal"
-   3 │   | "standard"
-   4 │   | "detailed";
-   5 │
-   6 │ export interface PluginConfig {
-   7 │   detailLevel: DetailLevel;
-     ╰─ … 35 more lines
+   │ (...35 previous lines)
+   36 │ export type DetailLevel =
+   37 │   | "minimal"
+   38 │   | "standard"
+   39 │   | "detailed";
+     ╰─ … 3 more lines
 ```
-
-### Generic output tool — Standard
 
 With the default `standardOutputMaxRows: 4`:
 
@@ -185,13 +179,13 @@ With the default `standardMaxRows: 3`:
 
 ## Ctrl+O
 
-Ctrl+O is a temporary Detailed override bounded by `detailedMaxRows`:
+Ctrl+O is a temporary Detailed override bounded by `detailedMaxRows` (default 20, `1..100`):
 
-| Configured mode | Normal display | Ctrl+O display        |
-| --------------- | -------------- | --------------------- |
-| Minimal         | Minimal        | Detailed, max 20 rows |
-| Standard        | Standard       | Detailed, max 20 rows |
-| Detailed        | Detailed       | Detailed, max 20 rows |
+| Configured mode | Normal display | Ctrl+O display                    |
+| --------------- | -------------- | --------------------------------- |
+| Minimal         | Minimal        | Detailed, `detailedMaxRows` rows  |
+| Standard        | Standard       | Detailed, `detailedMaxRows` rows  |
+| Detailed        | Detailed       | Detailed, `detailedMaxRows` rows  |
 
 Leaving the override restores the configured mode. Ctrl+O does not rewrite `detailLevel` or any row-limit setting.
 
@@ -202,3 +196,6 @@ Leaving the override restores the configured mode. Ctrl+O does not rewrite `deta
 - No compatibility aliases exist for deprecated setting names.
 - Current `native*` settings continue to win: a selected native fallback bypasses plugin density rendering for that tool.
 - Full result text remains retained or spilled exactly as before; Detailed mode and Ctrl+O never depend on the Standard preview.
+
+- Density rendering dispatches through `cards/card-registry.ts`. When the plugin is disabled or a `native*` setting wins, the registry throws a native-fallback error and the host restores its own renderer; a returned-`undefined` component would hide the transcript instead.
+- The five native surface skins (read-group, assistant commentary, native tool cards, warning, todo HUD) subscribe through one `core/container-interceptor.ts` hook. `/minimal-off` removes the subscribers; `/minimal-on` reinstalls them.

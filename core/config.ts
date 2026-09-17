@@ -4,7 +4,7 @@
 // own .omp/.pi plugin-overrides.json files. No plugin-owned YAML.
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 export const PLUGIN_NAME = "@local/omp-minimal-output";
 
@@ -274,6 +274,36 @@ export function getPluginConfig(): PluginConfig {
 
 export function reloadPluginConfig(): PluginConfig {
   return loadPluginConfig();
+}
+
+let lastConfigMtimes = "";
+function configMtimeKey(): string {
+  const paths = [lockfilePath(), ...projectOverridePaths()];
+  return paths
+    .map((p) => {
+      try {
+        return `${p}:${statSync(p).mtimeMs}`;
+      } catch {
+        return `${p}:-`;
+      }
+    })
+    .join(";");
+}
+
+export function maybeReloadConfig(): void {
+  try {
+    const key = configMtimeKey();
+    if (lastConfigMtimes === "") {
+      lastConfigMtimes = key;
+      return;
+    }
+    if (key !== lastConfigMtimes) {
+      lastConfigMtimes = key;
+      reloadPluginConfig();
+    }
+  } catch {
+    // Stat is best-effort.
+  }
 }
 
 export function setPluginConfigForTest(cfg: PluginConfig | null): void {

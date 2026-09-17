@@ -11,9 +11,9 @@ import {
   resultDetails,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, detailedRowLimit, standardRowLimit } from "./density.ts";
-import { getPluginConfig } from "./config.ts";
-import { markFlush } from "./loaders.ts";
+import { capRenderedRows, detailedRowLimit, standardRowLimit } from "../core/density.ts";
+import { getPluginConfig } from "../core/config.ts";
+import { markFlush } from "../core/loaders.ts";
 
 interface TaskAgentRow {
   agent: string;

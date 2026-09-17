@@ -11,8 +11,9 @@
 //   4. ErrorBanner: dismiss caption or shipped class name
 // Ctrl+O: TTSR isExpanded() → original render. Todo has no expand.
 
-import { truncatePlain } from "./text.ts";
-import { spinFrame, stripSgr, themeBgRgb, themeTokenRgb } from "./theme.ts";
+import { truncatePlain } from "../core/text.ts";
+import { spinFrame, stripSgr, themeBgRgb, themeTokenRgb } from "../core/theme.ts";
+import { getContainerInterceptor } from "../core/container-interceptor.ts";
 
 const ALERT_KIND = {
   warning: "warning",
@@ -153,9 +154,7 @@ export function isAlertLike(child: unknown): boolean {
   if (typeof child !== "object" || child === null) return false;
   const c = child as Record<string, unknown>;
   if (!isFn(c, "render")) return false;
-  return (
-    isTodoReminderLike(c) || isTtsrLike(c) || isAlertTextLike(c) || isErrorBannerLike(c) || isActivityAlertLike(c)
-  );
+  return isTodoReminderLike(c) || isTtsrLike(c) || isAlertTextLike(c) || isErrorBannerLike(c) || isActivityAlertLike(c);
 }
 
 function todoHeaderOf(c: Record<string, unknown>): string | undefined {
@@ -282,16 +281,13 @@ export interface WarningSkinDeps {
   active?: () => boolean;
 }
 
-export function installWarningSkin(
-  ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
-  deps: WarningSkinDeps,
-): () => void {
+export function installWarningSkin(ContainerCtor: unknown, deps: WarningSkinDeps): () => void {
   if (installed) return () => {};
-  const prototype = ContainerCtor?.prototype;
-  const addChild = prototype?.addChild;
-  if (typeof addChild !== "function") return () => {};
-  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
-    if (deps.active?.() === false) return addChild.apply(this, args);
+  const interceptor = getContainerInterceptor(ContainerCtor);
+  if (!interceptor.isAvailable) return () => {};
+
+  const unregister = interceptor.registerHook((_container, args) => {
+    if (deps.active?.() === false) return;
     for (const arg of args) {
       try {
         if (arg && typeof arg === "object" && !skinned.has(arg as object) && isAlertLike(arg)) {
@@ -301,31 +297,23 @@ export function installWarningSkin(
         // One bad child must not break the container.
       }
     }
-    return addChild.apply(this, args);
-  };
-  try {
-    prototype.addChild = patchedAddChild;
-  } catch {
-    return () => {};
-  }
+  });
+  if (!unregister) return () => {};
   installed = true;
+  let active = true;
+
   return () => {
+    if (!active) return;
+    active = false;
     liveAlerts.clear();
     alertLive = false;
-    try {
-      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
-    } catch {
-      // Another extension may own the current hook; never overwrite it.
-    }
+    unregister();
     installed = false;
     skinned = new WeakSet<object>();
   };
 }
 
-function skinAlert(
-  child: object,
-  deps: WarningSkinDeps,
-): void {
+function skinAlert(child: object, deps: WarningSkinDeps): void {
   const c = child as Record<string, unknown> & {
     render?: (width: number) => readonly string[];
     setToolActivityVisible?: (visible: boolean) => void;
@@ -368,7 +356,6 @@ function skinAlert(
   liveAlerts.add(child);
   try {
     deps.pump?.();
-  } catch {
-  }
+  } catch {}
   skinned.add(child);
 }

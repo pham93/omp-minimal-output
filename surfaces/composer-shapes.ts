@@ -14,7 +14,7 @@ import {
   type KeybindingsManager,
   type TUI,
 } from "@oh-my-pi/pi-tui";
-import { getPluginConfig, indicatorFrames } from "./config.ts";
+import { getPluginConfig, indicatorFrames } from "../core/config.ts";
 
 export const MINIMAL_COMPOSER_STYLE = {
   bottomDock: "minimal-bottom-dock",
@@ -972,6 +972,34 @@ export function installMinimalPromptEditor(
       ui.setEditorComponent(undefined);
     } catch {
       // Interactive UI teardown may already have released the editor host.
+    }
+  };
+}
+
+export function createPlanStatusProvider(ctx: ExtensionContext): () => MinimalPlanStatus | undefined {
+  let cachedLeafId: string | null | undefined;
+  let cachedStatus: MinimalPlanStatus | undefined;
+
+  return () => {
+    try {
+      const leafId = ctx.sessionManager.getLeafId();
+      if (leafId === cachedLeafId) return cachedStatus;
+
+      const branch = ctx.sessionManager.getBranch();
+      let nextStatus: MinimalPlanStatus = { enabled: false, paused: false };
+      for (let index = branch.length - 1; index >= 0; index -= 1) {
+        const entry = branch[index];
+        if (entry?.type !== "mode_change") continue;
+        if (entry.mode === "plan") nextStatus = { enabled: true, paused: false };
+        else if (entry.mode === "plan_paused") nextStatus = { enabled: false, paused: true };
+        break;
+      }
+
+      cachedLeafId = leafId;
+      cachedStatus = nextStatus;
+      return cachedStatus;
+    } catch {
+      return undefined;
     }
   };
 }

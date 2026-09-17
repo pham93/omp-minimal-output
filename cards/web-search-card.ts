@@ -1,7 +1,7 @@
 // Minimal web-search card. Execution remains delegated by index.ts; this module
 // owns only structured result reading and transcript presentation.
 import { Container } from "@oh-my-pi/pi-tui";
-import { getPluginConfig } from "./config.ts";
+import { getPluginConfig } from "../core/config.ts";
 import {
   cardDetailLine,
   cardHeaderLine,
@@ -15,9 +15,9 @@ import {
   stashedOrResultText,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, detailedRowLimit, standardRowLimit } from "./density.ts";
-import { markFlush } from "./loaders.ts";
-import { searchPatternText } from "./text.ts";
+import { capRenderedRows, detailedRowLimit, standardRowLimit } from "../core/density.ts";
+import { markFlush } from "../core/loaders.ts";
+import { searchPatternText } from "../core/text.ts";
 
 interface WebSearchSource {
   title: string;

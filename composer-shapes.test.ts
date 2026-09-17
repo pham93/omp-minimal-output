@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { DEFAULT_CONFIG, setPluginConfigForTest } from "./config.ts";
+import { DEFAULT_CONFIG, setPluginConfigForTest } from "./core/config.ts";
 /*
  * Composer shape tests. composer-shapes.ts has no local dependencies; its
  * three external imports are mocked here so the real module (including the
@@ -224,7 +224,7 @@ mock.module("@oh-my-pi/pi-coding-agent/modes/components/custom-editor", () => ({
 
 // Dynamic import: mock.module() above must execute before composer-shapes.ts
 // loads, so a hoisted static import cannot work here.
-const composer: ComposerModuleUnderTest = await import("./composer-shapes.ts");
+const composer: ComposerModuleUnderTest = await import("./surfaces/composer-shapes.ts");
 
 const BOX: TestComposerBox = {
   topLeft: "╭",

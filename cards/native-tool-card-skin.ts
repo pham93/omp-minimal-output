@@ -1,12 +1,19 @@
 // Display-only skin for native ToolExecutionComponent instances. It never registers or executes tools.
 
 import { compactCardText } from "./card-primitives.ts";
-import { isWrappedTool } from "./config.ts";
-import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "./density.ts";
+import { getContainerInterceptor } from "../core/container-interceptor.ts";
+import { isWrappedTool } from "../core/config.ts";
+import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "../core/density.ts";
 import { isHubCardData, renderHubCardLines } from "./hub-card.ts";
-import { fingerprintForToolCall, identityForToolCall, isToolError, toolFingerprint, toolFpBase } from "./results.ts";
+import {
+  fingerprintForToolCall,
+  identityForToolCall,
+  isToolError,
+  toolFingerprint,
+  toolFpBase,
+} from "../core/results.ts";
 import { renderTaskCardLines, isTaskCardData } from "./task-card.ts";
-import { formatRowLine } from "./theme.ts";
+import { formatRowLine } from "../core/theme.ts";
 
 export const NATIVE_TOOL_CARD_KIND = {
   hub: "hub",
@@ -300,18 +307,15 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
   skinned.add(child);
 }
 
-export function installNativeToolCardSkin(
-  ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
-  deps: NativeToolCardSkinDeps,
-): () => void {
+export function installNativeToolCardSkin(ContainerCtor: unknown, deps: NativeToolCardSkinDeps): () => void {
   if (installed) return () => {};
-  const prototype = ContainerCtor?.prototype;
-  const addChild = prototype?.addChild;
-  if (typeof addChild !== "function") return () => {};
-  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
-    if (deps.active?.() === false) return addChild.apply(this, args);
+  const interceptor = getContainerInterceptor(ContainerCtor);
+  if (!interceptor.isAvailable) return () => {};
+
+  const unregister = interceptor.registerHook((container, args) => {
+    if (deps.active?.() === false) return;
     try {
-      if (isToolExecutionComponentLike(this)) skinToolExecution(this as object, deps);
+      if (isToolExecutionComponentLike(container)) skinToolExecution(container as object, deps);
     } catch {
       // Constructor-time parent probing is display-only.
     }
@@ -322,21 +326,16 @@ export function installNativeToolCardSkin(
         // One unfamiliar child must never affect its native parent insertion.
       }
     }
-    return addChild.apply(this, args);
-  };
-  try {
-    prototype.addChild = patchedAddChild;
-  } catch {
-    return () => {};
-  }
+  });
+  if (!unregister) return () => {};
   installed = true;
+  let active = true;
+
   return () => {
+    if (!active) return;
+    active = false;
     resetNativeToolCardPump();
-    try {
-      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
-    } catch {
-      // Another extension may own the current hook; never overwrite it.
-    }
+    unregister();
     installed = false;
     skinned = new WeakSet<object>();
   };

@@ -1,10 +1,11 @@
 // Display-only bridge for provider-tagged assistant commentary that precedes tool calls,
 // and transcript thought blocks for standalone assistant messages.
 
-import { getPluginConfig, isHideThinkingBlock } from "./config.ts";
-import { detailProfile, thoughtRowLimit } from "./density.ts";
+import { getPluginConfig, isHideThinkingBlock } from "../core/config.ts";
+import { detailProfile, thoughtRowLimit } from "../core/density.ts";
 import { formatSettledThought } from "./scrolling-text.ts";
-import { formatRowLine } from "./theme.ts";
+import { formatRowLine } from "../core/theme.ts";
+import { getContainerInterceptor } from "../core/container-interceptor.ts";
 
 export const ASSISTANT_TEXT_PHASE = {
   commentary: "commentary",
@@ -16,12 +17,6 @@ export type AssistantTextPhase = (typeof ASSISTANT_TEXT_PHASE)[keyof typeof ASSI
 export interface AssistantCommentarySkinDeps {
   enabled: () => boolean;
   active?: () => boolean;
-}
-
-interface ContainerConstructor {
-  prototype?: {
-    addChild?: unknown;
-  };
 }
 
 interface AssistantMessageContent {
@@ -280,20 +275,16 @@ export function skinAssistantMessageComponent(target: object, deps: AssistantCom
  * Hooks Container.addChild because AssistantMessageComponent invokes it inside
  * its constructor before the initial persisted message reaches updateContent.
  */
-export function installAssistantCommentarySkin(
-  Container: ContainerConstructor,
-  deps: AssistantCommentarySkinDeps,
-): () => void {
+export function installAssistantCommentarySkin(Container: unknown, deps: AssistantCommentarySkinDeps): () => void {
   if (installed) return () => {};
-  const prototype = Container?.prototype;
-  const nativeAddChild = prototype?.addChild;
-  if (!prototype || typeof nativeAddChild !== "function") return () => {};
+  const interceptor = getContainerInterceptor(Container);
+  if (!interceptor.isAvailable) return () => {};
 
-  const patchedAddChild = function (this: unknown, ...children: unknown[]): unknown {
-    if (deps.active?.() === false) return nativeAddChild.apply(this, children);
+  const unregister = interceptor.registerHook((container, children) => {
+    if (deps.active?.() === false) return;
     try {
-      if (isAssistantMessageComponentLike(this)) {
-        skinAssistantMessageComponent(this, deps);
+      if (isAssistantMessageComponentLike(container)) {
+        skinAssistantMessageComponent(container, deps);
       }
     } catch {
       // Constructor-time probing is display-only and fail-open.
@@ -307,24 +298,15 @@ export function installAssistantCommentarySkin(
         // One unfamiliar child must never affect native insertion.
       }
     }
-    return nativeAddChild.apply(this, children);
-  };
-
-  try {
-    prototype.addChild = patchedAddChild;
-  } catch {
-    return () => {};
-  }
-
+  });
+  if (!unregister) return () => {};
   installed = true;
+  let active = true;
+
   return () => {
-    try {
-      if (prototype.addChild === patchedAddChild) {
-        prototype.addChild = nativeAddChild;
-      }
-    } catch {
-      // Another extension generation may own the current hook.
-    }
+    if (!active) return;
+    active = false;
+    unregister();
     installed = false;
     skinned = new WeakSet<object>();
     phaseCache.clear();

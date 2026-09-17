@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { DEFAULT_CONFIG, setPluginConfigForTest } from "./config.ts";
+import { DEFAULT_CONFIG, setPluginConfigForTest } from "./core/config.ts";
 
 class MockContainer {
   children: Array<{ render?: (width: number) => readonly string[] }> = [];
@@ -24,7 +24,7 @@ const {
   resetWriteCardFadesForTest,
   WRITE_CASCADE_STAGGER_MS,
   WRITE_LINE_FADE_DURATION_MS,
-} = await import("./write-card.ts");
+} = await import("./cards/write-card.ts");
 
 function stripAnsi(text: string): string {
   return Bun.stripANSI(text);

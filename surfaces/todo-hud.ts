@@ -3,6 +3,8 @@
 // (only compact-terminal collapse); identity is the HUD Text banner
 // (`TODO` + tree) and ToolExecutionComponent's updateResult/seal pair.
 
+import { getContainerInterceptor } from "../core/container-interceptor.ts";
+
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function ctorNameOf(value: unknown): string {
@@ -141,25 +143,19 @@ function skinTodoCard(child: object, deps: TodoChromeDeps): void {
   skinned.add(child);
 }
 
-export function installTodoChrome(
-  ContainerCtor: { prototype: { addChild: (...args: unknown[]) => unknown } },
-  deps: TodoChromeDeps,
-): () => void {
-  depsRef = deps;
+export function installTodoChrome(ContainerCtor: unknown, deps: TodoChromeDeps): () => void {
   if (installed) return () => {};
-  const prototype = ContainerCtor?.prototype;
-  const addChild = prototype?.addChild;
-  if (typeof addChild !== "function") return () => {};
-  const patchedAddChild = function (this: unknown, ...args: unknown[]): unknown {
-    if (deps.active?.() === false) return addChild.apply(this, args);
+  const interceptor = getContainerInterceptor(ContainerCtor);
+  if (!interceptor.isAvailable) return () => {};
+  const unregister = interceptor.registerHook((container, args) => {
+    if (deps.active?.() === false) return;
     let hideHud = false;
     try {
       hideHud = deps.hideHud();
     } catch {
       hideHud = false;
     }
-    const dropHudChildren = hideHud && isTodoHudContainer(this);
-    const kept: unknown[] = [];
+    const dropHudChildren = hideHud && isTodoHudContainer(container);
     for (const arg of args) {
       try {
         if (arg && typeof arg === "object") {
@@ -171,7 +167,6 @@ export function installTodoChrome(
             }
             if (hideHud) {
               if (!skinned.has(arg)) skinEmpty(arg);
-              if (dropHudChildren) continue;
             }
           } else if (!skinned.has(arg) && isTodoCardHost(arg)) {
             skinTodoCard(arg, deps);
@@ -180,23 +175,18 @@ export function installTodoChrome(
       } catch {
         // One bad child must not break the container.
       }
-      kept.push(arg);
     }
-    return addChild.apply(this, dropHudChildren ? [] : kept.length === args.length ? args : kept);
-  };
-  try {
-    prototype.addChild = patchedAddChild;
-  } catch {
-    return () => {};
-  }
+    if (dropHudChildren) return { children: [] };
+  });
+  if (!unregister) return () => {};
+  depsRef = deps;
   installed = true;
+  let active = true;
   return () => {
+    if (!active) return;
+    active = false;
     depsRef = undefined;
-    try {
-      if (prototype.addChild === patchedAddChild) prototype.addChild = addChild;
-    } catch {
-      // Another extension may own the current hook; never overwrite it.
-    }
+    unregister();
     installed = false;
     skinned = new WeakSet<object>();
   };

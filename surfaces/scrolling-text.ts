@@ -1,7 +1,7 @@
 import { visibleWidth } from "@oh-my-pi/pi-tui";
-import { getPluginConfig } from "./config.ts";
-import { wrapToWidth } from "./text.ts";
-import { LINE_WIDTH_RATIO, TOOL_INDENT, paintAt } from "./theme.ts";
+import { getPluginConfig } from "../core/config.ts";
+import { wrapToWidth } from "../core/text.ts";
+import { LINE_WIDTH_RATIO, TOOL_INDENT, paintAt } from "../core/theme.ts";
 
 export interface TextScrollerOptions {
   /** Maximum number of visible lines (default: 3) */

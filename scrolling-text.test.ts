@@ -7,7 +7,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
 }));
 
-const { TextScroller, createTextScroller, defaultSlotOpacities, formatSettledThought } = await import("./scrolling-text.ts");
+const { TextScroller, createTextScroller, defaultSlotOpacities, formatSettledThought } = await import("./surfaces/scrolling-text.ts");
 
 describe("defaultSlotOpacities", () => {
   test("returns empty array for 0 lines", () => {

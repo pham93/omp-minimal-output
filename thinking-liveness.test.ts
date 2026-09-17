@@ -34,7 +34,7 @@ mock.module("@oh-my-pi/pi-coding-agent/modes/components/custom-editor", () => ({
 mock.module("@oh-my-pi/pi-coding-agent/modes/theme/theme", () => ({
   theme: { fg: () => "" },
 }));
-const { formatRowLine, advanceSpinFrame, setSpinFrame, settleAt } = await import("./theme.ts");
+const { formatRowLine, advanceSpinFrame, setSpinFrame, settleAt } = await import("./core/theme.ts");
 const indexModule = await import("./index.ts");
 const registerExtension = indexModule.default;
 
@@ -235,8 +235,6 @@ describe("thought lines during subsequent thinking", () => {
     // In the PREVIOUS group in the transcript:
     setSpinFrame(1);
     const linesDuringNewThinking = groupRender!(80).map((l: string) => Bun.stripANSI(l));
-
-    // 1. The previous group header MUST NOT animate or become live! It must stay ●
     expect(linesDuringNewThinking[0]).toContain("●");
     expect(linesDuringNewThinking[0]).not.toMatch(/[◈◉◎○]/);
 
@@ -585,13 +583,13 @@ describe("transcript settled thought block rendering", () => {
   });
 
   test("hideThinkingBlock suppresses thought from transcript group", async () => {
-    const { applyOverlay, DEFAULT_CONFIG } = await import("./config.ts");
+    const { applyOverlay, DEFAULT_CONFIG } = await import("./core/config.ts");
     const cfg = applyOverlay(DEFAULT_CONFIG, { hideThinkingBlock: true });
     expect(cfg.hideThinkingBlock).toBe(true);
   });
 
   test("standalone assistant message with thinking renders thought block", async () => {
-    const { skinAssistantMessageComponent } = await import("./assistant-commentary-skin.ts");
+    const { skinAssistantMessageComponent } = await import("./surfaces/assistant-commentary-skin.ts");
 
     class FakeAssistantMessageComponent {
       transcriptBlockMode = "appendOnly" as const;
@@ -776,4 +774,55 @@ test("extension registers all commands and shortcuts on initial load", async () 
   expect(registeredCommands.has("demo-write")).toBe(true);
   expect(registeredCommands.has("minimal-status")).toBe(true);
   expect(registeredShortcuts.has("ctrl+alt+t")).toBe(true);
+});
+
+test("wrapped cards propagate adapter failures and request native fallback when disabled", async () => {
+  const { ToolWrapper } = await import("./core/tool-wrapper.ts");
+  const { GroupedToolManager } = await import("./cards/grouped-tool-card.ts");
+  const { ActivityTracker } = await import("./core/activity-tracker.ts");
+  const tools = new Map<string, WrappedToolDef>();
+  let enabled = true;
+  const pi = {
+    registerTool: (tool: WrappedToolDef) => tools.set(tool.name, tool),
+    sendMessage: () => {},
+  } as unknown as ExtensionAPI;
+  const groups = new GroupedToolManager({
+    rowIsLive: () => false,
+    activityLabel: () => "",
+    activityRunId: () => null,
+    activityStartedAt: () => 0,
+  });
+  const tracker = new ActivityTracker({ pi, owns: () => true, enabled: () => enabled });
+  const wrapper = new ToolWrapper(pi, {
+    owns: () => true,
+    enabled: () => enabled,
+    activityTracker: tracker,
+    groupedTools: groups,
+  });
+  wrapper.tryWrapTool("grep", { parameters: {} });
+  const tool = tools.get("grep")!;
+  const result = { content: [{ type: "text", text: "visible output" }] };
+  const render = () => tool.renderResult(result, { expanded: true }, null, { pattern: "needle" });
+  const nativeRender = groups.renderToolVisual;
+  const failure = new Error("forced adapter failure");
+  try {
+    groups.renderToolVisual = () => {
+      throw failure;
+    };
+    // Host catches this exact error to render its native transcript. Undefined hides it.
+    expect(render).toThrow(failure);
+    groups.renderToolVisual = nativeRender;
+    const card = render() as MockContainer;
+    expect(card.children[0]!.render!(80).map(Bun.stripANSI).join("\n")).toContain("visible output");
+    enabled = false;
+    expect(render).toThrow();
+    enabled = true;
+    expect((render() as MockContainer).children[0]!.render!(80).map(Bun.stripANSI).join("\n")).toContain(
+      "visible output",
+    );
+  } finally {
+    groups.renderToolVisual = nativeRender;
+    tracker.dispose();
+    groups.clear();
+  }
 });

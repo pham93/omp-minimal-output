@@ -1,9 +1,9 @@
 // Pure todo-header parse/paint for the sticky todos header. No host imports,
 // no I/O, no module state — all state lives in index.ts. Reuses only
 // formatRowLine (theme.ts) and truncatePlain (text.ts).
-import { currentIndicatorFrame, formatRowLine, paintAt, paintBold, LINE_WIDTH_RATIO } from "./theme.ts";
-import { capRenderedRows, detailedRowLimit } from "./density.ts";
-import { truncatePlain } from "./text.ts";
+import { currentIndicatorFrame, formatRowLine, paintAt, paintBold, LINE_WIDTH_RATIO } from "../core/theme.ts";
+import { capRenderedRows, detailedRowLimit } from "../core/density.ts";
+import { truncatePlain } from "../core/text.ts";
 
 export type TodoStatus = "done" | "active" | "open" | "blocked" | "dropped";
 
