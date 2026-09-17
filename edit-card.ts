@@ -64,8 +64,8 @@ export function languageForPath(path: string): string | undefined {
 }
 
 // ── edit pretty-diff card (grok-build row grammar, theme-derived only) ──
-// Gutter shows the new-side number (deleted rows show the old number);
-// -/+ rows carry a background band blended from their fg token. Unknown
+// Gutter shows the new-side number (deleted rows show the old number); added/removed rows are
+// distinguished by color band alone (no +/- marker). Unknown
 // theme tokens degrade to plain text via paintAt/themeTokenRgb. Everything
 // below is display-only: execute/description/parameters flow from `source`.
 export const DIFF_BG_BLEND = 0.22;
@@ -401,7 +401,7 @@ export function renderPrettyEditCard(
 
               const token = row.kind === "+" ? "toolDiffAdded" : "toolDiffRemoved";
               const padded = cell + " ".repeat(Math.max(0, bandWidth - visibleWidth(cell)));
-              lines.push(`${contentPrefix}${prettyDiffCell(theme, `${number} ${row.kind} ${padded}`, token, true)}`);
+              lines.push(`${contentPrefix}${prettyDiffCell(theme, `${number} │ ${padded}`, token, true)}`);
             }
             if (data.multi && !lastSection) lines.push(`${EDIT_FILE_INDENT}${paintAt(theme, "│", "dim", 0.7)}`);
           }
