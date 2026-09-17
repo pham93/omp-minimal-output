@@ -372,21 +372,90 @@ function findPlanRange(content: string): { start: number; end: number } | undefi
   return undefined;
 }
 
-function removeUsageTier(content: string): string {
+interface UsageWindowMatch {
+  kind: string;
+  start: number;
+  end: number;
+  usedPercent: number;
+}
+
+function filterUsageStatus(content: string): string {
   const plain = Bun.stripANSI(content);
-  const window = /(?:5h|1d|7d|mo)\s+\d+%/u.exec(plain);
-  if (!window || window.index === undefined) return content;
+  const windowRegex = /\b(5h|1d|7d|mo)\s+(\d+)%(?:\s*\([^)]*\))?/gu;
+  const matches: UsageWindowMatch[] = [];
 
-  let iconEnd = -1;
-  for (const icon of USAGE_ICON_VARIANTS) {
-    const index = plain.lastIndexOf(`${icon} `, window.index);
-    if (index >= 0) iconEnd = Math.max(iconEnd, index + icon.length);
+  for (const match of plain.matchAll(windowRegex)) {
+    if (match.index !== undefined && match[1] && match[2]) {
+      matches.push({
+        kind: match[1],
+        usedPercent: Number.parseInt(match[2], 10),
+        start: match.index,
+        end: match.index + match[0].length,
+      });
+    }
   }
-  if (iconEnd < 0) return content;
+  if (matches.length === 0) return content;
 
-  const between = plain.slice(iconEnd, window.index);
-  if (!between.replace(/[\s·\-|/]/gu, "")) return content;
-  return replacePlainRange(content, iconEnd, window.index, " ");
+  const groups: UsageWindowMatch[][] = [];
+  let currentGroup: UsageWindowMatch[] = [];
+
+  for (const m of matches) {
+    if (currentGroup.length === 0) {
+      currentGroup.push(m);
+    } else {
+      const prev = currentGroup[currentGroup.length - 1]!;
+      const gap = plain.slice(prev.end, m.start);
+      if (/^[\s·\-|/]+$/u.test(gap)) {
+        currentGroup.push(m);
+      } else {
+        groups.push(currentGroup);
+        currentGroup = [m];
+      }
+    }
+  }
+  if (currentGroup.length > 0) groups.push(currentGroup);
+
+  let result = content;
+
+  for (let i = groups.length - 1; i >= 0; i -= 1) {
+    const group = groups[i];
+    if (!group || group.length === 0) continue;
+
+    const first = group[0]!;
+    const last = group[group.length - 1]!;
+    const chosen = group.find((w) => w.kind === "5h") ?? group.find((w) => w.kind === "7d") ?? first;
+
+    let replaceStart = first.start;
+    let iconEnd = -1;
+    for (const icon of USAGE_ICON_VARIANTS) {
+      const idx = plain.lastIndexOf(icon, first.start);
+      if (idx >= 0) {
+        const afterIcon = idx + icon.length;
+        const between = plain.slice(afterIcon, first.start);
+        if (between.length <= 32 && /^[\s·\-|/\w]*$/u.test(between)) {
+          iconEnd = Math.max(iconEnd, afterIcon);
+        }
+      }
+    }
+
+    let prefix = "";
+    if (iconEnd >= 0) {
+      replaceStart = iconEnd;
+      prefix = " ";
+    }
+
+    const replaceEnd = last.end;
+    const rawReplaceStart = rawOffsetForPlainIndex(result, replaceStart);
+    const rawReplaceEnd = rawOffsetForPlainIndex(result, replaceEnd);
+    const rawChosenStart = rawOffsetForPlainIndex(result, chosen.start);
+    const rawChosenEnd = rawOffsetForPlainIndex(result, chosen.end);
+    const rawChosen = result.slice(rawChosenStart, rawChosenEnd);
+    const remainingPercent = Math.max(0, Math.min(100, 100 - chosen.usedPercent));
+    const rawAdjusted = rawChosen.replace(/(\d+)\s*%/u, `${remainingPercent}%`);
+    result = `${result.slice(0, rawReplaceStart)}${prefix}${rawAdjusted}${result.slice(rawReplaceEnd)}`;
+  }
+
+  return result;
 }
 function expandThinkingEffort(content: string): string {
   let result = content;
@@ -483,7 +552,7 @@ function workingPrefix(ctx: ComposerChromeContext): string {
 function decorateStatusContent(content: string, ctx: ComposerChromeContext, gaugeWidthReduction = 0): string {
   try {
     const icons = replaceNerdStatusIcons(replaceFolderIcon(content));
-    const usage = removeUsageTier(icons);
+    const usage = filterUsageStatus(icons);
     const effort = expandThinkingEffort(usage);
     const details = replaceGitDetails(effort);
     const model = stripDuplicateNativeModel(details);
@@ -762,9 +831,11 @@ export class MinimalPromptEditor extends CustomEditor {
   constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) {
     super(tui, theme, keybindings);
     this.#box = theme.symbols.boxRound;
+    syncComposerRefreshTimer(tui);
   }
 
   override render(width: number): string[] {
+    syncComposerRefreshTimer(this.tui);
     const safeWidth = Math.max(0, Math.trunc(width));
     try {
       if (!MINIMAL_COMPOSER_STYLE_IDS.has(this.getBorderStyle()) || safeWidth < EDITOR_FRAME_MIN_WIDTH) {
@@ -817,6 +888,56 @@ export class MinimalPromptEditor extends CustomEditor {
   }
 }
 
+let activeTui: TUI | undefined;
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let currentTimerIntervalMs = 0;
+
+export function getComposerRefreshIntervalMs(): number {
+  try {
+    const seconds = getPluginConfig().composerRefreshInterval;
+    if (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0) {
+      return Math.floor(seconds) * 1000;
+    }
+  } catch {
+    // Default fallback
+  }
+  return 60_000;
+}
+
+export function syncComposerRefreshTimer(tui?: TUI): void {
+  if (tui) activeTui = tui;
+  if (!activeTui) return;
+
+  const intervalMs = getComposerRefreshIntervalMs();
+  if (refreshTimer && currentTimerIntervalMs === intervalMs) return;
+
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  }
+
+  currentTimerIntervalMs = intervalMs;
+  refreshTimer = setInterval(() => {
+    try {
+      if (typeof activeTui?.requestRender === "function") {
+        activeTui.requestRender();
+      }
+    } catch {
+      // Best-effort render
+    }
+  }, intervalMs);
+  refreshTimer.unref?.();
+}
+
+export function stopComposerRefreshTimer(): void {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  }
+  currentTimerIntervalMs = 0;
+  activeTui = undefined;
+}
+
 export function registerMinimalComposerShapes(pi: ExtensionAPI): void {
   for (const shape of COMPOSER_SHAPES) pi.registerComposerShape(shape);
 }
@@ -843,6 +964,7 @@ export function installMinimalPromptEditor(
   return () => {
     if (!active) return;
     active = false;
+    stopComposerRefreshTimer();
     contextUsageProvider = NO_CONTEXT_USAGE;
     planStatusProvider = NO_PLAN_STATUS;
     workingStatusProvider = NO_WORKING_STATUS;

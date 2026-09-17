@@ -70,6 +70,7 @@ export interface PluginConfig extends WrappedToolSettings {
   editShowTabs: boolean;
   editShowSpaces: boolean;
   hideThinkingBlock?: boolean;
+  composerRefreshInterval: number;
 }
 
 export const DEFAULT_CONFIG: PluginConfig = {
@@ -100,6 +101,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   todoReminderOneLine: true,
   editShowTabs: true,
   editShowSpaces: false,
+  composerRefreshInterval: 60,
 };
 
 const BOOLEAN_KEYS: Record<string, true> = {
@@ -223,6 +225,13 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         }
         continue;
       }
+      if (key === "composerRefreshInterval") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.composerRefreshInterval = Math.min(3600, Math.max(1, Math.floor(v)));
+        }
+        continue;
+      }
       if (BOOLEAN_KEYS[key] === true) {
         const v = src[key];
         if (typeof v === "boolean") {
@@ -267,6 +276,9 @@ export function reloadPluginConfig(): PluginConfig {
   return loadPluginConfig();
 }
 
+export function setPluginConfigForTest(cfg: PluginConfig | null): void {
+  cache = cfg;
+}
 export function isWrappedTool(name: string): name is WrappedTool {
   return Object.prototype.hasOwnProperty.call(WRAPPED_TOOL_REGISTRY, name);
 }

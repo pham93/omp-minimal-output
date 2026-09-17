@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-
+import { DEFAULT_CONFIG, setPluginConfigForTest } from "./config.ts";
 /*
  * Composer shape tests. composer-shapes.ts has no local dependencies; its
  * three external imports are mocked here so the real module (including the
@@ -19,8 +19,8 @@ import { describe, expect, mock, test } from "bun:test";
 // import would hoist above the mocks and defeat them.
 
 // Simulated user theme: borderColor renders green (the reported bug was a
-// "grayscale" composer still showing green), accent is cyan.
 const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 const MAGENTA = "\x1b[35m";
 const RESET = "\x1b[39m";
@@ -334,11 +334,13 @@ function expectChromeLayout(line: string, width: number, expectedInner: string):
 }
 
 const resetProviders = (): void => {
+  setPluginConfigForTest(null);
   composer.updateMinimalPromptEditorProviders(
     () => undefined,
     () => undefined,
     () => undefined,
   );
+  composer.stopComposerRefreshTimer?.();
 };
 
 describe("composer shape registration", () => {
@@ -803,5 +805,144 @@ describe("thinking effort expansion", () => {
     );
     const rows = editor.render(40);
     expect(rows.some((row) => stripAnsi(row).includes("xhigh"))).toBe(true);
+  });
+});
+
+describe("composer usage filtering and auto-refresh", () => {
+  test("retains only 5h with reset time when both 5h and 7d are present and inverts to remaining %", () => {
+    resetProviders();
+    const status = "󰚩 GPT · \uf017 5h 0% (4h 58m) · 7d 7% (5d 16h) ⌂ myproj ⎇ main";
+    const bottom = bottomDock().renderBottom(makeChromeContext(status)) ?? "";
+    const plain = stripAnsi(bottom);
+    expect(plain).toContain("5h 100% (4h 58m)");
+    expect(plain).not.toContain("7d");
+    expect(plain).not.toContain("5d 16h");
+  });
+
+  test("retains 7d with reset time when 5h is not present and inverts to remaining %", () => {
+    resetProviders();
+    const status = "󰚩 GPT · \uf017 7d 7% (5d 16h) ⌂ myproj ⎇ main";
+    const bottom = bottomDock().renderBottom(makeChromeContext(status)) ?? "";
+    const plain = stripAnsi(bottom);
+    expect(plain).toContain("7d 93% (5d 16h)");
+    expect(plain).not.toContain("5h");
+  });
+
+  test("retains 7d when 1d and 7d are present without 5h and inverts to remaining %", () => {
+    resetProviders();
+    const status = "󰚩 GPT · \uf017 1d 10% (12h) · 7d 7% (5d 16h) ⌂ myproj ⎇ main";
+    const bottom = bottomDock().renderBottom(makeChromeContext(status)) ?? "";
+    const plain = stripAnsi(bottom);
+    expect(plain).toContain("7d 93% (5d 16h)");
+    expect(plain).not.toContain("1d");
+    expect(plain).not.toContain("5h");
+  });
+
+  test("strips tier text between icon and chosen window and displays remaining %", () => {
+    resetProviders();
+    const status = "󰚩 GPT · \uf017 Plus 5h 0% (4h 58m) · 7d 7% (5d 16h) ⌂ myproj ⎇ main";
+    const bottom = bottomDock().renderBottom(makeChromeContext(status)) ?? "";
+    const plain = stripAnsi(bottom);
+    expect(plain).toContain("\uf017 5h 100% (4h 58m)");
+    expect(plain).not.toContain("Plus");
+    expect(plain).not.toContain("7d");
+  });
+
+  test("preserves ANSI color sequences on the selected usage window with remaining %", () => {
+    resetProviders();
+    const status = `󰚩 GPT · \uf017 ${GREEN}5h 0%${RESET} ${MAGENTA}(4h 58m)${RESET} · ${YELLOW}7d 7%${RESET} ⌂ myproj ⎇ main`;
+    const bottom = bottomDock().renderBottom(makeChromeContext(status)) ?? "";
+    expect(bottom).toContain(`${GREEN}5h 100%${RESET}`);
+    expect(bottom).toContain(`${MAGENTA}(4h 58m)${RESET}`);
+    expect(stripAnsi(bottom)).not.toContain("7d");
+  });
+
+  test("inverts 0% to 100% when percentage is wrapped in OMP ANSI color codes", () => {
+    resetProviders();
+    // OMP wraps the percentage in theme ANSI codes: 5h \x1b[32m0%\x1b[39m (4h 58m)
+    const status = `󰚩 GPT · \uf017 5h \x1b[32m0%\x1b[39m \x1b[2m(4h 58m)\x1b[22m · 7d \x1b[33m7%\x1b[39m ⌂ myproj ⎇ main`;
+    const bottom = bottomDock().renderBottom(makeChromeContext(status)) ?? "";
+    const plain = stripAnsi(bottom);
+    expect(plain).toContain("5h 100% (4h 58m)");
+    expect(plain).not.toMatch(/\b0%/);
+    expect(plain).not.toContain("7d");
+  });
+  test("handles alternate icon variants such as unicode timer and ascii time:", () => {
+    resetProviders();
+    const statusUnicode = "Opus · ⏱ 5h 20% (1h 10m) · 7d 50% (2d) ⌂ myproj ⎇ main";
+    const bottomUnicode = stripAnsi(bottomDock().renderBottom(makeChromeContext(statusUnicode)) ?? "");
+    expect(bottomUnicode).toContain("⏱ 5h 80% (1h 10m)");
+    expect(bottomUnicode).not.toContain("7d");
+
+    const statusAscii = "Opus · time: 7d 40% (3d) ⌂ myproj ⎇ main";
+    const bottomAscii = stripAnsi(bottomDock().renderBottom(makeChromeContext(statusAscii)) ?? "");
+    expect(bottomAscii).toContain("time: 7d 60% (3d)");
+  });
+
+  test("getComposerRefreshIntervalMs returns default 60s when unconfigured", () => {
+    resetProviders();
+    expect(composer.getComposerRefreshIntervalMs()).toBe(60_000);
+  });
+
+  test("getComposerRefreshIntervalMs uses plugin config value for refreshing", () => {
+    try {
+      resetProviders();
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 15 });
+      expect(composer.getComposerRefreshIntervalMs()).toBe(15_000);
+
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 5 });
+      expect(composer.getComposerRefreshIntervalMs()).toBe(5_000);
+
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 120 });
+      expect(composer.getComposerRefreshIntervalMs()).toBe(120_000);
+    } finally {
+      resetProviders();
+    }
+  });
+
+  test("syncComposerRefreshTimer schedules render requests using plugin config value", () => {
+    try {
+      resetProviders();
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 10 });
+      let renders = 0;
+      const mockTui = {
+        requestRender: () => {
+          renders += 1;
+        },
+      };
+      composer.syncComposerRefreshTimer(mockTui as any);
+      expect(typeof composer.stopComposerRefreshTimer).toBe("function");
+      composer.stopComposerRefreshTimer();
+    } finally {
+      resetProviders();
+    }
+  });
+
+  test("MinimalPromptEditor syncs refresh timer using plugin config interval", () => {
+    try {
+      resetProviders();
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 25 });
+      let renders = 0;
+      const mockTui = {
+        requestRender: () => {
+          renders += 1;
+        },
+      };
+      const inner = (innerWidth: number): string[] => [
+        `╭${"─".repeat(innerWidth - 2)}╮`,
+        `hello${" ".repeat(innerWidth - 5)}`,
+        `╰ ${"─".repeat(innerWidth - 2)}╯`,
+      ];
+      const editor = new composer.MinimalPromptEditor(
+        mockTui as any,
+        makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.bottomDock, inner(36)),
+        {} as any,
+      );
+      editor.render(40);
+      expect(composer.getComposerRefreshIntervalMs()).toBe(25_000);
+      composer.stopComposerRefreshTimer();
+    } finally {
+      resetProviders();
+    }
   });
 });
