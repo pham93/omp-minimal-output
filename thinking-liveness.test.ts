@@ -749,3 +749,31 @@ test("headless bindings never acquire or tear down the interactive UI", async ()
     await parent.emit("session_shutdown");
   }
 });
+
+test("extension registers all commands and shortcuts on initial load", async () => {
+  const { default: registerExtension } = await import("./index.ts");
+  const registeredCommands = new Map<string, unknown>();
+  const registeredShortcuts = new Map<string, unknown>();
+
+  const mockPi = {
+    on: () => {},
+    registerTool: () => {},
+    registerCommand: (name: string, options: unknown) => {
+      registeredCommands.set(name, options);
+    },
+    registerShortcut: (shortcut: string, options: unknown) => {
+      registeredShortcuts.set(shortcut, options);
+    },
+    registerMessageRenderer: () => {},
+    registerComposerShape: () => {},
+  };
+  registerExtension(mockPi as unknown as ExtensionAPI);
+
+  expect(registeredCommands.has("minimal-on")).toBe(true);
+  expect(registeredCommands.has("minimal-off")).toBe(true);
+  expect(registeredCommands.has("todos-show")).toBe(true);
+  expect(registeredCommands.has("todos")).toBe(true);
+  expect(registeredCommands.has("demo-write")).toBe(true);
+  expect(registeredCommands.has("minimal-status")).toBe(true);
+  expect(registeredShortcuts.has("ctrl+alt+t")).toBe(true);
+});

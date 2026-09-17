@@ -45,7 +45,7 @@ import { type MarkFlush, markFlush } from "./loaders.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
 import { renderWebSearchCard } from "./web-search-card.ts";
-import { renderWriteCard } from "./write-card.ts";
+import { renderWriteCard, writeCardsNeedPump } from "./write-card.ts";
 import { cardDetailLine, cardIsPartial, resultDetails, stashedOrResultText } from "./card-primitives.ts";
 import {
   capRenderedRows,
@@ -1291,17 +1291,119 @@ function skillPromptRenderer(message: unknown, options: unknown, theme: unknown)
   const oneLiner = userInvoked && args ? `◆ Skill ${name} ${args}` : `◆ Skill ${name}`;
   return paintRow(theme, { body: oneLiner });
 }
+interface CommandDelegates {
+  minimalOn: (ctx: ExtensionContext) => Promise<void> | void;
+  minimalOff: (ctx: ExtensionContext) => Promise<void> | void;
+  todosShow: (ctx: ExtensionContext) => Promise<void> | void;
+  todos: (ctx: ExtensionContext) => Promise<void> | void;
+  demoWrite: (ctx: ExtensionContext) => Promise<void> | void;
+  minimalStatus: (ctx: ExtensionContext) => Promise<void> | void;
+  toggleTodosShortcut: (ctx: ExtensionContext) => Promise<void> | void;
+}
+
+let commandDelegates: CommandDelegates | undefined;
 
 export default function (pi: ExtensionAPI) {
   registerMinimalComposerShapes(pi);
-  // Prepared factories are rebound in-process for headless subagents. Do not
-  // touch shared state, prototype patches, or ownership until this bind has UI.
+
+  if (typeof (pi as { registerAssistantThinkingRenderer?: unknown }).registerAssistantThinkingRenderer === "function") {
+    try {
+      (
+        pi as {
+          registerAssistantThinkingRenderer: (fn: (...a: unknown[]) => unknown) => void;
+        }
+      ).registerAssistantThinkingRenderer(() => undefined);
+    } catch {
+      // Older hosts without this hook keep hideThinkingBlock + the widget path.
+    }
+  }
+
   let activated = false;
-  pi.on("session_start", async (_event, ctx) => {
+  let startSession: ((ctx: ExtensionContext) => Promise<void>) | undefined;
+
+  const ensureActivated = async (ctx: ExtensionContext): Promise<void> => {
     if (!ctx.hasUI || activated) return;
     activated = true;
-    const startSession = activateInteractiveRuntime(pi);
+    startSession ??= activateInteractiveRuntime(pi);
     await startSession(ctx);
+  };
+
+  pi.registerCommand("minimal-on", {
+    description: "Enable grok-build-style minimal output",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.minimalOn(ctx);
+    },
+  });
+
+  pi.registerCommand("minimal-off", {
+    description: "Disable grok-build-style minimal output",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.minimalOff(ctx);
+    },
+  });
+
+  pi.registerCommand("todos-show", {
+    description: "Show the current session todo card",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.todosShow(ctx);
+    },
+  });
+
+  pi.registerCommand("todos", {
+    description: "Toggle todos widget expand/collapse",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.todos(ctx);
+    },
+  });
+
+  pi.registerCommand("demo-write", {
+    description: "Live interactive demonstration of Write card streaming",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.demoWrite(ctx);
+    },
+  });
+
+  pi.registerCommand("minimal-status", {
+    description: "Show minimal-output plugin state",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.minimalStatus(ctx);
+    },
+  });
+
+  pi.registerShortcut("ctrl+alt+t", {
+    description: "Toggle todos widget expand/collapse",
+    handler: async (ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.toggleTodosShortcut(ctx);
+    },
+  });
+
+  pi.on("session_start", async (_event, ctx) => {
+    await ensureActivated(ctx);
+  });
+
+  // Mid-session reload hooks: if the module is re-evaluated mid-session after
+  // file changes, activate on the very next session event without requiring OMP restart.
+  pi.on("before_agent_start", async (_event, ctx) => {
+    await ensureActivated(ctx);
+  });
+  pi.on("turn_start", async (_event, ctx) => {
+    await ensureActivated(ctx);
+  });
+  pi.on("tool_execution_start", async (_event, ctx) => {
+    await ensureActivated(ctx);
+  });
+  pi.on("message_update", async (_event, ctx) => {
+    await ensureActivated(ctx);
+  });
+  pi.on("input", async (_event, ctx) => {
+    await ensureActivated(ctx);
   });
 }
 
@@ -1734,6 +1836,7 @@ function activateInteractiveRuntime(pi: ExtensionAPI): (ctx: ExtensionContext) =
       nativeToolCardsNeedPump() ||
       alertSkinActive() ||
       anySettling() ||
+      writeCardsNeedPump() ||
       todoNeedsPump(todoHeaderState, todoCompletingAt, agentRunning) ||
       spinTimer === undefined
     )
@@ -2007,6 +2110,9 @@ function activateInteractiveRuntime(pi: ExtensionAPI): (ctx: ExtensionContext) =
       for (const value of liveRuns.values()) earliest = Math.min(earliest, value.startedAt);
       spinStartedAt = earliest;
     }
+    requestRepaint();
+    if (writeCardsNeedPump()) ensureSpinTimer(ctx);
+    stopSpinTimerIfIdle(ctx);
   });
 
   pi.on("message_update", async (event, ctx) => {
@@ -2082,20 +2188,15 @@ function activateInteractiveRuntime(pi: ExtensionAPI): (ctx: ExtensionContext) =
     syncTodoHeaderFromSession(ctx);
   });
 
-  pi.registerCommand("minimal-on", {
-    description: "Enable grok-build-style minimal output",
-    handler: async (_args, ctx) => {
+  commandDelegates = {
+    minimalOn: (_ctx) => {
       if (!runtimeOwner.owns()) return;
       enabled = true;
       clearActivityRun();
       installTodosWidget();
-      ctx.ui.notify("Minimal output enabled", "info");
+      _ctx.ui.notify("Minimal output enabled", "info");
     },
-  });
-
-  pi.registerCommand("minimal-off", {
-    description: "Disable grok-build-style minimal output",
-    handler: async (_args, ctx) => {
+    minimalOff: (_ctx) => {
       if (!runtimeOwner.owns()) return;
       liveRuns.clear();
       agentRunning = false;
@@ -2106,70 +2207,91 @@ function activateInteractiveRuntime(pi: ExtensionAPI): (ctx: ExtensionContext) =
       clearActivityRun();
       setTodosWidget(false);
       resetThought();
-      stopSpinTimerIfIdle(ctx);
-      setWorking(ctx, undefined);
-      ctx.ui.notify("Minimal output disabled", "warning");
+      stopSpinTimerIfIdle(_ctx);
+      setWorking(_ctx, undefined);
+      _ctx.ui.notify("Minimal output disabled", "warning");
     },
-  });
-
-  pi.on("session_shutdown", async () => {
-    if (!runtimeOwner.owns()) return;
-    runtimeOwner.release();
-  });
-  pi.registerCommand("todos-show", {
-    description: "Show the current session todo card",
-    handler: async (_args, ctx) => {
+    todosShow: (_ctx) => {
       if (!runtimeOwner.owns()) return;
       todoSessionVisible = true;
-      syncTodoHeaderFromSession(ctx);
+      syncTodoHeaderFromSession(_ctx);
       installTodosWidget();
       const hasTodos = !!todoHeaderState && todoHeaderState.items.length > 0;
-      ctx.ui.notify(
+      _ctx.ui.notify(
         todosWidgetOn ? "Todos shown" : hasTodos ? "Todos header is disabled" : "No todos in this session",
         "info",
       );
     },
-  });
-
-  pi.registerCommand("todos", {
-    description: "Toggle todos widget expand/collapse",
-    handler: async (_args, ctx) => {
+    todos: (_ctx) => {
       if (!runtimeOwner.owns()) return;
       todosCollapsed = !todosCollapsed;
       refreshTodosWidget();
-      ctx.ui.notify(todosCollapsed ? "Todos collapsed" : "Todos expanded", "info");
+      _ctx.ui.notify(todosCollapsed ? "Todos collapsed" : "Todos expanded", "info");
     },
-  });
+    demoWrite: async (_ctx) => {
+      if (!runtimeOwner.owns() || !_ctx.hasUI) return;
+      const demoLines = [
+        'import { Database } from "bun:sqlite";',
+        'import * as fs from "node:fs/promises";',
+        'import { resolve } from "node:path";',
+        "",
+        "export interface ServerConfig {",
+        "  port: number;",
+        "  host: string;",
+        "  ssl: boolean;",
+        "  workers: number;",
+        "}",
+        "",
+        "export class MicroserviceServer {",
+        "  private isRunning = false;",
+        "  private connections = 0;",
+        "",
+        "  constructor(private readonly config: ServerConfig) {}",
+        "",
+        "  public async start(): Promise<void> {",
+        "    this.isRunning = true;",
+        "    console.log(`Server starting on port ${this.config.port}...`);",
+        "  }",
+        "",
+        "  public async stop(): Promise<void> {",
+        "    this.isRunning = false;",
+        "    console.log('Server stopped gracefully.');",
+        "  }",
+        "",
+        "  public getStats(): { connections: number; active: boolean } {",
+        "    return { connections: this.connections, active: this.isRunning };",
+        "  }",
+        "}",
+        "",
+        "export default new MicroserviceServer({ port: 8080, host: '0.0.0.0', ssl: false, workers: 4 });",
+      ];
 
-  pi.registerShortcut("ctrl+alt+t", {
-    description: "Toggle todos widget expand/collapse",
-    handler: async () => {
-      if (!runtimeOwner.owns()) return;
-      todosCollapsed = !todosCollapsed;
-      refreshTodosWidget();
+      _ctx.ui.notify("Streaming Write card demo starting...", "info");
+      for (let count = 1; count <= demoLines.length; count += 1) {
+        const partialContent = demoLines.slice(0, count).join("\n");
+        const isLast = count === demoLines.length;
+        _ctx.ui.setWidget(
+          "minimal-write-demo",
+          (_tui: unknown, theme: unknown) =>
+            renderWriteCard(
+              theme,
+              { path: "src/server.ts", content: partialContent },
+              isLast ? "ok" : undefined,
+              { isPartial: !isLast },
+              "demo:write:stream",
+            ),
+          { placement: "above-editor" },
+        );
+        if (typeof _ctx.ui.requestRender === "function") _ctx.ui.requestRender();
+        await new Promise((r) => setTimeout(r, 80));
+      }
+
+      await new Promise((r) => setTimeout(r, 2000));
+      _ctx.ui.setWidget("minimal-write-demo", undefined);
+      if (typeof _ctx.ui.requestRender === "function") _ctx.ui.requestRender();
+      _ctx.ui.notify("Write streaming demo finished", "info");
     },
-  });
-
-  if (typeof (pi as { registerAssistantThinkingRenderer?: unknown }).registerAssistantThinkingRenderer === "function") {
-    try {
-      (
-        pi as {
-          registerAssistantThinkingRenderer: (fn: (...a: unknown[]) => unknown) => void;
-        }
-      ).registerAssistantThinkingRenderer(() => {
-        // Host addChild()s the return value and later calls .render().
-        // `{ component, mode: "replace" }` is not a Component, so Ctrl+T
-        // (unhide thinking) crashed with "t[i].render is not a function".
-        return undefined;
-      });
-    } catch {
-      // Older hosts without this hook keep hideThinkingBlock + the widget path.
-    }
-  }
-
-  pi.registerCommand("minimal-status", {
-    description: "Show minimal-output plugin state",
-    handler: async (_args, ctx) => {
+    minimalStatus: (_ctx) => {
       if (!runtimeOwner.owns()) return;
       const cfg = getPluginConfig();
       const native: string[] = [];
@@ -2183,11 +2305,21 @@ function activateInteractiveRuntime(pi: ExtensionAPI): (ctx: ExtensionContext) =
       if (cfg.nativeWebSearch) native.push("web_search");
       if (cfg.nativeTask) native.push("task");
       if (cfg.nativeHub) native.push("hub");
-      ctx.ui.notify(
+      _ctx.ui.notify(
         `Minimal output: ${enabled ? "on" : "off"} (collapsed rows, shimmer disabled) opacity=${cfg.opacity} indicator=${cfg.indicator} anim=${cfg.indicatorAnimation ? "on" : "off"} native=[${native.join(",")}] searchMax=${cfg.webSearchMaxResults} taskMax=${cfg.taskMaxAgents} hubMax=${cfg.hubMaxItems} tabs=${cfg.editShowTabs ? "on" : "off"} spaces=${cfg.editShowSpaces ? "on" : "off"} reminder=${cfg.todoReminderOneLine !== false ? "on" : "off"}`,
         "info",
       );
     },
+    toggleTodosShortcut: (_ctx) => {
+      if (!runtimeOwner.owns()) return;
+      todosCollapsed = !todosCollapsed;
+      refreshTodosWidget();
+    },
+  };
+
+  pi.on("session_shutdown", async () => {
+    if (!runtimeOwner.owns()) return;
+    runtimeOwner.release();
   });
   return startSession;
 }
