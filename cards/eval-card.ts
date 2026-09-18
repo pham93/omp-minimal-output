@@ -10,6 +10,7 @@
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import {
   cardLifecycle,
+  colorizeConsoleLine,
   minimalCardHeaderLine,
   parentCardHeaderLines,
   resolveParentCardLabel,
@@ -208,7 +209,7 @@ export function renderEvalCard(
                 lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${more} earlier lines)`, "dim", op)}`);
               }
               for (const line of output) {
-                const cellText = dimAnsi(theme, line, op);
+                const cellText = dimAnsi(theme, colorizeConsoleLine(theme, line), op);
                 lines.push(
                   stripSgr(line).trim()
                     ? `${TOOL_INDENT}${paintAt(theme, truncatePlain(cellText, w), "toolOutput", op)}`

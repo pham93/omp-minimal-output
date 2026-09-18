@@ -4,7 +4,7 @@ Grok-build-style minimal console output for omp. Collapsed rows use theme-derive
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
-Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools retain a settled `●` indicator. Trailing blank output rows are removed; interior blanks and source indentation are preserved. Each execution owns its output allowance; parent/tool headers and omission hints do not consume content lines or hide later tool headers.
+Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools retain a settled `●` indicator. Trailing blank output rows are removed; interior blanks and source indentation are preserved. Each execution owns its output allowance; parent/tool headers and omission hints do not consume content lines or hide later tool headers. Piped bash and eval output without TTY colors (`git diff`, `bun test`) is semantically colored: additions and passes in success, deletions and failures in error, hunk headers in accent. Existing ANSI from a PTY or `--color=always` passes through.
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 

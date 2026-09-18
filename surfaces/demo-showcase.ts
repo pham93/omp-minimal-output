@@ -84,15 +84,17 @@ function renderGroupedDemo(theme: unknown): Container {
 
   groups.renderToolVisual(
     theme,
-    "demo:bash",
+    "bash:demo",
     {
       body: "$ bun test",
       live: false,
       error: false,
       right: "(0.2s)",
       details: [
-        "\x1b[32m✔\x1b[0m 102 pass   \x1b[38;5;244m(0.2s)\x1b[0m",
-        "\x1b[36mℹ\x1b[0m 0 fail",
+        "118 pass",
+        '@@ -128,7 +128,7 @@ describe("runPluginDemo", () => {',
+        "-    const { ctx, widgets } = createMockCtx();",
+        "+    const { ctx, widgets, notifications } = createMockCtx();",
       ],
     },
     frozen,
@@ -121,10 +123,7 @@ function renderGroupedDemo(theme: unknown): Container {
       right: "(8ms)",
       details: formatSearchDetails(
         theme,
-        [
-          "src/config.ts: 1 hit (first 1 shown)",
-          "src/config.ts:14:export const DEFAULT_PORT = 3000;",
-        ],
+        ["src/config.ts: 1 hit (first 1 shown)", "src/config.ts:14:export const DEFAULT_PORT = 3000;"],
         "DEFAULT_PORT",
       ),
     },
@@ -665,4 +664,3 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
   ctx.ui.notify("Minimal output demo tour completed! (Run /demo <target> to inspect specific cards)", "info");
   return;
 }
-

@@ -53,7 +53,6 @@ export interface CardItemLimit<T> {
   hidden: number;
 }
 
-
 export function stashedOrResultText(result: unknown): string {
   return stashedResultText(result) || toolResultText(result);
 }
@@ -204,6 +203,103 @@ export function cardDetailLine(
     return `${prefixPainted}${dimmed}\x1b[0m`;
   }
   return `${prefixPainted}${paintAt(theme, truncated, error ? "error" : "dim", cfg.opacity)}`;
+}
+
+const HAS_SGR_RE = /\x1b\[[0-9;]*m/;
+const DIFF_ADD_RE = /^\s*\+[^+]/;
+const DIFF_DEL_RE = /^\s*-[^-]/;
+const DIFF_HUNK_RE = /^\s*@@ -\d/;
+const DIFF_STAT_RE = /^(.*?\|\s+\d+\s+)([+-]+)(\s*)$/;
+const TEST_PASS_RE = /\d+\s+pass(?:ed)?/gi;
+const TEST_FAIL_RE = /[1-9]\d*\s+fail(?:ed)?/gi;
+const INSERTIONS_RE = /[1-9]\d*\s+insertions?\(\+\)/gi;
+const DELETIONS_RE = /[1-9]\d*\s+deletions?\(-\)/gi;
+const PASS_WORD_RE = /\bPASS\b|\(pass\)/g;
+const FAIL_WORD_RE = /\bFAIL\b|\(fail\)/g;
+const STATUS_GLYPH_RE = /[✔✓✖✗]/g;
+
+type ConsoleToken = "success" | "error" | "accent";
+
+interface ConsoleSpan {
+  start: number;
+  end: number;
+  token: ConsoleToken;
+}
+
+function spansFrom(re: RegExp, line: string, token: ConsoleToken): ConsoleSpan[] {
+  re.lastIndex = 0;
+  const spans: ConsoleSpan[] = [];
+  for (const match of line.matchAll(re)) {
+    const start = match.index ?? 0;
+    spans.push({ start, end: start + match[0].length, token });
+  }
+  return spans;
+}
+
+function paintSpans(theme: unknown, line: string, spans: readonly ConsoleSpan[]): string {
+  if (spans.length === 0) return line;
+  const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
+  let out = "";
+  let cursor = 0;
+  for (const span of sorted) {
+    if (span.start < cursor || span.end <= span.start || span.end > line.length) continue;
+    if (span.start > cursor) out += paintAt(theme, line.slice(cursor, span.start), "dim", 1);
+    out += paintAt(theme, line.slice(span.start, span.end), span.token, 1);
+    cursor = span.end;
+  }
+  if (cursor === 0) return line;
+  if (cursor < line.length) out += paintAt(theme, line.slice(cursor), "dim", 1);
+  return out;
+}
+
+// Presentation-only: wrap common piped CLI patterns in theme tokens so
+// `git diff` / `bun test` without a TTY still scan as colored output.
+// Existing SGR (pty, --color=always) is left untouched. Callers: bash
+// grouped details and eval stdout — not source listings (read/grep).
+export function colorizeConsoleLine(theme: unknown, line: string): string {
+  if (!line || HAS_SGR_RE.test(line)) return line;
+  if (!line.trim()) return line;
+
+  if (DIFF_ADD_RE.test(line)) return paintAt(theme, line, "success", 1);
+  if (DIFF_DEL_RE.test(line)) return paintAt(theme, line, "error", 1);
+  if (DIFF_HUNK_RE.test(line)) return paintAt(theme, line, "accent", 1);
+
+  const stat = DIFF_STAT_RE.exec(line);
+  if (stat?.[1] !== undefined && stat[2] !== undefined) {
+    const bar = stat[2];
+    const barStart = stat[1].length;
+    const spans: ConsoleSpan[] = [];
+    let i = 0;
+    while (i < bar.length) {
+      const ch = bar[i]!;
+      let j = i + 1;
+      while (j < bar.length && bar[j] === ch) j += 1;
+      if (ch === "+" || ch === "-") {
+        spans.push({ start: barStart + i, end: barStart + j, token: ch === "+" ? "success" : "error" });
+      }
+      i = j;
+    }
+    return paintSpans(theme, line, spans);
+  }
+
+  STATUS_GLYPH_RE.lastIndex = 0;
+  const glyphs: ConsoleSpan[] = [];
+  for (const match of line.matchAll(STATUS_GLYPH_RE)) {
+    const start = match.index ?? 0;
+    const ch = match[0]!;
+    glyphs.push({ start, end: start + ch.length, token: ch === "✖" || ch === "✗" ? "error" : "success" });
+  }
+  const mixed = [
+    ...spansFrom(TEST_PASS_RE, line, "success"),
+    ...spansFrom(TEST_FAIL_RE, line, "error"),
+    ...spansFrom(INSERTIONS_RE, line, "success"),
+    ...spansFrom(DELETIONS_RE, line, "error"),
+    ...spansFrom(PASS_WORD_RE, line, "success"),
+    ...spansFrom(FAIL_WORD_RE, line, "error"),
+    ...glyphs,
+  ];
+  if (mixed.length > 0) return paintSpans(theme, line, mixed);
+  return line;
 }
 
 export function limitCardItems<T>(items: readonly T[], max: number): CardItemLimit<T> {

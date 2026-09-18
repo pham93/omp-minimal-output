@@ -10,7 +10,7 @@ import {
 import { formatRowLine, elapsedSuffix, paintAt, TOOL_INDENT } from "../core/theme.ts";
 import { markFlush } from "../core/loaders.ts";
 import { highlightCell, languageForPath } from "./edit-card.ts";
-import { cardDetailLine, cardIsPartial, stashedOrResultText } from "./card-primitives.ts";
+import { cardDetailLine, cardIsPartial, colorizeConsoleLine, stashedOrResultText } from "./card-primitives.ts";
 import { formatSettledThought } from "../surfaces/scrolling-text.ts";
 import { thinkingRailLines } from "../surfaces/thinking-widget.ts";
 import { durationSuffix, isToolError } from "../core/results.ts";
@@ -187,7 +187,9 @@ export class GroupedToolManager {
           const rowProfile = typeof row.detail === "object" ? row.detail : profile;
           const visibleDetails = Math.min(row.details.length, outputRowLimit(rowProfile));
           for (let detailIndex = 0; detailIndex < visibleDetails; detailIndex += 1) {
-            lines.push(cardDetailLine(theme, width, row.details[detailIndex]!, detailPrefix, row.error));
+            const rawDetail = row.details[detailIndex]!;
+            const detailLine = row.fp.startsWith("bash:") ? colorizeConsoleLine(theme, rawDetail) : rawDetail;
+            lines.push(cardDetailLine(theme, width, detailLine, detailPrefix, row.error));
           }
           const hidden = row.details.length - visibleDetails;
           if (hidden > 0) {
@@ -244,6 +246,7 @@ function groupedOutputLines(result: unknown): string[] {
   while (rows.length > 0 && !Bun.stripANSI(rows[rows.length - 1]!).trim()) rows.pop();
   return rows;
 }
+
 function highlightPatternMatches(theme: unknown, text: string, pattern: string): string {
   if (!pattern || pattern.length === 0) return text;
   try {
@@ -356,7 +359,7 @@ export function renderGroupedToolCard(context: CardRenderContext): Container {
   if (!isCall && (toolName === "grep" || toolName === "ast_grep")) {
     const rawPattern =
       typeof args === "object" && args !== null
-        ? (args as Record<string, unknown>)["pattern"] ?? (args as Record<string, unknown>)["query"] ?? ""
+        ? ((args as Record<string, unknown>)["pattern"] ?? (args as Record<string, unknown>)["query"] ?? "")
         : "";
     const pattern = typeof rawPattern === "string" ? rawPattern : "";
     details = formatSearchDetails(theme, details, pattern);
