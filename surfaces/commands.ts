@@ -9,6 +9,7 @@ export interface CommandDelegates {
   demo: (args: string | undefined, ctx: ExtensionContext) => Promise<void> | void;
   minimalStatus: (ctx: ExtensionContext) => Promise<void> | void;
   toggleTodosShortcut: (ctx: ExtensionContext) => Promise<void> | void;
+  inspect: (ctx: ExtensionContext) => Promise<void> | void;
 }
 
 export interface PluginCommandHandle {
@@ -62,7 +63,8 @@ export function registerPluginCommands(
     },
   });
   pi.registerCommand("demo", {
-    description: "Interactive demo of minimal output (targets: all, grouped, write, edit, eval, grep, task, hub, todo, thinking, warning, web_search, stop)",
+    description:
+      "Interactive demo of minimal output (targets: all, grouped, write, edit, eval, grep, task, hub, todo, thinking, warning, web_search, stop)",
     getArgumentCompletions: (argumentPrefix: string) => {
       const prefix = argumentPrefix.trim().toLowerCase();
       const matches = DEMO_OPTIONS.filter((opt) => opt.value.toLowerCase().startsWith(prefix));
@@ -92,11 +94,27 @@ export function registerPluginCommands(
     },
   });
 
+  pi.registerCommand("inspect", {
+    description: "Inspect session tool cards and expand one at a time",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.inspect(ctx);
+    },
+  });
+
   pi.registerShortcut("ctrl+alt+t", {
     description: "Toggle todos widget expand/collapse",
     handler: async (ctx) => {
       await ensureActivated(ctx);
       await commandDelegates?.toggleTodosShortcut(ctx);
+    },
+  });
+
+  pi.registerShortcut("ctrl+alt+i", {
+    description: "Inspect session tool cards and expand one at a time",
+    handler: async (ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.inspect(ctx);
     },
   });
 

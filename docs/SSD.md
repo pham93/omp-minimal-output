@@ -11,7 +11,7 @@ Display-only output skin for `omp`. Same tools, same execution. Smaller rows.
 `omp-minimal-output` repaints tool rows in the transcript:
 
 - One settled row per tool call (`◆` one-liner + duration) dispatched by `CardRegistry`.
-- `Ctrl+O` (`app.tools.expand`) reveals details. No per-row click path — renderers are display-only.
+- `Ctrl+O` (`app.tools.expand`) reveals details globally. `/inspect` (`ctrl+alt+i`) outlines one replica card. No per-row click path — renderers are display-only.
 - Live reasoning streams in the widget above the editor; `hideThinkingBlock: true` (default in `minimal-output.yml`) hides the native thinking block and suppresses settled thought rows. Spillovers go to `$TMPDIR/omp-minimal-*.log`.
 
 Out of scope: changing what any tool does, its schema, approvals, or result data.

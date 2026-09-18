@@ -233,6 +233,20 @@ function embeddedGaugeColumns(content: string): { start: number; end: number } |
   }
 }
 
+function containsProjectIcon(plain: string): boolean {
+  return PROJECT_ICON_VARIANTS.some(
+    (variant) => plain.includes(`${variant.host} `) || plain.includes(`${variant.replacement} `),
+  );
+}
+
+function isContextGaugeInterior(content: string): boolean {
+  const plain = Bun.stripANSI(content);
+  if (!plain.trim() || containsProjectIcon(plain)) return false;
+  if (/\d+\s*%\s*\/\s*\d+[KMG]?\b/u.test(plain)) return true;
+  if (/\[[█░]+\]/u.test(plain)) return true;
+  return /[\u2500-\u259f]{3,}/u.test(plain);
+}
+
 function replaceContextGauge(content: string, ctx: ComposerChromeContext, widthReduction = 0): string {
   try {
     const usage = contextUsageProvider();
@@ -244,8 +258,9 @@ function replaceContextGauge(content: string, ctx: ComposerChromeContext, widthR
       if (right < 0) continue;
       const left = content.lastIndexOf(caps.left, right - 1);
       if (left < 0) continue;
-
       const end = right + caps.right.length;
+      const interior = content.slice(left + caps.left.length, right);
+      if (!isContextGaugeInterior(interior)) continue;
       const gaugeWidth = Math.min(
         CONTEXT_GAUGE_MAX_WIDTH,
         Math.max(0, visibleWidth(content.slice(left, end)) - reduction),

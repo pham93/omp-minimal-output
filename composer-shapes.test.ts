@@ -190,9 +190,8 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   sliceByColumn: mockSliceByColumn,
   truncateToWidth: mockTruncateToWidth,
   visibleWidth: mockVisibleWidth,
+  matchesKey: (data: string, key: string) => data === key,
 }));
-
-
 
 class FakeEditor {
   borderColor: (value: string) => string;
@@ -547,6 +546,85 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
         const bottom = stripAnsi(dock.renderBottom(makeChromeContext(worktreeStatus, 140)) ?? "");
         expect(`${top} ${bottom}`).toContain("50%/200K");
         expect(`${top} ${bottom}`).toContain("fix-composer");
+      }
+    } finally {
+      resetProviders();
+    }
+  });
+
+  test("every status-line separator keeps the project name on both docks", () => {
+    composer.updateMinimalPromptEditorProviders(
+      () => ({ percent: 50, contextWindow: 200_000 }),
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      const project = "omp-minimal-output";
+      const samples: Array<{ name: string; status: string }> = [
+        {
+          name: "powerline unicode",
+          status: `󰚩 GPT ▶ 📁 ${project} ▶  main ▶────50%────200K──◀ session`,
+        },
+        {
+          name: "powerline unicode path last",
+          status: `󰚩 GPT ▶ 📁 ${project} ────50%────200K──◀ session`,
+        },
+        {
+          name: "powerline nerd",
+          status: `󰚩 GPT \ue0b0 📁 ${project} \ue0b0  main \ue0b0────50%────200K──\ue0b2 session`,
+        },
+        {
+          name: "powerline nerd path last",
+          status: `󰚩 GPT \ue0b0 📁 ${project} ────50%────200K──\ue0b2 session`,
+        },
+        {
+          name: "powerline-thin unicode",
+          status: `󰚩 GPT > 📁 ${project} >  main >────50%────200K──< session`,
+        },
+        {
+          name: "powerline-thin nerd",
+          status: `󰚩 GPT \ue0b1 📁 ${project} \ue0b1  main \ue0b1────50%────200K──\ue0b3 session`,
+        },
+        {
+          name: "slash unicode",
+          status: `󰚩 GPT / 📁 ${project} /  main ────50%────200K── session`,
+        },
+        {
+          name: "slash nerd",
+          status: `󰚩 GPT \ue0bb 📁 ${project} \ue0bb  main ────50%────200K── session`,
+        },
+        {
+          name: "pipe unicode",
+          status: `󰚩 GPT │ 📁 ${project} │  main ────50%────200K── session`,
+        },
+        {
+          name: "pipe nerd",
+          status: `󰚩 GPT \ue0b3 📁 ${project} \ue0b3  main ────50%────200K── session`,
+        },
+        {
+          name: "block",
+          status: `󰚩 GPT █ 📁 ${project} █  main ────50%────200K── session`,
+        },
+        {
+          name: "none",
+          status: `󰚩 GPT  📁 ${project}   main ────50%────200K── session`,
+        },
+        {
+          name: "ascii",
+          status: `󰚩 GPT > 📁 ${project} >  main >────50%────200K──< session`,
+        },
+        {
+          name: "ascii folder",
+          status: `GPT [D] ${project} @ main ────50%────200K── session`,
+        },
+      ];
+      for (const sample of samples) {
+        for (const dock of [topDock(), bottomDock(), grayscaleTopDock(), grayscaleBottomDock()]) {
+          const top = stripAnsi(dock.renderTop(makeChromeContext(sample.status, 140)) ?? "");
+          const bottom = stripAnsi(dock.renderBottom(makeChromeContext(sample.status, 140)) ?? "");
+          expect(top, sample.name).toContain(project);
+          expect(`${top} ${bottom}`, sample.name).toContain("50%/200K");
+        }
       }
     } finally {
       resetProviders();

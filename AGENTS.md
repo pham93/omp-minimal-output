@@ -41,6 +41,7 @@ Prefer boring, explicit code over clever abstractions. Make the smallest coheren
   - `surfaces/commands.ts`: top-level slash command and shortcut registrations.
   - `surfaces/warning-skin.ts`, `surfaces/assistant-commentary-skin.ts`, `surfaces/read-group.ts`: overlay skins.
   - `surfaces/scrolling-text.ts`: TextScroller animation buffer.
+  - `surfaces/inspect-overlay.ts`: Rewind-like fullscreen inspect replica (`/inspect`, `ctrl+alt+i`).
 - `*.test.ts`: Bun behavior and regression tests, colocated at repository root.
 - `package.json`: extension manifest, published files, and user-facing settings.
 - `README.md`, `docs/`, `CONTEXT.md`: public behavior, domain glossary, and configuration documentation.
@@ -59,19 +60,25 @@ Keep orchestration in `index.ts`; move reusable formatting or parsing into the e
 - Never produce duplicate activity rows, cards, or widgets for one execution.
 - Keep spill-file and truncation behavior intact for large output.
 
+- Chosen designs are contracts. Do not replace a contracted surface with a different product to work around a paint, layout, or UX bug. Fix the invariant in place.
+- Screenshots, mockups, and "this is how it looks" are evidence of the current or broken surface, not a redesign, unless the user explicitly chooses a new approach in this conversation.
+- `/inspect` (`ctrl+alt+i`) is a Rewind-like fullscreen session replica: ↑/↓ (and overlay-focused `j`/`k`) outlines one tool card, Enter toggles that replica card only, Esc closes without rewriting transcript scrollback. It is not a compact picker. Do not register bare `j`/`k` as global shortcuts. Ctrl+O inside the overlay is not a global expand.
+
 If a requested design conflicts with one of these contracts, document the conflict and choose the behavior-preserving design.
 
 ## Working Method
 
 1. Read the affected module, adjacent helpers, and relevant tests before editing.
 2. Trace registrations, configuration, and every call site affected by a public symbol change.
-3. State the observable contract: running, partial, settled, expanded, error, disabled, and reload behavior as applicable.
+3. State the observable contract: running, partial, settled, expanded, error, disabled, and reload behavior as applicable. If the task already chose a design, that choice is the contract — implement it; do not substitute a familiar or smaller UI.
 4. Implement the smallest end-to-end change. Avoid opportunistic refactors.
 5. Verify the narrow behavior first, then the full test suite.
 6. Update settings metadata and documentation in the same change when public behavior changes.
 7. Remove obsolete branches, comments, aliases, and temporary probes before review.
 
 Do not suppress a symptom with a special case when the source invariant can be fixed.
+
+Do not treat a visual defect as permission to change the product shape.
 
 ## TypeScript Standards
 

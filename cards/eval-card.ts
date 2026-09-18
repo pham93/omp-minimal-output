@@ -30,7 +30,7 @@ import {
   setSpinFrame,
   stripSgr,
 } from "../core/theme.ts";
-import { evalCell, evalLabelText, truncatePlain } from "../core/text.ts";
+import { boundedTextLines, evalCell, evalLabelText, truncatePlain } from "../core/text.ts";
 import { highlightCell } from "./edit-card.ts";
 
 // Input and output previews use independent content-row budgets from
@@ -118,11 +118,10 @@ export function renderEvalCard(
     if (lifecycle.settled && fp) evalRunSince.delete(fp);
     const since = running ? runSince(fp) : 0;
     const cell = evalCell(args);
-    const rawCode = cell.code ? cell.code.split("\n") : [];
-    while (rawCode.length > 0 && !stripSgr(rawCode[rawCode.length - 1] ?? "").trim()) rawCode.pop();
     const inputCap = Math.max(0, Math.floor(inputRowLimit(lifecycle.detail)));
-    const input = rawCode.slice(0, inputCap);
-    const inputMore = rawCode.length - input.length;
+    const inputWindow = boundedTextLines(cell.code ?? "", inputCap);
+    const input = inputWindow.lines;
+    const inputMore = inputWindow.total - input.length;
 
     let output: string[] = [];
     let more = 0;
@@ -130,26 +129,23 @@ export function renderEvalCard(
     const errorLines: string[] = [];
     if (result !== undefined) {
       const rawText = evalResultText(result, header);
+      const outputCap = Math.max(0, Math.floor(outputRowLimit(lifecycle.detail)));
       if (error) {
-        const errorCap = Math.max(0, Math.floor(outputRowLimit(lifecycle.detail)));
-        for (const value of stripSgr(rawText).split("\n")) {
-          const line = value.trim();
-          if (!line) continue;
-          errorLines.push(line);
-          if (errorLines.length >= errorCap) break;
+        let start = 0;
+        const stripped = stripSgr(rawText);
+        while (errorLines.length < outputCap && start <= stripped.length) {
+          const nl = stripped.indexOf("\n", start);
+          const end = nl === -1 ? stripped.length : nl;
+          const line = stripped.slice(start, end).trim();
+          if (line) errorLines.push(line);
+          if (nl === -1) break;
+          start = nl + 1;
         }
       } else {
-        const raw = rawText.split("\n");
-        while (raw.length > 0 && !stripSgr(raw[raw.length - 1] ?? "").trim()) raw.pop();
-        const outputCap = Math.max(0, Math.floor(outputRowLimit(lifecycle.detail)));
-        if (lifecycle.partial) {
-          output = raw.slice(-outputCap);
-          more = raw.length - output.length;
-          earlierHint = true;
-        } else {
-          output = raw.slice(0, outputCap);
-          more = raw.length - output.length;
-        }
+        const window = boundedTextLines(rawText, outputCap, lifecycle.partial ? "tail" : "head");
+        output = window.lines;
+        more = window.total - output.length;
+        earlierHint = lifecycle.partial && more > 0;
       }
     }
 

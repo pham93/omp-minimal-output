@@ -4,7 +4,7 @@ Schematic row shapes per card. Color/paint omitted — structure only; spacing a
 
 > Design rationale lives in [`SSD.md`](SSD.md). The implemented detail-level contract lives in [`DETAIL_LEVELS.md`](DETAIL_LEVELS.md). Usage lives in [`../README.md`](../README.md).
 > `◈◉◎○` = running spin. `◆` = settled shadow row. `●` = settled Task / Hub / web-search / read-group row. Red = error.
-> `Ctrl+O` toggles collapsed ↔ expanded globally; `detailedMaxRows` (default 20) counts content per section/file or complete structured items, excluding headers and hints. No per-row click.
+> `Ctrl+O` toggles collapsed ↔ expanded globally; `/inspect` outlines one replica card. `detailedMaxRows` (default 20) counts content per section/file or complete structured items, excluding headers and hints. No per-row click.
 
 ## Bash
 

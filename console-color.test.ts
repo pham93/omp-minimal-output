@@ -15,6 +15,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   padding: (w: number) => " ".repeat(Math.max(0, w)),
   sliceByColumn: (s: string, start: number, len: number) => s.slice(start, start + len),
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
+  matchesKey: (data: string, key: string) => data === key,
 }));
 
 const { colorizeConsoleLine } = await import("./cards/card-primitives.ts");

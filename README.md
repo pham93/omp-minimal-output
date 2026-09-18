@@ -1,6 +1,6 @@
 # omp-minimal-output
 
-Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally with a configurable 20-content-line default allowance per section. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
+Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally with a configurable 20-content-line default allowance per section. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path. `/inspect` (or `ctrl+alt+i`) opens a Rewind-like fullscreen replica; ↑/↓ outlines one tool card, Enter expands that replica only, and Esc closes without rewriting transcript scrollback.
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
@@ -8,9 +8,11 @@ Generic grouped tools keep output indented beneath each tool, with continuation 
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
-Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/demo-write`, `/demo`, `/demo-all`; shortcut `ctrl+alt+t` toggles Todo expand/collapse.
+Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/inspect`, `/demo-write`, `/demo`, `/demo-all`; shortcut `ctrl+alt+t` toggles Todo expand/collapse; `ctrl+alt+i` opens the inspect overlay.
 
 Development demo: `/demo` (or `/demo-all`) runs a live interactive showcase of minimal cards and surfaces without LLM or network requests. Inspect individual components via `/demo <write|edit|eval|grouped|grep|task|hub|todo|search>` or dismiss early with `/demo stop`.
+
+Inspect overlay: `/inspect` replays this session's tool cards fullscreen with the same plugin chrome as the transcript. ↑/↓ (or `j`/`k`) outlines one card, Enter/`l` toggles that card's Detailed window, `h` collapses it, Esc closes. Ctrl+O in the overlay is not a global expand.
 
 Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 

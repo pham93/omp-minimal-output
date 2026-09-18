@@ -185,6 +185,8 @@ Ctrl+O is a temporary Detailed override using `detailedMaxRows` (default 20, `1.
 
 Leaving the override restores the configured mode. Ctrl+O does not rewrite `detailLevel` or any row-limit setting.
 
+Per-card expand lives in `/inspect` (shortcut `ctrl+alt+i`): a fullscreen replica outlines one tool card and Enter toggles that card only. Inspect does not rewrite transcript scrollback and does not treat Ctrl+O as a global expand inside the overlay.
+
 ## Implementation boundaries
 
 - Tool execution, schemas, approval policy, persisted provider messages, and result data remain unchanged.

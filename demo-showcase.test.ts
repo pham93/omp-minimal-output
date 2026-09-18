@@ -14,6 +14,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   padding: (w: number) => " ".repeat(Math.max(0, w)),
   sliceByColumn: (s: string, start: number, len: number) => s.slice(start, start + len),
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
+  matchesKey: (data: string, key: string) => data === key,
 }));
 // Dynamic import required: mock.module("@oh-my-pi/pi-tui") must run before importing the module under test.
 const { runPluginDemo, DEMO_OPTIONS } = await import("./surfaces/demo-showcase.ts");

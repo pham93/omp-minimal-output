@@ -25,6 +25,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   padding: (w: number) => " ".repeat(Math.max(0, w)),
   sliceByColumn: (s: string, start: number, len: number) => s.slice(start, start + len),
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
+  matchesKey: (data: string, key: string) => data === key,
 }));
 
 mock.module("@oh-my-pi/pi-coding-agent", () => ({
@@ -779,6 +780,8 @@ test("extension registers all commands and shortcuts on initial load", async () 
   expect(registeredCommands.has("demo")).toBe(true);
   expect(registeredCommands.has("demo-all")).toBe(true);
   expect(registeredCommands.has("minimal-status")).toBe(true);
+  expect(registeredCommands.has("inspect")).toBe(true);
+  expect(registeredShortcuts.has("ctrl+alt+i")).toBe(true);
   expect(registeredShortcuts.has("ctrl+alt+t")).toBe(true);
 });
 

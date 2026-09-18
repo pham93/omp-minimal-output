@@ -14,6 +14,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   padding: (w: number) => " ".repeat(Math.max(0, w)),
   sliceByColumn: (s: string, start: number, len: number) => s.slice(start, start + len),
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
+  matchesKey: (data: string, key: string) => data === key,
 }));
 const { GroupedToolManager } = await import("./cards/grouped-tool-card.ts");
 const { renderEvalCard } = await import("./cards/eval-card.ts");

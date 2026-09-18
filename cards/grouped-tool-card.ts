@@ -14,7 +14,7 @@ import { cardDetailLine, cardIsPartial, colorizeConsoleLine, stashedOrResultText
 import { formatSettledThought } from "../surfaces/scrolling-text.ts";
 import { thinkingRailLines } from "../surfaces/thinking-widget.ts";
 import { durationSuffix, isToolError } from "../core/results.ts";
-import { toolActionLabel } from "../core/text.ts";
+import { boundedTextLines, toolActionLabel } from "../core/text.ts";
 import type { CardRenderContext } from "./card-registry.ts";
 
 export interface GroupRow {
@@ -25,6 +25,7 @@ export interface GroupRow {
   right: string;
   startedAt: number;
   details: string[];
+  detailTotal?: number;
   detail?: DetailProfile | string;
 }
 
@@ -82,6 +83,7 @@ export class GroupedToolManager {
       startedAt: prev?.startedAt ?? row.startedAt,
       detail: row.detail ?? prev?.detail,
       details: row.details ?? prev?.details ?? [],
+      detailTotal: row.detailTotal ?? (row.details ?? prev?.details ?? []).length,
     });
     if (this.#toolGroups.size > 40) {
       const oldest = this.#toolGroups.keys().next();
@@ -191,7 +193,7 @@ export class GroupedToolManager {
             const detailLine = row.fp.startsWith("bash:") ? colorizeConsoleLine(theme, rawDetail) : rawDetail;
             lines.push(cardDetailLine(theme, width, detailLine, detailPrefix, row.error));
           }
-          const hidden = row.details.length - visibleDetails;
+          const hidden = Math.max(0, (row.detailTotal ?? row.details.length) - visibleDetails);
           if (hidden > 0) {
             lines.push(cardDetailLine(theme, width, `… ${hidden} more lines`, detailPrefix, row.error));
           }
@@ -212,6 +214,7 @@ export class GroupedToolManager {
       error: boolean;
       right?: string;
       details?: string[];
+      detailTotal?: number;
       detail?: DetailProfile;
     },
     frozen?: FrozenGroup,
@@ -225,6 +228,7 @@ export class GroupedToolManager {
         right: opts.right ?? "",
         startedAt: Date.now(),
         details: opts.details ?? [],
+        detailTotal: opts.detailTotal,
         detail: opts.detail,
       },
       frozen,
@@ -239,12 +243,8 @@ export class GroupedToolManager {
   }
 }
 
-function groupedOutputLines(result: unknown): string[] {
-  const text = stashedOrResultText(result);
-  if (!text) return [];
-  const rows = text.split(/\r?\n/u);
-  while (rows.length > 0 && !Bun.stripANSI(rows[rows.length - 1]!).trim()) rows.pop();
-  return rows;
+function groupedOutputWindow(result: unknown, cap: number): { lines: string[]; total: number } {
+  return boundedTextLines(stashedOrResultText(result), cap);
 }
 
 function highlightPatternMatches(theme: unknown, text: string, pattern: string): string {
@@ -355,14 +355,21 @@ function frozenGroupOf(result: unknown): FrozenGroup | undefined {
 export function renderGroupedToolCard(context: CardRenderContext): Container {
   const { theme, toolName, args, result, options, fingerprint, phase, groupedTools } = context;
   const isCall = phase === "call";
-  let details = isCall ? [] : groupedOutputLines(result);
-  if (!isCall && (toolName === "grep" || toolName === "ast_grep")) {
-    const rawPattern =
-      typeof args === "object" && args !== null
-        ? ((args as Record<string, unknown>)["pattern"] ?? (args as Record<string, unknown>)["query"] ?? "")
-        : "";
-    const pattern = typeof rawPattern === "string" ? rawPattern : "";
-    details = formatSearchDetails(theme, details, pattern);
+  const profile = detailProfile(options);
+  let details: string[] = [];
+  let detailTotal = 0;
+  if (!isCall && !profile.minimal) {
+    const bounded = groupedOutputWindow(result, outputRowLimit(profile));
+    details = bounded.lines;
+    detailTotal = bounded.total;
+    if (toolName === "grep" || toolName === "ast_grep") {
+      const rawPattern =
+        typeof args === "object" && args !== null
+          ? ((args as Record<string, unknown>)["pattern"] ?? (args as Record<string, unknown>)["query"] ?? "")
+          : "";
+      const pattern = typeof rawPattern === "string" ? rawPattern : "";
+      details = formatSearchDetails(theme, details, pattern);
+    }
   }
   return groupedTools.renderToolVisual(
     theme,
@@ -373,7 +380,8 @@ export function renderGroupedToolCard(context: CardRenderContext): Container {
       error: !isCall && isToolError(result, options),
       right: isCall ? "" : durationSuffix(result),
       details,
-      detail: detailProfile(options),
+      detailTotal,
+      detail: profile,
     },
     isCall ? undefined : frozenGroupOf(result),
   );

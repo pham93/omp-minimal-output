@@ -64,6 +64,38 @@ export function wrapLatestLines(text: string, width: number, maxLines: number): 
   return wrapToWidth(text.trim(), width).slice(-maxLines);
 }
 
+export function boundedTextLines(
+  text: string,
+  cap: number,
+  from: "head" | "tail" = "head",
+): { lines: string[]; total: number } {
+  const limit = Math.max(0, Math.floor(cap));
+  if (!text) return { lines: [], total: 0 };
+
+  const starts: number[] = [0];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 10) starts.push(i + 1);
+  }
+
+  const lineAt = (index: number): string => {
+    const start = starts[index]!;
+    let end = index + 1 < starts.length ? starts[index + 1]! - 1 : text.length;
+    if (end > start && text.charCodeAt(end - 1) === 13) end -= 1;
+    return text.slice(start, end);
+  };
+
+  let count = starts.length;
+  while (count > 0 && !Bun.stripANSI(lineAt(count - 1)).trim()) count -= 1;
+
+  const lines: string[] = [];
+  if (limit > 0 && count > 0) {
+    const take = Math.min(limit, count);
+    const begin = from === "tail" ? count - take : 0;
+    for (let i = 0; i < take; i += 1) lines.push(lineAt(begin + i));
+  }
+  return { lines, total: count };
+}
+
 export function truncatePlain(text: string, max: number): string {
   if (max <= 0) return "";
   if (visibleWidth(text) <= max) return text;
