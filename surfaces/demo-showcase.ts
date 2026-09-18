@@ -277,28 +277,38 @@ function renderTodoDemo(theme: unknown, width: number): readonly string[] {
 function renderSearchDemo(theme: unknown): Container {
   const groups = new GroupedToolManager({
     rowIsLive: () => false,
-    activityLabel: () => "Searching codebase for configurations",
+    activityLabel: () => "Searching for getArgumentCompletions implementations in pi-coding-agent",
     activityRunId: () => "demo:search",
     activityStartedAt: () => Date.now() - 600,
   });
-  const frozen = { gid: "demo:search", label: "Searching codebase for configurations" };
+  const frozen = {
+    gid: "demo:search",
+    label: "Searching for getArgumentCompletions implementations in pi-coding-agent",
+  };
   const lines = formatSearchDetails(
     theme,
     [
-      "src/config.ts: 2 hits (first 2 shown)",
-      "src/config.ts:14:export const DEFAULT_PORT = 3000;",
-      "src/server.ts:22:  port: number = DEFAULT_PORT;",
+      "# /home/redbull/.bun/install/cache/@oh-my-pi/pi-coding-agent@18.2.4@@@1/src/modes/",
+      "## interactive-mode.ts#CDE3",
+      ' 1290:                    icon: getSlashCommandTypeIcon("extension"),',
+      " *1291:                    getArgumentCompletions: cmd.getArgumentCompletions,",
+      " … 3 more lines",
+      "",
+      "## autocomplete.ts#C99C",
+      " 182:",
+      " *183:export interface AutocompleteItem {",
+      " … 3 more lines",
     ],
-    "DEFAULT_PORT",
+    "getArgumentCompletions",
   );
   groups.renderToolVisual(
     theme,
     "demo:grep",
     {
-      body: 'Grep "DEFAULT_PORT"',
+      body: "Search `getArgumentCompletions:`",
       live: false,
       error: false,
-      right: "(12ms)",
+      right: "(14ms)",
       details: lines,
     },
     frozen,
@@ -336,11 +346,12 @@ export interface DemoOption {
 
 export const DEMO_OPTIONS: readonly DemoOption[] = [
   { value: "all", label: "all", description: "Sequential tour of all cards and surfaces" },
+  { value: "search", label: "search", description: "Code search (grep) with syntax highlighting and pattern emphasis" },
+  { value: "grep", label: "grep", description: "Alias for code search (grep)" },
   { value: "grouped", label: "grouped", description: "Grouped tools tree (bash, read, grep) with continuation rails" },
   { value: "write", label: "write", description: "Interactive streaming Write card with latest-lines projection" },
   { value: "edit", label: "edit", description: "Edit card diff with line numbers and soft diff bands" },
   { value: "eval", label: "eval", description: "Code cell evaluation with output separator rule" },
-  { value: "grep", label: "grep", description: "Search results with code syntax highlighting and pattern emphasis" },
   { value: "task", label: "task", description: "Subagent task hierarchy with status and durations" },
   { value: "hub", label: "hub", description: "Background processes and peer coordination status" },
   { value: "todo", label: "todo", description: "Todos checklist header with phase grouping and progress" },
@@ -475,8 +486,8 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
     clearDemo();
     return;
   }
-  if (target === "grep") {
-    ctx.ui.notify("Demo: Search (grep) with syntax highlighting", "info");
+  if (target === "search" || target === "grep") {
+    ctx.ui.notify("Demo: Code search (grep) with syntax highlighting", "info");
     setDemoComponent((_tui, theme) => renderSearchDemo(theme));
     await sleep(3500, currentSeq);
     if (currentSeq !== activeDemoSeq) return;
@@ -484,7 +495,7 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
     return;
   }
 
-  if (target === "web_search" || target === "search") {
+  if (target === "web_search" || target === "web") {
     ctx.ui.notify("Demo: Web Search card", "info");
     setDemoComponent((_tui, theme) => renderWebSearchDemo(theme));
     await sleep(3500, currentSeq);
@@ -561,7 +572,7 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
 
   // Step 1: Thinking stream
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[1/7] Reasoning Stream & Pulse Header", "info");
+  ctx.ui.notify("[1/8] Reasoning Stream & Pulse Header", "info");
   setDemoComponent((_tui, theme) => {
     const container = new Container();
     container.addChild({
@@ -574,14 +585,21 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
 
   // Step 2: Grouped tools (bash, read, grep)
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[2/7] Grouped Tools & Continuation Rails", "info");
+  ctx.ui.notify("[2/8] Grouped Tools & Continuation Rails", "info");
   setDemoComponent((_tui, theme) => renderGroupedDemo(theme));
   await sleep(2200, currentSeq);
   if (currentSeq !== activeDemoSeq) return;
 
-  // Step 3: Write card streaming
+  // Step 3: Code search (grep) with syntax highlighting
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[3/7] Streaming Write Card", "info");
+  ctx.ui.notify("[3/8] Code Search (grep) with Syntax Highlighting", "info");
+  setDemoComponent((_tui, theme) => renderSearchDemo(theme));
+  await sleep(2200, currentSeq);
+  if (currentSeq !== activeDemoSeq) return;
+
+  // Step 4: Write card streaming
+  if (currentSeq !== activeDemoSeq) return;
+  ctx.ui.notify("[4/8] Streaming Write Card", "info");
   for (let count = 1; count <= DEMO_WRITE_LINES.length; count += 2) {
     if (currentSeq !== activeDemoSeq) return;
     const partialContent = DEMO_WRITE_LINES.slice(0, count).join("\n");
@@ -602,21 +620,21 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
 
   // Step 4: Edit card diff
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[4/7] Edit Card (Diff & Line Markers)", "info");
+  ctx.ui.notify("[5/8] Edit Card (Diff & Line Markers)", "info");
   setDemoComponent((_tui, theme) => renderEditDemo(theme));
   await sleep(2200, currentSeq);
   if (currentSeq !== activeDemoSeq) return;
 
   // Step 5: Eval card
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[5/7] Eval Card (Code & Execution Output)", "info");
+  ctx.ui.notify("[6/8] Eval Card (Code & Execution Output)", "info");
   setDemoComponent((_tui, theme) => renderEvalDemo(theme));
   await sleep(2200, currentSeq);
   if (currentSeq !== activeDemoSeq) return;
 
   // Step 6: Task and Hub cards
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[6/7] Task & Hub Cards", "info");
+  ctx.ui.notify("[7/8] Task & Hub Cards", "info");
   setDemoComponent((_tui, theme) => {
     const combined = new Container();
     combined.addChild(renderTaskDemo(theme));
@@ -628,7 +646,7 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
 
   // Step 7: Todos, Warning, and Web Search
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[7/7] Todos, Warning Banner & Search", "info");
+  ctx.ui.notify("[8/8] Todos, Warning Banner & Search", "info");
   setDemoComponent((_tui, theme) => {
     const combined = new Container();
     combined.addChild({

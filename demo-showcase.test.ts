@@ -128,7 +128,7 @@ describe("runPluginDemo", () => {
   });
 
   test("renders todo and web search demo cards", async () => {
-    const { ctx, widgets } = createMockCtx();
+    const { ctx, widgets, notifications } = createMockCtx();
     const todoPromise = runPluginDemo(ctx as never, "todo");
     expect(widgets.has("minimal-demo")).toBe(true);
     const todoFactory = widgets.get("minimal-demo") as (_tui: unknown, theme: unknown) => { render?: (w: number) => unknown; children?: unknown[] };
@@ -156,6 +156,14 @@ describe("runPluginDemo", () => {
     expect(grepFactory({}, {})).toBeDefined();
     await runPluginDemo(ctx as never, "stop");
     await grepPromise;
+
+    const codeSearchPromise = runPluginDemo(ctx as never, "search");
+    expect(widgets.has("minimal-demo")).toBe(true);
+    const codeSearchFactory = widgets.get("minimal-demo") as (_tui: unknown, theme: unknown) => unknown;
+    expect(codeSearchFactory({}, {})).toBeDefined();
+    expect(notifications.some((n) => n.message.includes("Code search (grep)"))).toBe(true);
+    await runPluginDemo(ctx as never, "stop");
+    await codeSearchPromise;
   });
 
   test("renders thinking and warning demo targets", async () => {
