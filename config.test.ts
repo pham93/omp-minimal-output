@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { applyOverlay, DEFAULT_CONFIG, getPluginConfig, setPluginConfigForTest } from "./core/config.ts";
+import {
+  applyOverlay,
+  CONFIG_MTIME_CHECK_INTERVAL_MS,
+  DEFAULT_CONFIG,
+  getPluginConfig,
+  maybeReloadConfig,
+  setPluginConfigForTest,
+} from "./core/config.ts";
 
 describe("composerRefreshInterval config", () => {
   test("defaults to 60 seconds", () => {
@@ -38,5 +45,18 @@ describe("composerRefreshInterval config", () => {
       setPluginConfigForTest(null);
       expect(getPluginConfig().composerRefreshInterval).toBe(60);
     }
+  });
+});
+
+describe("maybeReloadConfig throttling", () => {
+  test("throttles mtime checks within interval", () => {
+    const now = 10_000;
+    // First check runs
+    maybeReloadConfig(now, true);
+    // Checks within interval are throttled (no throw, no repeated stats)
+    expect(() => maybeReloadConfig(now + 500)).not.toThrow();
+    expect(() => maybeReloadConfig(now + CONFIG_MTIME_CHECK_INTERVAL_MS - 1)).not.toThrow();
+    // Check after interval elapses runs
+    expect(() => maybeReloadConfig(now + CONFIG_MTIME_CHECK_INTERVAL_MS + 1)).not.toThrow();
   });
 });

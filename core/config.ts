@@ -275,7 +275,11 @@ export function getPluginConfig(): PluginConfig {
   return loadPluginConfig();
 }
 
+export const CONFIG_MTIME_CHECK_INTERVAL_MS = 3000;
+let lastConfigCheckAt = 0;
+
 export function reloadPluginConfig(): PluginConfig {
+  lastConfigCheckAt = Date.now();
   return loadPluginConfig();
 }
 
@@ -293,7 +297,9 @@ function configMtimeKey(): string {
     .join(";");
 }
 
-export function maybeReloadConfig(): void {
+export function maybeReloadConfig(now = Date.now(), force = false): void {
+  if (!force && now - lastConfigCheckAt < CONFIG_MTIME_CHECK_INTERVAL_MS) return;
+  lastConfigCheckAt = now;
   try {
     const key = configMtimeKey();
     if (lastConfigMtimes === "") {

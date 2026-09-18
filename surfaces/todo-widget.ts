@@ -7,6 +7,7 @@ import {
   renderDensityTodoHeader,
   todoItemKey,
   todoNeedsPump,
+  todoHasActiveTransition,
   type TodoHeaderState,
 } from "./todos-header.ts";
 export { parseTodoResult, parseTodoPhases };
@@ -87,6 +88,10 @@ export class TodoWidget {
 
   needsPump(): boolean {
     return todoNeedsPump(this.#headerState, this.#completingAt, this.#agentRunning);
+  }
+
+  hasFastAnimation(): boolean {
+    return todoHasActiveTransition(this.#completingAt);
   }
 
   bindUi(ctx: unknown): void {

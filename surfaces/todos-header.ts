@@ -209,6 +209,13 @@ export function groupTodoPhases(items: readonly TodoItem[]): TodoPhaseGroup[] {
   return groups;
 }
 
+export function todoHasActiveTransition(completingAt: ReadonlyMap<string, number>, now = Date.now()): boolean {
+  for (const started of completingAt.values()) {
+    if (now - started < TODO_DONE_ANIM_MS) return true;
+  }
+  return false;
+}
+
 export function todoNeedsPump(
   state: TodoHeaderState | null,
   completingAt: ReadonlyMap<string, number>,
@@ -217,11 +224,7 @@ export function todoNeedsPump(
 ): boolean {
   if (!state || state.items.length === 0) return false;
   if (running && state.items.some((item) => item.status === "active")) return true;
-  for (const item of state.items) {
-    const started = completingAt.get(todoItemKey(item));
-    if (started !== undefined && now - started < TODO_DONE_ANIM_MS) return true;
-  }
-  return false;
+  return todoHasActiveTransition(completingAt, now);
 }
 
 function statusGlyph(s: TodoStatus, anim?: TodoAnim): string {

@@ -141,6 +141,17 @@ export default function (pi: ExtensionAPI) {
       onTick: () => {
         if (alertSkinActive()) invalidateLiveAlerts();
       },
+      hasFastAnimation: () => {
+        return (
+          activityTracker.liveRunsCount !== 0 ||
+          nativeToolCardsNeedPump() ||
+          alertSkinActive() ||
+          anySettling() ||
+          writeCardsNeedPump() ||
+          thinkingWidget.isAnimating() ||
+          todoWidget.hasFastAnimation()
+        );
+      },
       isIdle: () => {
         return !(
           activityTracker.activityLive ||

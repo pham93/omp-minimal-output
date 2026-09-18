@@ -1,9 +1,13 @@
 import { advanceSpinFrame } from "./theme.ts";
 import { maybeReloadConfig } from "./config.ts";
 
+export const ANIMATION_FAST_MS = 120;
+export const ANIMATION_SLOW_MS = 1000;
+
 export interface AnimationPumpDeps {
   owns: () => boolean;
   isIdle?: () => boolean;
+  hasFastAnimation?: () => boolean;
   onTick?: () => void;
 }
 
@@ -27,6 +31,7 @@ export class AnimationPump {
   #timer: unknown = undefined;
   #ui: unknown = undefined;
   #ctx: unknown = undefined;
+  #currentIntervalMs: number = ANIMATION_FAST_MS;
   readonly #deps: AnimationPumpDeps;
 
   constructor(deps: AnimationPumpDeps) {
@@ -50,6 +55,15 @@ export class AnimationPump {
   hasTimer(): boolean {
     return this.#timer !== undefined;
   }
+
+  currentIntervalMs(): number {
+    return this.#currentIntervalMs;
+  }
+
+  desiredIntervalMs(): number {
+    return this.#deps.hasFastAnimation?.() !== false ? ANIMATION_FAST_MS : ANIMATION_SLOW_MS;
+  }
+
   clearTimer(ctx?: unknown): void {
     const target = ctx ?? this.#ctx;
     const timers = pulseTimers(target);
@@ -70,13 +84,38 @@ export class AnimationPump {
     if (typeof ctx === "object" && ctx !== null && "ui" in ctx) {
       this.bindUi((ctx as { ui?: unknown }).ui);
     }
-    if (this.#timer !== undefined) return;
+    if (this.#deps.isIdle?.()) {
+      this.clearTimer(ctx);
+      return;
+    }
 
+    const desired = this.desiredIntervalMs();
+    if (this.#timer !== undefined) {
+      if (this.#currentIntervalMs === desired) return;
+      this.clearTimer(ctx);
+    }
+
+    this.#startTimer(ctx, desired);
+  }
+
+  #startTimer(ctx: unknown, intervalMs: number): void {
+    this.#currentIntervalMs = intervalMs;
     const tick = (): void => {
       if (!this.#deps.owns()) {
         this.clearTimer(ctx);
         return;
       }
+      if (this.#ctx !== undefined && this.#deps.isIdle?.()) {
+        this.clearTimer(this.#ctx);
+        return;
+      }
+
+      const desired = this.desiredIntervalMs();
+      if (desired !== this.#currentIntervalMs) {
+        this.clearTimer(this.#ctx);
+        this.#startTimer(this.#ctx, desired);
+      }
+
       advanceSpinFrame();
       maybeReloadConfig();
       this.#deps.onTick?.();
@@ -92,19 +131,15 @@ export class AnimationPump {
           }
         }
       }
-
-      if (this.#ctx !== undefined && this.#deps.isIdle?.()) {
-        this.clearTimer(this.#ctx);
-      }
     };
 
     const timers = pulseTimers(ctx);
     try {
       if (timers) {
-        this.#timer = timers.setInterval(tick, 120);
+        this.#timer = timers.setInterval(tick, intervalMs);
         return;
       }
-      this.#timer = setInterval(tick, 120);
+      this.#timer = setInterval(tick, intervalMs);
     } catch {
       this.#timer = undefined;
     }
@@ -113,9 +148,14 @@ export class AnimationPump {
   stopIfIdle(ctx: unknown): void {
     if (this.#deps.isIdle?.() && this.#timer !== undefined) {
       this.clearTimer(ctx);
+    } else if (this.#timer !== undefined) {
+      const desired = this.desiredIntervalMs();
+      if (desired !== this.#currentIntervalMs) {
+        this.clearTimer(ctx);
+        this.#startTimer(ctx, desired);
+      }
     }
   }
-
   requestRepaint(): void {
     if (!this.#deps.owns()) return;
     try {
