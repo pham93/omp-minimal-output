@@ -16,7 +16,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
 }));
 // Dynamic import required: mock.module("@oh-my-pi/pi-tui") must run before importing the module under test.
-const { runPluginDemo } = await import("./surfaces/demo-showcase.ts");
+const { runPluginDemo, DEMO_OPTIONS } = await import("./surfaces/demo-showcase.ts");
 const { formatSearchDetails } = await import("./cards/grouped-tool-card.ts");
 const { cardDetailLine } = await import("./cards/card-primitives.ts");
 
@@ -213,5 +213,41 @@ describe("runPluginDemo", () => {
     // Should preserve SGR color codes rather than stripping to plain text
     expect(rendered).toContain("\x1b[38;2;");
     expect(Bun.stripANSI(rendered)).toContain("✔ pass ✖ fail");
+  });
+  test("runPluginDemo lists all available options on help or question mark", async () => {
+    const { ctx, notifications } = createMockCtx();
+    await runPluginDemo(ctx as never, "help");
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].type).toBe("info");
+    expect(notifications[0].message).toContain("Available /demo targets:");
+    expect(notifications[0].message).toContain("grouped");
+    expect(notifications[0].message).toContain("write");
+    expect(notifications[0].message).toContain("grep");
+    expect(notifications[0].message).toContain("stop");
+
+    const { ctx: ctxQuestion, notifications: notifsQuestion } = createMockCtx();
+    await runPluginDemo(ctxQuestion as never, "?");
+    expect(notifsQuestion[0].message).toContain("Available /demo targets:");
+  });
+
+  test("runPluginDemo warns and lists valid targets on unknown target", async () => {
+    const { ctx, notifications } = createMockCtx();
+    await runPluginDemo(ctx as never, "unknown_tool");
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].type).toBe("warning");
+    expect(notifications[0].message).toContain('Unknown demo target "unknown_tool"');
+    expect(notifications[0].message).toContain("Available targets:");
+  });
+
+  test("DEMO_OPTIONS provides complete labels, values, and descriptions for autocomplete", () => {
+    expect(DEMO_OPTIONS.length).toBeGreaterThanOrEqual(10);
+    for (const opt of DEMO_OPTIONS) {
+      expect(typeof opt.value).toBe("string");
+      expect(typeof opt.label).toBe("string");
+      expect(typeof opt.description).toBe("string");
+      expect(opt.description.length).toBeGreaterThan(0);
+    }
   });
 });

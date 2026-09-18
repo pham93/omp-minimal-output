@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-
+import { DEMO_OPTIONS } from "./demo-showcase.ts";
 export interface CommandDelegates {
   minimalOn: (ctx: ExtensionContext) => Promise<void> | void;
   minimalOff: (ctx: ExtensionContext) => Promise<void> | void;
@@ -62,7 +62,14 @@ export function registerPluginCommands(
     },
   });
   pi.registerCommand("demo", {
-    description: "Interactive demonstration of minimal output cards (e.g. /demo, /demo edit, /demo eval, /demo grouped)",
+    description: "Interactive demo of minimal output (targets: all, grouped, write, edit, eval, grep, task, hub, todo, thinking, warning, web_search, stop)",
+    getArgumentCompletions: (argumentPrefix: string) => {
+      const prefix = argumentPrefix.trim().toLowerCase();
+      const matches = DEMO_OPTIONS.filter((opt) => opt.value.toLowerCase().startsWith(prefix));
+      return matches.length > 0
+        ? matches.map((m) => ({ value: m.value, label: m.label, description: m.description }))
+        : null;
+    },
     handler: async (args, ctx) => {
       await ensureActivated(ctx);
       await commandDelegates?.demo(args, ctx);

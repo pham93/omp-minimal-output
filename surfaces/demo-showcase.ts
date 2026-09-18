@@ -314,7 +314,7 @@ function renderThinkingDemo(theme: unknown, width: number): readonly string[] {
   const text = [
     "Analyzing terminal geometry and container hierarchy.",
     "Checking tool execution wrapper seams and theme background tokens.",
-    "Enforcing 2-character padding and transparent row background.",
+    "Enforcing 1-character padding and transparent row background.",
   ].join("\n");
   const rails = thinkingRailLines(theme, width, text, false);
   return [header, ...rails];
@@ -328,14 +328,38 @@ function renderWarningDemo(theme: unknown, width: number): readonly string[] {
   return [truncatePlain(line, width)];
 }
 
+export interface DemoOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export const DEMO_OPTIONS: readonly DemoOption[] = [
+  { value: "all", label: "all", description: "Sequential tour of all cards and surfaces" },
+  { value: "grouped", label: "grouped", description: "Grouped tools tree (bash, read, grep) with continuation rails" },
+  { value: "write", label: "write", description: "Interactive streaming Write card with latest-lines projection" },
+  { value: "edit", label: "edit", description: "Edit card diff with line numbers and soft diff bands" },
+  { value: "eval", label: "eval", description: "Code cell evaluation with output separator rule" },
+  { value: "grep", label: "grep", description: "Search results with code syntax highlighting and pattern emphasis" },
+  { value: "task", label: "task", description: "Subagent task hierarchy with status and durations" },
+  { value: "hub", label: "hub", description: "Background processes and peer coordination status" },
+  { value: "todo", label: "todo", description: "Todos checklist header with phase grouping and progress" },
+  { value: "thinking", label: "thinking", description: "Reasoning stream with live pulse and vertical rail" },
+  { value: "warning", label: "warning", description: "One-line pulsing alert banner" },
+  { value: "web_search", label: "web_search", description: "Web search query and ranked source results" },
+  { value: "stop", label: "stop", description: "Dismiss the currently active demo widget" },
+  { value: "help", label: "help", description: "List all available demo targets and descriptions" },
+] as const;
+
 export type DemoTarget =
   | "all"
   | "write"
   | "edit"
   | "eval"
   | "grouped"
-  | "web_search"
+  | "grep"
   | "search"
+  | "web_search"
   | "task"
   | "hub"
   | "todo"
@@ -344,21 +368,53 @@ export type DemoTarget =
   | "think"
   | "warning"
   | "alert"
-  | "stop";
+  | "stop"
+  | "help"
+  | "list";
+
 export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): Promise<void> {
   if (!ctx.hasUI) return;
 
-  const target = (rawTarget?.trim().toLowerCase() || "all") as DemoTarget;
+  const cleaned = rawTarget?.trim().toLowerCase();
+  const clearDemo = () => {
+    ctx.ui.setWidget(WIDGET_KEY, undefined);
+    if (typeof ctx.ui.requestRender === "function") ctx.ui.requestRender();
+  };
+
+  if (cleaned === "help" || cleaned === "list" || cleaned === "options" || cleaned === "?") {
+    clearDemo();
+    const list = DEMO_OPTIONS.filter((o) => o.value !== "help")
+      .map((opt) => `  ${opt.value.padEnd(12)} - ${opt.description}`)
+      .join("\n");
+    ctx.ui.notify(`Available /demo targets:\n${list}`, "info");
+    return;
+  }
+
+  const validValues = new Set<string>([
+    ...DEMO_OPTIONS.map((o) => o.value),
+    "todos",
+    "search",
+    "think",
+    "alert",
+    "options",
+    "?",
+  ]);
+
+  if (cleaned && !validValues.has(cleaned)) {
+    clearDemo();
+    const validList = DEMO_OPTIONS.filter((o) => o.value !== "help")
+      .map((o) => o.value)
+      .join(", ");
+    ctx.ui.notify(`Unknown demo target "${rawTarget}". Available targets: ${validList}`, "warning");
+    return;
+  }
+
+  const target = (cleaned || "all") as DemoTarget;
   const currentSeq = ++activeDemoSeq;
 
   const setDemoComponent = (factory: (tui: unknown, theme: unknown) => unknown) => {
     if (currentSeq !== activeDemoSeq) return;
     ctx.ui.setWidget(WIDGET_KEY, factory as never, { placement: "above-editor" });
-    if (typeof ctx.ui.requestRender === "function") ctx.ui.requestRender();
-  };
-
-  const clearDemo = () => {
-    ctx.ui.setWidget(WIDGET_KEY, undefined);
     if (typeof ctx.ui.requestRender === "function") ctx.ui.requestRender();
   };
 
