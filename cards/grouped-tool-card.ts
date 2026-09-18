@@ -259,8 +259,30 @@ function highlightPatternMatches(theme: unknown, text: string, pattern: string):
 export function formatSearchDetails(theme: unknown, lines: string[], pattern?: string): string[] {
   let currentFile: string | undefined;
   return lines.map((line) => {
-    // 1. File summary header line: e.g. "src/server.ts: 3 hits (first 3 shown)"
-    const headerMatch = line.match(/^([^:]+):\s*(\d+\s+hits.*)$/);
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+
+    // 1. Directory header: e.g. "# /path/to/dir/"
+    const dirMatch = trimmed.match(/^(#+)\s+(.+\/)$/);
+    if (dirMatch) {
+      const hashes = paintAt(theme, dirMatch[1], "dim", 0.6);
+      const dirPath = paintAt(theme, dirMatch[2], "accent", 0.85);
+      return `${hashes} ${dirPath}`;
+    }
+
+    // 2. File header: e.g. "## interactive-mode.ts#CDE3" or "## src/server.ts"
+    const fileMatch = trimmed.match(/^(#+)\s+([^#\s]+)(?:#([0-9a-fA-F]+))?(.*)$/);
+    if (fileMatch) {
+      const hashes = paintAt(theme, fileMatch[1], "dim", 0.6);
+      currentFile = fileMatch[2].trim();
+      const fileStyled = paintAt(theme, currentFile, "accent", 1);
+      const tagStyled = fileMatch[3] ? paintAt(theme, `#${fileMatch[3]}`, "dim", 0.6) : "";
+      const extra = fileMatch[4] ?? "";
+      return `${hashes} ${fileStyled}${tagStyled}${extra}`;
+    }
+
+    // 3. File summary header line: e.g. "src/server.ts: 3 hits (first 3 shown)"
+    const headerMatch = trimmed.match(/^([^#:][^:]*):\s*(\d+\s+hits?.*)$/);
     if (headerMatch) {
       currentFile = headerMatch[1].trim();
       const fileStyled = paintAt(theme, currentFile, "accent", 0.95);
@@ -268,9 +290,29 @@ export function formatSearchDetails(theme: unknown, lines: string[], pattern?: s
       return `${fileStyled}: ${hitsStyled}`;
     }
 
-    // 2. Search match line: e.g. "src/server.ts:15:export class MicroserviceServer {"
+    // 4. Match or context line under file header: e.g. " 1290:code", "*1291:code", "  15:code"
+    const lineMatch = line.match(/^(\s*)(\*|\s)?(\s*)(\d+)[:|](.*)$/);
+    if (lineMatch) {
+      const leadingIndent = lineMatch[1] ?? "";
+      const isMatch = lineMatch[2] === "*";
+      const marker = isMatch ? "*" : " ";
+      const midSpaces = lineMatch[3] ?? "";
+      const lineNum = lineMatch[4];
+      const code = lineMatch[5] ?? "";
+      const lang = currentFile ? languageForPath(currentFile) : undefined;
+      let highlighted = lang ? highlightCell(code, lang) : code;
+      if (pattern && isMatch) {
+        highlighted = highlightPatternMatches(theme, highlighted, pattern);
+      }
+      const markerStyled = isMatch ? paintAt(theme, marker, "accent", 1) : marker;
+      const lineNumStyled = paintAt(theme, lineNum, isMatch ? "accent" : "dim", isMatch ? 0.95 : 0.65);
+      const colonStyled = paintAt(theme, ":", "dim", 0.5);
+      return `${leadingIndent}${markerStyled}${midSpaces}${lineNumStyled}${colonStyled}${highlighted}`;
+    }
+
+    // 5. Search match line with embedded file: e.g. "src/server.ts:15:export class MicroserviceServer {"
     const match = line.match(/^(\s*(?:\*\s*)?)(.+?):(\d+)(?::(\d+))?:(.*)$/);
-    if (match) {
+    if (match && !match[2].startsWith("#")) {
       const marker = match[1] ?? "";
       const file = match[2]?.trim() ?? "";
       const lineNum = match[3];
@@ -282,27 +324,15 @@ export function formatSearchDetails(theme: unknown, lines: string[], pattern?: s
       if (pattern) {
         highlighted = highlightPatternMatches(theme, highlighted, pattern);
       }
-      const markerStyled = marker ? paintAt(theme, marker, "accent", 0.8) : "";
+      const markerStyled = marker ? paintAt(theme, marker, "accent", 1) : "";
       const fileStyled = file ? paintAt(theme, file, "accent", 0.85) : "";
       const coordStyled = paintAt(theme, `:${lineNum}${col ? `:${col}` : ""}:`, "dim", 0.7);
       return `${markerStyled}${fileStyled}${coordStyled} ${highlighted}`;
     }
 
-    // 3. Line number under a file header: e.g. "  15:export class ..." or "*15:..."
-    const lineNumMatch = line.match(/^(\s*\*?\s*)(\d+)(?::(\d+))?:(.*)$/);
-    if (lineNumMatch && currentFile) {
-      const marker = lineNumMatch[1] ?? "";
-      const lineNum = lineNumMatch[2];
-      const col = lineNumMatch[3];
-      const code = lineNumMatch[4] ?? "";
-      const lang = languageForPath(currentFile);
-      let highlighted = lang ? highlightCell(code, lang) : code;
-      if (pattern) {
-        highlighted = highlightPatternMatches(theme, highlighted, pattern);
-      }
-      const markerStyled = marker ? paintAt(theme, marker, "accent", 0.8) : "";
-      const coordStyled = paintAt(theme, `${lineNum}${col ? `:${col}` : ""}:`, "dim", 0.7);
-      return `${markerStyled}${coordStyled} ${highlighted}`;
+    // 6. Omission hint / ellipsis: e.g. "… 3 more lines"
+    if (trimmed.startsWith("…")) {
+      return paintAt(theme, line, "dim", 0.65);
     }
 
     return line;

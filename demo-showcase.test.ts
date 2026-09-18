@@ -200,7 +200,51 @@ describe("runPluginDemo", () => {
     // Pattern highlight escape sequences applied
     expect(formatted[1]).toContain("\x1b[1m");
   });
+  test("formatSearchDetails parses real OMP grouped grep output with directory and file headers", () => {
+    const mockTheme = {
+      fg: (_token: string, text: string) => text,
+    };
+    const ompGrepLines = [
+      "      # /home/redbull/.bun/install/cache/@oh-my-pi/pi-coding-agent@18.2.4@@@1/src/modes/",
+      "      ## interactive-mode.ts#CDE3",
+      "       1290:                    icon: getSlashCommandTypeIcon(\"extension\"),",
+      "      *1291:                    getArgumentCompletions: cmd.getArgumentCompletions,",
+      "      … 3 more lines",
+      "",
+      "      ## autocomplete.ts#C99C",
+      "       182:",
+      "      *183:export interface AutocompleteItem {",
+      "      … 3 more lines",
+    ];
 
+    const formatted = formatSearchDetails(mockTheme, ompGrepLines, "getArgumentCompletions");
+    expect(formatted).toHaveLength(ompGrepLines.length);
+
+    // Directory line formatted
+    expect(formatted[0]).toContain("#");
+    expect(formatted[0]).toContain("src/modes/");
+
+    // File line formatted with file name and tag
+    expect(formatted[1]).toContain("interactive-mode.ts");
+    expect(formatted[1]).toContain("#CDE3");
+
+    // Context line has line number 1290
+    expect(formatted[2]).toContain("1290");
+    expect(formatted[2]).toContain("getSlashCommandTypeIcon");
+
+    // Match line has * marker, line number 1291, and highlighted pattern
+    expect(formatted[3]).toContain("1291");
+    expect(formatted[3]).toContain("getArgumentCompletions");
+    expect(formatted[3]).toContain("\x1b[1m");
+
+    // Second file header
+    expect(formatted[6]).toContain("autocomplete.ts");
+    expect(formatted[6]).toContain("#C99C");
+
+    // Second match line
+    expect(formatted[8]).toContain("183");
+    expect(formatted[8]).toContain("AutocompleteItem");
+  });
   test("cardDetailLine preserves TTY/ANSI colors using dimAnsi", () => {
     const mockTheme = {
       bg: () => [20, 20, 20] as [number, number, number],
