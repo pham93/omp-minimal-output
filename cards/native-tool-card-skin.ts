@@ -122,6 +122,38 @@ function methodOf(record: Record<string, unknown>, name: string): ((...args: unk
   const value = record[name];
   return typeof value === "function" ? (value as (...args: unknown[]) => unknown) : undefined;
 }
+export function deduplicateReadToolImages(
+  child: object,
+  state: CapturedToolExecutionState,
+  deps: NativeToolCardSkinDeps,
+): void {
+  const setShowImages = methodOf(child as Record<string, unknown>, "setShowImages");
+  if (!setShowImages) return;
+  if (deps.active?.() === false) {
+    try {
+      setShowImages.call(child, true);
+    } catch {
+      // Display-only.
+    }
+    return;
+  }
+  const identity = state.toolCallId ? identityForToolCall(state.toolCallId) : undefined;
+  const isRead =
+    identity?.toolName === "read" ||
+    (typeof state.args === "object" &&
+      state.args !== null &&
+      ("path" in state.args || "file_path" in state.args) &&
+      !("command" in state.args) &&
+      !("pattern" in state.args) &&
+      !("edits" in state.args));
+  if (isRead) {
+    try {
+      setShowImages.call(child, false);
+    } catch {
+      // Display-only.
+    }
+  }
+}
 
 /** Strictly distinguish a native ToolExecutionComponent from read-group and unrelated containers. */
 export function isToolExecutionComponentLike(child: unknown): child is object {
@@ -244,6 +276,7 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
       try {
         state.args = args[0];
         captureCallIdentity(state, args[1]);
+        deduplicateReadToolImages(child, state, deps);
         requestPump(deps);
       } catch {
         // State capture is display-only.
@@ -254,6 +287,7 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
       const native = setExecutionStarted.apply(child, args);
       try {
         captureCallIdentity(state, args[0]);
+        deduplicateReadToolImages(child, state, deps);
         requestPump(deps);
       } catch {
         // State capture is display-only.
@@ -267,6 +301,7 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
         state.partial = args[1] === true;
         syncPartialPump(state, deps);
         captureCallIdentity(state, args[2]);
+        deduplicateReadToolImages(child, state, deps);
         requestPump(deps);
       } catch {
         // State capture is display-only.
@@ -302,6 +337,7 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
     }
 
     component["render"] = (...args: unknown[]): unknown => {
+      deduplicateReadToolImages(child, state, deps);
       try {
         const containerObj = child as { children?: unknown[] };
         if (Array.isArray(containerObj.children)) {

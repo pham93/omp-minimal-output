@@ -16,11 +16,8 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   matchesKey: (data: string, key: string) => data === key,
 }));
 
-const {
-  installNativeToolCardSkin,
-  stripToolExecutionBackground,
-  TOOL_EXECUTION_PADDING_X,
-} = await import("./cards/native-tool-card-skin.ts");
+const { deduplicateReadToolImages, installNativeToolCardSkin, stripToolExecutionBackground, TOOL_EXECUTION_PADDING_X } =
+  await import("./cards/native-tool-card-skin.ts");
 const { markFlush, tryCaptureFramedSymbol } = await import("./core/loaders.ts");
 const { paintReadGroupLines } = await import("./surfaces/read-group.ts");
 
@@ -196,5 +193,38 @@ describe("stripToolExecutionBackground and padding enforcement", () => {
     expect(multiLines[0]).toContain("Read 2 files");
     expect(multiLines[1].startsWith(" ")).toBe(true);
     expect(multiLines[2].startsWith(" ")).toBe(true);
+  });
+});
+
+describe("deduplicateReadToolImages", () => {
+  test("sets showImages to false on read tool execution component and restores when inactive", () => {
+    let showImagesState: boolean | undefined = undefined;
+    const component = {
+      setShowImages(show: boolean) {
+        showImagesState = show;
+      },
+    };
+    const state = {
+      args: { path: "attachment://1" },
+      result: undefined,
+      partial: false,
+      expanded: false,
+      toolCallId: "call-1",
+      sealed: false,
+    };
+    deduplicateReadToolImages(component, state, {
+      enabled: () => true,
+      theme: () => null,
+      active: () => true,
+    });
+    expect(showImagesState).toBe(false);
+
+    // When inactive, restores showImages to true
+    deduplicateReadToolImages(component, state, {
+      enabled: () => true,
+      theme: () => null,
+      active: () => false,
+    });
+    expect(showImagesState).toBe(true);
   });
 });
