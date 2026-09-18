@@ -17,6 +17,8 @@ mock.module("@oh-my-pi/pi-tui", () => ({
 }));
 // Dynamic import required: mock.module("@oh-my-pi/pi-tui") must run before importing the module under test.
 const { runPluginDemo } = await import("./surfaces/demo-showcase.ts");
+const { formatSearchDetails } = await import("./cards/grouped-tool-card.ts");
+const { cardDetailLine } = await import("./cards/card-primitives.ts");
 
 function createMockCtx() {
   const notifications: Array<{ message: string; type?: string }> = [];
@@ -147,6 +149,13 @@ describe("runPluginDemo", () => {
 
     await runPluginDemo(ctx as never, "stop");
     await searchPromise;
+
+    const grepPromise = runPluginDemo(ctx as never, "grep");
+    expect(widgets.has("minimal-demo")).toBe(true);
+    const grepFactory = widgets.get("minimal-demo") as (_tui: unknown, theme: unknown) => unknown;
+    expect(grepFactory({}, {})).toBeDefined();
+    await runPluginDemo(ctx as never, "stop");
+    await grepPromise;
   });
 
   test("renders thinking and warning demo targets", async () => {
@@ -168,5 +177,41 @@ describe("runPluginDemo", () => {
     expect(Array.isArray(warningLines)).toBe(true);
     await runPluginDemo(ctx as never, "stop");
     await warningPromise;
+  });
+
+  test("formatSearchDetails syntax-highlights code lines and patterns", () => {
+    const mockTheme = {
+      fg: (_token: string, text: string) => text,
+    };
+    const rawLines = [
+      "src/config.ts: 1 hit (first 1 shown)",
+      "src/config.ts:14:export const DEFAULT_PORT = 3000;",
+    ];
+
+    const formatted = formatSearchDetails(mockTheme, rawLines, "DEFAULT_PORT");
+    expect(formatted).toHaveLength(2);
+    // File header line formatted
+    expect(formatted[0]).toContain("src/config.ts");
+    expect(formatted[0]).toContain("1 hit");
+    // Match line formatted with coordinate and highlighted pattern
+    expect(formatted[1]).toContain("src/config.ts");
+    expect(formatted[1]).toContain(":14:");
+    expect(formatted[1]).toContain("DEFAULT_PORT");
+    // Pattern highlight escape sequences applied
+    expect(formatted[1]).toContain("\x1b[1m");
+  });
+
+  test("cardDetailLine preserves TTY/ANSI colors using dimAnsi", () => {
+    const mockTheme = {
+      bg: () => [20, 20, 20] as [number, number, number],
+      token: () => [120, 120, 120] as [number, number, number],
+    };
+    // Colored TTY text: green check, red fail
+    const coloredTtyText = "\x1b[32m✔ pass\x1b[0m \x1b[31m✖ fail\x1b[0m";
+    const rendered = cardDetailLine(mockTheme, 100, coloredTtyText);
+
+    // Should preserve SGR color codes rather than stripping to plain text
+    expect(rendered).toContain("\x1b[38;2;");
+    expect(Bun.stripANSI(rendered)).toContain("✔ pass ✖ fail");
   });
 });

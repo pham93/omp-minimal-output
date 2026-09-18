@@ -7,8 +7,9 @@ import {
   minimalToolSummary,
   type DetailProfile,
 } from "../core/density.ts";
-import { formatRowLine, elapsedSuffix, TOOL_INDENT } from "../core/theme.ts";
+import { formatRowLine, elapsedSuffix, paintAt, TOOL_INDENT } from "../core/theme.ts";
 import { markFlush } from "../core/loaders.ts";
+import { highlightCell, languageForPath } from "./edit-card.ts";
 import { cardDetailLine, cardIsPartial, stashedOrResultText } from "./card-primitives.ts";
 import { formatSettledThought } from "../surfaces/scrolling-text.ts";
 import { thinkingRailLines } from "../surfaces/thinking-widget.ts";
@@ -243,7 +244,70 @@ function groupedOutputLines(result: unknown): string[] {
   while (rows.length > 0 && !Bun.stripANSI(rows[rows.length - 1]!).trim()) rows.pop();
   return rows;
 }
+function highlightPatternMatches(theme: unknown, text: string, pattern: string): string {
+  if (!pattern || pattern.length === 0) return text;
+  try {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(${escaped})`, "gi");
+    const highlightToken = paintAt(theme, "$1", "accent", 1);
+    return text.replace(re, `\x1b[1m${highlightToken}\x1b[22m`);
+  } catch {
+    return text;
+  }
+}
 
+export function formatSearchDetails(theme: unknown, lines: string[], pattern?: string): string[] {
+  let currentFile: string | undefined;
+  return lines.map((line) => {
+    // 1. File summary header line: e.g. "src/server.ts: 3 hits (first 3 shown)"
+    const headerMatch = line.match(/^([^:]+):\s*(\d+\s+hits.*)$/);
+    if (headerMatch) {
+      currentFile = headerMatch[1].trim();
+      const fileStyled = paintAt(theme, currentFile, "accent", 0.95);
+      const hitsStyled = paintAt(theme, headerMatch[2], "dim", 0.7);
+      return `${fileStyled}: ${hitsStyled}`;
+    }
+
+    // 2. Search match line: e.g. "src/server.ts:15:export class MicroserviceServer {"
+    const match = line.match(/^(\s*(?:\*\s*)?)(.+?):(\d+)(?::(\d+))?:(.*)$/);
+    if (match) {
+      const marker = match[1] ?? "";
+      const file = match[2]?.trim() ?? "";
+      const lineNum = match[3];
+      const col = match[4];
+      const code = match[5] ?? "";
+      currentFile = file || currentFile;
+      const lang = currentFile ? languageForPath(currentFile) : undefined;
+      let highlighted = lang ? highlightCell(code, lang) : code;
+      if (pattern) {
+        highlighted = highlightPatternMatches(theme, highlighted, pattern);
+      }
+      const markerStyled = marker ? paintAt(theme, marker, "accent", 0.8) : "";
+      const fileStyled = file ? paintAt(theme, file, "accent", 0.85) : "";
+      const coordStyled = paintAt(theme, `:${lineNum}${col ? `:${col}` : ""}:`, "dim", 0.7);
+      return `${markerStyled}${fileStyled}${coordStyled} ${highlighted}`;
+    }
+
+    // 3. Line number under a file header: e.g. "  15:export class ..." or "*15:..."
+    const lineNumMatch = line.match(/^(\s*\*?\s*)(\d+)(?::(\d+))?:(.*)$/);
+    if (lineNumMatch && currentFile) {
+      const marker = lineNumMatch[1] ?? "";
+      const lineNum = lineNumMatch[2];
+      const col = lineNumMatch[3];
+      const code = lineNumMatch[4] ?? "";
+      const lang = languageForPath(currentFile);
+      let highlighted = lang ? highlightCell(code, lang) : code;
+      if (pattern) {
+        highlighted = highlightPatternMatches(theme, highlighted, pattern);
+      }
+      const markerStyled = marker ? paintAt(theme, marker, "accent", 0.8) : "";
+      const coordStyled = paintAt(theme, `${lineNum}${col ? `:${col}` : ""}:`, "dim", 0.7);
+      return `${markerStyled}${coordStyled} ${highlighted}`;
+    }
+
+    return line;
+  });
+}
 function frozenGroupOf(result: unknown): FrozenGroup | undefined {
   try {
     const details = (result as { details?: unknown } | null | undefined)?.details;
@@ -258,6 +322,15 @@ function frozenGroupOf(result: unknown): FrozenGroup | undefined {
 export function renderGroupedToolCard(context: CardRenderContext): Container {
   const { theme, toolName, args, result, options, fingerprint, phase, groupedTools } = context;
   const isCall = phase === "call";
+  let details = isCall ? [] : groupedOutputLines(result);
+  if (!isCall && (toolName === "grep" || toolName === "ast_grep")) {
+    const rawPattern =
+      typeof args === "object" && args !== null
+        ? (args as Record<string, unknown>)["pattern"] ?? (args as Record<string, unknown>)["query"] ?? ""
+        : "";
+    const pattern = typeof rawPattern === "string" ? rawPattern : "";
+    details = formatSearchDetails(theme, details, pattern);
+  }
   return groupedTools.renderToolVisual(
     theme,
     fingerprint,
@@ -266,7 +339,7 @@ export function renderGroupedToolCard(context: CardRenderContext): Container {
       live: isCall && cardIsPartial(options),
       error: !isCall && isToolError(result, options),
       right: isCall ? "" : durationSuffix(result),
-      details: isCall ? [] : groupedOutputLines(result),
+      details,
       detail: detailProfile(options),
     },
     isCall ? undefined : frozenGroupOf(result),

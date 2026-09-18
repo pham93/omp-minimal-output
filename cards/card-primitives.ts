@@ -4,7 +4,7 @@ import { getPluginConfig } from "../core/config.ts";
 import { detailProfile, minimalToolSummary, type DetailProfile } from "../core/density.ts";
 import { isToolError, toolResultText, resultDetails, stashedResultText } from "../core/results.ts";
 export { resultDetails, stashedResultText };
-import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, isSettling, paintAt } from "../core/theme.ts";
+import { LINE_WIDTH_RATIO, TOOL_INDENT, dimAnsi, formatRowLine, isSettling, paintAt } from "../core/theme.ts";
 import { truncatePlain } from "../core/text.ts";
 
 export const CARD_LIFECYCLE_STATE = {
@@ -197,7 +197,13 @@ export function cardDetailLine(
   const rowWidth = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
   const budget = Math.max(0, rowWidth - visibleWidth(prefix));
   if (budget === 0) return " ".repeat(rowWidth);
-  return `${paintAt(theme, prefix, "dim", cfg.opacity)}${paintAt(theme, truncatePlain(text, budget), error ? "error" : "dim", cfg.opacity)}`;
+  const truncated = truncatePlain(text, budget);
+  const prefixPainted = paintAt(theme, prefix, "dim", cfg.opacity);
+  if (/\x1b\[[0-9;]*m/.test(truncated)) {
+    const dimmed = dimAnsi(theme, truncated, cfg.opacity);
+    return `${prefixPainted}${dimmed}\x1b[0m`;
+  }
+  return `${prefixPainted}${paintAt(theme, truncated, error ? "error" : "dim", cfg.opacity)}`;
 }
 
 export function limitCardItems<T>(items: readonly T[], max: number): CardItemLimit<T> {

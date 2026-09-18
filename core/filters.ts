@@ -478,33 +478,34 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
   if (stripped !== text) rules.push("ansi");
 
   let oneLiner = "";
-  let details = stripped;
+  let details = text;
 
   if (toolName === "bash") {
     const cmd = typeof fields["command"] === "string" ? (fields["command"] as string) : "";
     const short = shortCommandText(cmd);
     if (isTestCommand(cmd)) {
-      const r = aggregateTestOutput(stripped, `bash \`${short}\``);
+      const r = aggregateTestOutput(text, `bash \`${short}\``);
       oneLiner = r.oneLiner;
       details = r.details;
       rules.push("test");
     } else if (isBuildCommand(cmd)) {
-      const r = filterBuildOutput(stripped, `bash \`${short}\``);
+      const r = filterBuildOutput(text, `bash \`${short}\``);
       oneLiner = r.oneLiner;
       details = r.details;
       rules.push("build");
     } else if (isGitCommand(cmd)) {
-      const r = compactGitOutput(stripped, cmd, short);
+      const r = compactGitOutput(text, cmd, short);
       oneLiner = r.oneLiner;
       details = r.details;
       rules.push("git");
     } else if (isLinterCommand(cmd)) {
-      const r = aggregateLinterOutput(stripped, `bash \`${short}\``);
+      const r = aggregateLinterOutput(text, `bash \`${short}\``);
       oneLiner = r.oneLiner;
       details = r.details;
       rules.push("linter");
     } else {
       oneLiner = `◆ ${short}`;
+      details = text;
     }
   } else if (toolName === "read") {
     const p = typeof fields["path"] === "string" ? (fields["path"] as string) : "file";
@@ -706,5 +707,5 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
   if (capped.truncated) rules.push("truncate");
   const finalText = capped.details ? `${oneLiner}\n${capped.details}` : oneLiner;
   if (finalText === text) return { text, changed: false, rule: "", fullText: text };
-  return { text: finalText, changed: true, rule: rules.join(",") || "collapse", fullText: stripped };
+  return { text: finalText, changed: true, rule: rules.join(",") || "collapse", fullText: text };
 }

@@ -6,7 +6,7 @@ import { renderEvalCard } from "../cards/eval-card.ts";
 import { renderWebSearchCard } from "../cards/web-search-card.ts";
 import { renderTaskCard } from "../cards/task-card.ts";
 import { renderHubCard } from "../cards/hub-card.ts";
-import { GroupedToolManager } from "../cards/grouped-tool-card.ts";
+import { GroupedToolManager, formatSearchDetails } from "../cards/grouped-tool-card.ts";
 import { renderDensityTodoHeader } from "./todos-header.ts";
 import { formatRowLine, paintAt } from "../core/theme.ts";
 import { truncatePlain } from "../core/text.ts";
@@ -90,7 +90,10 @@ function renderGroupedDemo(theme: unknown): Container {
       live: false,
       error: false,
       right: "(0.2s)",
-      details: ["bun test v1.4.2 (744846f84)", "102 pass", "0 fail"],
+      details: [
+        "\x1b[32m✔\x1b[0m 102 pass   \x1b[38;5;244m(0.2s)\x1b[0m",
+        "\x1b[36mℹ\x1b[0m 0 fail",
+      ],
     },
     frozen,
   );
@@ -116,7 +119,14 @@ function renderGroupedDemo(theme: unknown): Container {
       live: false,
       error: false,
       right: "(8ms)",
-      details: ["3 matches across 2 files"],
+      details: formatSearchDetails(
+        theme,
+        [
+          "src/config.ts: 1 hit (first 1 shown)",
+          "src/config.ts:14:export const DEFAULT_PORT = 3000;",
+        ],
+        "DEFAULT_PORT",
+      ),
     },
     frozen,
   );
@@ -264,6 +274,37 @@ function renderTodoDemo(theme: unknown, width: number): readonly string[] {
     true,
   );
 }
+function renderSearchDemo(theme: unknown): Container {
+  const groups = new GroupedToolManager({
+    rowIsLive: () => false,
+    activityLabel: () => "Searching codebase for configurations",
+    activityRunId: () => "demo:search",
+    activityStartedAt: () => Date.now() - 600,
+  });
+  const frozen = { gid: "demo:search", label: "Searching codebase for configurations" };
+  const lines = formatSearchDetails(
+    theme,
+    [
+      "src/config.ts: 2 hits (first 2 shown)",
+      "src/config.ts:14:export const DEFAULT_PORT = 3000;",
+      "src/server.ts:22:  port: number = DEFAULT_PORT;",
+    ],
+    "DEFAULT_PORT",
+  );
+  groups.renderToolVisual(
+    theme,
+    "demo:grep",
+    {
+      body: 'Grep "DEFAULT_PORT"',
+      live: false,
+      error: false,
+      right: "(12ms)",
+      details: lines,
+    },
+    frozen,
+  );
+  return groups.paintGroup(theme, "demo:search");
+}
 function renderThinkingDemo(theme: unknown, width: number): readonly string[] {
   const header = formatRowLine(theme, width, {
     body: "Reasoning over project architecture & card seams...",
@@ -373,6 +414,14 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
   if (target === "grouped") {
     ctx.ui.notify("Demo: Grouped tools & continuation rails", "info");
     setDemoComponent((_tui, theme) => renderGroupedDemo(theme));
+    await sleep(3500, currentSeq);
+    if (currentSeq !== activeDemoSeq) return;
+    clearDemo();
+    return;
+  }
+  if (target === "grep") {
+    ctx.ui.notify("Demo: Search (grep) with syntax highlighting", "info");
+    setDemoComponent((_tui, theme) => renderSearchDemo(theme));
     await sleep(3500, currentSeq);
     if (currentSeq !== activeDemoSeq) return;
     clearDemo();
