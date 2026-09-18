@@ -10,7 +10,7 @@ import {
   type ParentCardLabel,
 } from "./card-primitives.ts";
 import { getPluginConfig } from "../core/config.ts";
-import { capRenderedRows, detailedRowLimit, standardWriteMaxRows } from "../core/density.ts";
+import { detailedRowLimit, standardWriteMaxRows } from "../core/density.ts";
 import { highlightCell, languageForPath } from "./edit-card.ts";
 import { markFlush } from "../core/loaders.ts";
 import { durationSuffix } from "../core/results.ts";
@@ -200,13 +200,10 @@ export function renderWriteCard(
             1,
           )}`;
           lines.push(error);
-          return capRenderedRows(lines, maxRows, error, error);
+          return lines;
         }
 
-        const available = Math.max(0, maxRows - lines.length);
-        const hiddenSummary = data.lineCount > available;
-        const contentCap = hiddenSummary ? Math.max(0, available - 1) : available;
-        const visible = data.lines.slice(-contentCap);
+        const visible = data.lines;
         const gutterWidth = Math.max(1, String(data.lineCount).length);
         const language = languageForPath(data.path);
         const restOpacity = getPluginConfig().opacity;

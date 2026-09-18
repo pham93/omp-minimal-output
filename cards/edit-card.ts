@@ -12,13 +12,13 @@ import {
 import { diffStat, parsePipeDiff, parseUnifiedDiff, selectPrettyRows } from "../core/filters.ts";
 import type { PrettyRow } from "../core/filters.ts";
 import { markFlush } from "../core/loaders.ts";
-import { capRenderedRows, detailedRowLimit, detailProfile, standardEditRowsPerFile } from "../core/density.ts";
+import { detailedRowLimit, detailProfile, standardEditRowsPerFile } from "../core/density.ts";
 import { durationSuffix, isToolError, toolResultText } from "../core/results.ts";
 import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "../core/theme.ts";
 import { shortPathText, showWhitespace, truncatePlain } from "../core/text.ts";
 import { getPluginConfig } from "../core/config.ts";
 
-import("@oh-my-pi/pi-coding-agent/modes/theme/theme")
+import("@oh-my-pi/pi-coding-agent")
   .then((m) => {
     if (m && typeof m.highlightCode === "function") {
       coreHighlight = m as CoreHighlight;
@@ -405,14 +405,7 @@ export function renderPrettyEditCard(
             }
             if (data.multi && !lastSection) lines.push(`${EDIT_FILE_INDENT}${paintAt(theme, "│", "dim", 0.7)}`);
           }
-          if (!lifecycle.detail.detailed) return lines;
-          const maxRows = detailedRowLimit();
-          const hiddenRows = Math.max(1, lines.length - maxRows + 1);
-          const overflow = formatRowLine(theme, width, {
-            body: `… ${hiddenRows} more rows`,
-            indent: true,
-          });
-          return capRenderedRows(lines, maxRows, overflow);
+          return lines;
         } catch {
           return [formatRowLine(theme, width, { body: paintHeaderStat(theme, data.header), live, error })];
         }

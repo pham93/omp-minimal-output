@@ -2,8 +2,7 @@ import { Container } from "@oh-my-pi/pi-tui";
 import { isHideThinkingBlock } from "../core/config.ts";
 import {
   detailProfile,
-  detailedRowLimit,
-  standardRowLimit,
+  outputRowLimit,
   thoughtRowLimit,
   minimalToolSummary,
   type DetailProfile,
@@ -116,7 +115,8 @@ export class GroupedToolManager {
         if (!group) return [];
         const rows = [...group.rows.values()].sort((a, b) => a.startedAt - b.startedAt);
         const bodies = rows.filter((row) => !row.fp.startsWith("thought:"));
-        const profile = bodies[0]?.detail ?? detailProfile();
+        const firstDetail = bodies[0]?.detail;
+        const profile = typeof firstDetail === "object" ? firstDetail : detailProfile(undefined);
         const headerLive = rows.some((row) => this.#deps.rowIsLive(row.fp));
         const header = group.label;
         const readCount = bodies.filter((row) => row.fp.startsWith("read:")).length;
@@ -150,18 +150,9 @@ export class GroupedToolManager {
             }),
           );
         }
-        const hasOutput = bodies.some((row) => row.details.length > 0);
-        const toolLimit = profile.detailed ? detailedRowLimit() : standardRowLimit(hasOutput);
         const sessionCtx = this.#deps.getSessionContext?.();
-        const thoughtRowsCount = isHideThinkingBlock(sessionCtx)
-          ? 0
-          : rows.filter((row) => row.fp.startsWith("thought:")).length;
-        const thoughtAllowance = (thoughtRowLimit(profile) + 2) * thoughtRowsCount;
-        const maxRows = toolLimit + thoughtAllowance;
-        let totalRows = lines.length;
         const hasHeader = lines.length > 0;
         const isStandalone = !hasHeader;
-        let terminalError: string | undefined;
         for (const [idx, row] of rows.entries()) {
           const live = this.#deps.rowIsLive(row.fp);
           const isThought = row.fp.startsWith("thought:");
@@ -177,9 +168,7 @@ export class GroupedToolManager {
             right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
             mark: isStandalone && !live ? "●" : undefined,
           });
-          totalRows += 1;
-          if (lines.length < maxRows) lines.push(rowLine);
-          if (row.error) terminalError = rowLine;
+          lines.push(rowLine);
           if (isThought) {
             const rawThought = typeof row.detail === "string" && row.detail ? row.detail : row.details.join("\n");
             const thoughtLines = live
@@ -190,26 +179,21 @@ export class GroupedToolManager {
                   theme,
                   indent: !isStandalone,
                 });
-            totalRows += thoughtLines.length;
-            lines.push(...thoughtLines.slice(0, Math.max(0, maxRows - lines.length)));
+            lines.push(...thoughtLines);
+            continue;
           }
           const detailPrefix = isStandalone || isLastTool ? `${TOOL_INDENT}   ` : "│    ";
-          totalRows += row.details.length;
-          const visibleDetails = Math.min(row.details.length, Math.max(0, maxRows - lines.length));
+          const rowProfile = typeof row.detail === "object" ? row.detail : profile;
+          const visibleDetails = Math.min(row.details.length, outputRowLimit(rowProfile));
           for (let detailIndex = 0; detailIndex < visibleDetails; detailIndex += 1) {
             lines.push(cardDetailLine(theme, width, row.details[detailIndex]!, detailPrefix, row.error));
           }
+          const hidden = row.details.length - visibleDetails;
+          if (hidden > 0) {
+            lines.push(cardDetailLine(theme, width, `… ${hidden} more lines`, detailPrefix, row.error));
+          }
         }
-        if (totalRows <= maxRows) return lines;
-        const hiddenRows = totalRows - maxRows + 1;
-        const overflow = isStandalone
-          ? cardDetailLine(theme, width, `… ${hiddenRows} more rows`)
-          : formatRowLine(theme, width, {
-              body: `… ${hiddenRows} more rows`,
-              indent: true,
-              tree: "last",
-            });
-        return [...lines.slice(0, maxRows - 1), terminalError ?? overflow];
+        return lines;
       },
     });
     markFlush?.(c);

@@ -47,6 +47,25 @@ function renderCard(container: unknown, width = 100): string[] {
 }
 
 describe("write-card latest lines and hint projection", () => {
+  test("content budget is independent of parent headers and omission hints", () => {
+    const content = Array.from({ length: 8 }, (_, i) => `budget_line_${i + 1}`).join("\n");
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, standardWriteMaxRows: 3 });
+    try {
+      for (const parent of [undefined, "Creating file"]) {
+        const lines = renderCard(renderWriteCard(null, { path: "budget.ts", content }, "ok", {}, undefined, parent));
+        const visible = lines.map(stripAnsi).filter((line) => line.includes("budget_line_"));
+        expect(visible.map((line) => line.match(/budget_line_\d+/)?.[0])).toEqual([
+          "budget_line_6",
+          "budget_line_7",
+          "budget_line_8",
+        ]);
+        expect(lines.map(stripAnsi).some((line) => line.includes("5 previous lines"))).toBe(true);
+      }
+    } finally {
+      setPluginConfigForTest(null);
+    }
+  });
+
   test("renders all lines without hint when content fits within row limit", () => {
     resetWriteCardFadesForTest();
     setPluginConfigForTest(null);
@@ -94,28 +113,28 @@ describe("write-card latest lines and hint projection", () => {
     resetWriteCardFadesForTest();
     setPluginConfigForTest(null);
 
-    // Frame 1: 5 lines arrive (fits in available rows)
+    // Frame 1: 5 lines arrive (fits in the 10-line content budget)
     const chunk1 = Array.from({ length: 5 }, (_, i) => `streaming line ${i + 1}`).join("\n");
     const card1 = renderWriteCard(null, { path: "src/stream.ts", content: chunk1 }, "ok", {});
     const lines1 = renderCard(card1, 100).map(stripAnsi);
     expect(lines1[0]).toContain("Write src/stream.ts — 5 lines");
     expect(lines1.some((l) => l.includes("previous lines"))).toBe(false);
 
-    // Frame 2: 25 lines have arrived (exceeds standard 10 rows: 1 header + 1 hint + 8 content)
+    // Frame 2: 25 lines have arrived (exceeds standardWriteMaxRows content lines)
     const chunk2 = Array.from({ length: 25 }, (_, i) => `streaming line ${i + 1}`).join("\n");
     const card2 = renderWriteCard(null, { path: "src/stream.ts", content: chunk2 }, "ok", {});
     const lines2 = renderCard(card2, 100).map(stripAnsi);
     expect(lines2[0]).toContain("Write src/stream.ts — 25 lines");
-    // 25 - 8 = 17 previous lines
-    expect(lines2[1]).toContain("│ (...17 previous lines)");
+    // 25 - 10 content lines = 15 previous lines; hint does not consume the budget
+    expect(lines2[1]).toContain("│ (...15 previous lines)");
     expect(lines2[lines2.length - 1]).toContain("25 │ streaming line 25");
 
-    // Frame 3: 50 lines have arrived (hint adapts to 50 - 8 = 42 previous lines)
+    // Frame 3: 50 lines have arrived (hint adapts to 50 - 10 = 40 previous lines)
     const chunk3 = Array.from({ length: 50 }, (_, i) => `streaming line ${i + 1}`).join("\n");
     const card3 = renderWriteCard(null, { path: "src/stream.ts", content: chunk3 }, "ok", {});
     const lines3 = renderCard(card3, 100).map(stripAnsi);
     expect(lines3[0]).toContain("Write src/stream.ts — 50 lines");
-    expect(lines3[1]).toContain("│ (...42 previous lines)");
+    expect(lines3[1]).toContain("│ (...40 previous lines)");
     expect(lines3[lines3.length - 1]).toContain("50 │ streaming line 50");
   });
 
@@ -144,6 +163,24 @@ describe("write-card latest lines and hint projection", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("Write src/test.ts — 2 lines");
     setPluginConfigForTest(null);
+  });
+
+  test("minimum content budget retains the latest line beside headers and hint", () => {
+    resetWriteCardFadesForTest();
+    const content = Array.from({ length: 4 }, (_, i) => `minimum_line_${i + 1}`).join("\n");
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, standardWriteMaxRows: 1 });
+    try {
+      const lines = renderCard(
+        renderWriteCard(null, { path: "minimum.ts", content }, "ok", {}, undefined, "Creating file"),
+      ).map(stripAnsi);
+      expect(lines.some((line) => line.includes("Write minimum.ts — 4 lines"))).toBe(true);
+      expect(
+        lines.filter((line) => line.includes("minimum_line_")).map((line) => line.match(/minimum_line_\d+/)?.[0]),
+      ).toEqual(["minimum_line_4"]);
+      expect(lines.some((line) => line.includes("3 previous lines"))).toBe(true);
+    } finally {
+      setPluginConfigForTest(null);
+    }
   });
 });
 

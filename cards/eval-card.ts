@@ -6,7 +6,7 @@
 // indented, no border, no background. A dim labeled rule (`── output ──`)
 // separates input from output, with an accent pulse sweeping it while
 // running. Core re-invokes renderResult with partial results (`isPartial`);
-// Ctrl+O uses the configured Detailed total-row ceiling.
+// Ctrl+O uses the configured Detailed content-row ceiling.
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import {
   cardLifecycle,
@@ -15,7 +15,7 @@ import {
   resolveParentCardLabel,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, detailedRowLimit, standardRowLimit } from "../core/density.ts";
+import { inputRowLimit, outputRowLimit } from "../core/density.ts";
 import { markFlush } from "../core/loaders.ts";
 import { durationSuffix, isToolError, toolResultText } from "../core/results.ts";
 import {
@@ -32,11 +32,8 @@ import {
 import { evalCell, evalLabelText, truncatePlain } from "../core/text.ts";
 import { highlightCell } from "./edit-card.ts";
 
-// Standard keeps short input/output previews. Detailed and Ctrl+O use the
-// shared total-row ceiling from density.ts.
-const INPUT_COLLAPSED_LINES = 3;
-const OUTPUT_COLLAPSED_LINES = 5;
-const STREAM_COLLAPSED_LINES = 3;
+// Input and output previews use independent content-row budgets from
+// density.ts; headers, rules, and hints sit outside those allowances.
 
 function contentWidth(width: number): number {
   return Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - TOOL_INDENT.length);
@@ -122,7 +119,7 @@ export function renderEvalCard(
     const cell = evalCell(args);
     const rawCode = cell.code ? cell.code.split("\n") : [];
     while (rawCode.length > 0 && !stripSgr(rawCode[rawCode.length - 1] ?? "").trim()) rawCode.pop();
-    const inputCap = lifecycle.detail.detailed ? detailedRowLimit() : INPUT_COLLAPSED_LINES;
+    const inputCap = Math.max(0, Math.floor(inputRowLimit(lifecycle.detail)));
     const input = rawCode.slice(0, inputCap);
     const inputMore = rawCode.length - input.length;
 
@@ -133,7 +130,7 @@ export function renderEvalCard(
     if (result !== undefined) {
       const rawText = evalResultText(result, header);
       if (error) {
-        const errorCap = detailedRowLimit();
+        const errorCap = Math.max(0, Math.floor(outputRowLimit(lifecycle.detail)));
         for (const value of stripSgr(rawText).split("\n")) {
           const line = value.trim();
           if (!line) continue;
@@ -143,9 +140,9 @@ export function renderEvalCard(
       } else {
         const raw = rawText.split("\n");
         while (raw.length > 0 && !stripSgr(raw[raw.length - 1] ?? "").trim()) raw.pop();
-        const outputCap = lifecycle.detail.detailed ? detailedRowLimit() : OUTPUT_COLLAPSED_LINES;
+        const outputCap = Math.max(0, Math.floor(outputRowLimit(lifecycle.detail)));
         if (lifecycle.partial) {
-          output = lifecycle.detail.detailed ? raw.slice(-outputCap) : raw.slice(-STREAM_COLLAPSED_LINES);
+          output = raw.slice(-outputCap);
           more = raw.length - output.length;
           earlierHint = true;
         } else {
@@ -223,14 +220,7 @@ export function renderEvalCard(
               }
             }
           }
-          const maxRows = lifecycle.detail.detailed ? detailedRowLimit() : standardRowLimit(result !== undefined);
-          const hidden = Math.max(1, lines.length - maxRows + 1);
-          const overflow = `${TOOL_INDENT}${paintAt(theme, `… ${hidden} more lines`, "dim", op)}`;
-          const terminal =
-            error && errorLines.length > 0
-              ? `${TOOL_INDENT}${paintAt(theme, truncatePlain(errorLines[0] ?? "Eval failed", w), "error", 1)}`
-              : undefined;
-          return capRenderedRows(lines, maxRows, overflow, terminal);
+          return lines;
         } catch {
           return [formatRowLine(theme, width, { body: header, live: running, error })];
         }

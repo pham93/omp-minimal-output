@@ -54,10 +54,13 @@ export interface PluginConfig extends WrappedToolSettings {
   indicator: IndicatorId;
   indicatorAnimation: boolean;
   detailLevel: DetailLevel;
+  /** Input content lines; also thinking lines and native read-group entries. */
   standardMaxRows: number;
+  /** Output content lines per execution, independent of input and chrome. */
   standardOutputMaxRows: number;
   standardEditRowsPerFile: number;
   standardWriteMaxRows: number;
+  /** Content lines per section/file, or complete items for structured tool cards. */
   detailedMaxRows: number;
   nativeTask: boolean;
   taskMaxAgents: number;

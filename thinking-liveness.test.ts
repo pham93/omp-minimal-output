@@ -27,11 +27,8 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   truncateToWidth: (s: string, w: number) => s.slice(0, w),
 }));
 
-mock.module("@oh-my-pi/pi-coding-agent/modes/components/custom-editor", () => ({
+mock.module("@oh-my-pi/pi-coding-agent", () => ({
   CustomEditor: class {},
-}));
-
-mock.module("@oh-my-pi/pi-coding-agent/modes/theme/theme", () => ({
   theme: { fg: () => "" },
 }));
 const { formatRowLine, advanceSpinFrame, setSpinFrame, settleAt } = await import("./core/theme.ts");
@@ -275,8 +272,14 @@ describe("thought lines during subsequent thinking", () => {
       false,
     );
     const overflowRows = overflow(80).map(Bun.stripANSI);
-    expect(overflowRows).toHaveLength(4);
-    expect(overflowRows.slice(1)).toEqual(["     line 0", "     line 1", "     … 8 more rows"]);
+    expect(overflowRows).toHaveLength(6);
+    expect(overflowRows.slice(1)).toEqual([
+      "     line 0",
+      "     line 1",
+      "     line 2",
+      "     line 3",
+      "     … 6 more lines",
+    ]);
 
     const grouped = renderResult("first", "first output", "history-group", "Inspecting sources");
     renderResult("second", "second output", "history-group", "Inspecting sources");
@@ -289,9 +292,10 @@ describe("thought lines during subsequent thinking", () => {
 
     const failed = renderResult("failed", "failure detail\n".repeat(10), "history-error", "", false, true);
     const failedRows = failed(80).map(Bun.stripANSI);
-    expect(failedRows).toHaveLength(4);
-    expect(failedRows[3]).toContain("failed");
-    expect(failedRows[3]).not.toContain("more rows");
+    expect(failedRows).toHaveLength(6);
+    expect(failedRows[0]).toContain("failed");
+    expect(failedRows.slice(1, 5).every((line) => line.includes("failure detail"))).toBe(true);
+    expect(failedRows[5]).toContain("… 6 more lines");
     const narrowDetails = standalone(8).slice(1).map(Bun.stripANSI);
     expect(narrowDetails.every((line) => line.length <= 8)).toBe(true);
   });

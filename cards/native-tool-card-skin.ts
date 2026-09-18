@@ -3,17 +3,10 @@
 import { compactCardText } from "./card-primitives.ts";
 import { getContainerInterceptor } from "../core/container-interceptor.ts";
 import { isWrappedTool } from "../core/config.ts";
-import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "../core/density.ts";
+import { detailProfile } from "../core/density.ts";
 import { isHubCardData, renderHubCardLines } from "./hub-card.ts";
-import {
-  fingerprintForToolCall,
-  identityForToolCall,
-  isToolError,
-  toolFingerprint,
-  toolFpBase,
-} from "../core/results.ts";
+import { fingerprintForToolCall, identityForToolCall, toolFingerprint, toolFpBase } from "../core/results.ts";
 import { renderTaskCardLines, isTaskCardData } from "./task-card.ts";
-import { formatRowLine } from "../core/theme.ts";
 
 export const NATIVE_TOOL_CARD_KIND = {
   hub: "hub",
@@ -146,25 +139,6 @@ export function resetNativeToolCardPump(): void {
 }
 let skinned = new WeakSet<object>();
 let installed = false;
-export function applyNativeDensityRows(
-  theme: unknown,
-  width: number,
-  native: readonly string[],
-  result: unknown,
-  options?: { expanded?: boolean },
-): readonly string[] {
-  const profile = detailProfile(options);
-  if (native.length <= 1) return native;
-  if (profile.minimal) return native.slice(0, 1);
-  const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(result !== undefined);
-  const hiddenRows = Math.max(1, native.length - maxRows + 1);
-  const overflow = formatRowLine(theme, width, {
-    body: `… ${hiddenRows} more rows`,
-    indent: true,
-  });
-  const terminal = isToolError(result) ? native[native.length - 1] : undefined;
-  return capRenderedRows(native, maxRows, overflow, terminal);
-}
 
 function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
   if (skinned.has(child)) return;
@@ -261,11 +235,11 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
         if (!selected || !deps.enabled(selected.kind)) {
           const identity = state.toolCallId ? identityForToolCall(state.toolCallId) : undefined;
           if (!deps.genericEnabled?.(identity?.toolName)) return native;
-          return Array.isArray(native) && native.every((line) => typeof line === "string")
-            ? applyNativeDensityRows(deps.theme(), width, native, state.result, {
-                expanded: state.expanded,
-              })
-            : native;
+          // ToolExecutionComponent.render() is an opaque string[]; there is no
+          // public chrome/body split. Minimal keeps the existing one-row
+          // projection. Standard/Detailed fail open rather than clipping chrome.
+          if (!Array.isArray(native) || !native.every((line) => typeof line === "string")) return native;
+          return detailProfile({ expanded: state.expanded }).minimal ? native.slice(0, 1) : native;
         }
         if (state.sealed && (state.result === undefined || state.partial)) return native;
         const options = { expanded: state.expanded, isPartial: state.partial };

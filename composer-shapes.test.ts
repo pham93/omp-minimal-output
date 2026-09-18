@@ -192,11 +192,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   visibleWidth: mockVisibleWidth,
 }));
 
-mock.module("@oh-my-pi/pi-coding-agent/modes/theme/theme", () => ({
-  theme: {
-    fg: (_color: string, text: string): string => `${MAGENTA}${text}${RESET}`,
-  },
-}));
+
 
 class FakeEditor {
   borderColor: (value: string) => string;
@@ -218,10 +214,12 @@ class FakeEditor {
   }
 }
 
-mock.module("@oh-my-pi/pi-coding-agent/modes/components/custom-editor", () => ({
+mock.module("@oh-my-pi/pi-coding-agent", () => ({
   CustomEditor: FakeEditor,
+  theme: {
+    fg: (_color: string, text: string): string => `${MAGENTA}${text}${RESET}`,
+  },
 }));
-
 // Dynamic import: mock.module() above must execute before composer-shapes.ts
 // loads, so a hoisted static import cannot work here.
 const composer: ComposerModuleUnderTest = await import("./surfaces/composer-shapes.ts");

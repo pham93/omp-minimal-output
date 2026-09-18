@@ -11,7 +11,7 @@ import {
   resultDetails,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, detailedRowLimit, standardRowLimit } from "../core/density.ts";
+import { detailedRowLimit } from "../core/density.ts";
 import { getPluginConfig } from "../core/config.ts";
 import { markFlush } from "../core/loaders.ts";
 
@@ -277,39 +277,31 @@ export function renderTaskCardLines(
     settledMark: "●",
     parentLabel,
   });
-  let terminalError: string | undefined;
   if (data.rows.length === 0 && lifecycle.error) {
-    terminalError = cardTitleLine(
-      theme,
-      width,
-      conciseErrorText(result, {
-        fallback: "Task failed",
-        skipPattern: /^●?\s*Task\b/iu,
-      }),
-      true,
+    lines.push(
+      cardTitleLine(
+        theme,
+        width,
+        conciseErrorText(result, {
+          fallback: "Task failed",
+          skipPattern: /^●?\s*Task\b/iu,
+        }),
+        true,
+      ),
     );
-    lines.push(terminalError);
   }
   for (const row of data.rows) {
     lines.push(cardTitleLine(theme, width, `${row.agent} — ${row.status}`, row.failed));
     if (row.task) lines.push(cardDetailLine(theme, width, `task: ${row.task}`));
     if (row.output) lines.push(cardDetailLine(theme, width, `output: ${row.output}`));
-    if (row.error) {
-      terminalError = cardDetailLine(theme, width, `error: ${row.error}`);
-      lines.push(terminalError);
-    }
+    if (row.error) lines.push(cardDetailLine(theme, width, `error: ${row.error}`));
     if (row.artifact) lines.push(cardDetailLine(theme, width, `artifact: ${row.artifact}`));
   }
   const hiddenAgents = Math.max(0, data.rowCount - data.rows.length);
   if (hiddenAgents > 0) {
     lines.push(cardDetailLine(theme, width, `… ${hiddenAgents} more ${hiddenAgents === 1 ? "agent" : "agents"}`));
   }
-  const maxRows = lifecycle.detail.detailed
-    ? detailedRowLimit()
-    : standardRowLimit(data.rowCount > 0 || lifecycle.error);
-  const hiddenRows = Math.max(1, lines.length - maxRows + 1);
-  const overflow = cardDetailLine(theme, width, `… ${hiddenRows} more rows`);
-  return capRenderedRows(lines, maxRows, overflow, terminalError);
+  return lines;
 }
 
 export function renderTaskCard(

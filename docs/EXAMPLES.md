@@ -4,7 +4,7 @@ Schematic row shapes per card. Color/paint omitted — structure only; spacing a
 
 > Design rationale lives in [`SSD.md`](SSD.md). The implemented detail-level contract lives in [`DETAIL_LEVELS.md`](DETAIL_LEVELS.md). Usage lives in [`../README.md`](../README.md).
 > `◈◉◎○` = running spin. `◆` = settled shadow row. `●` = settled Task / Hub / web-search / read-group row. Red = error.
-> `Ctrl+O` toggles collapsed ↔ expanded globally; expanded cards cap at `detailedMaxRows` (default 20). No per-row click.
+> `Ctrl+O` toggles collapsed ↔ expanded globally; `detailedMaxRows` (default 20) counts content per section/file or complete structured items, excluding headers and hints. No per-row click.
 
 ## Bash
 
@@ -63,7 +63,7 @@ Grouped reads (native group skinned):
 ● Read src/index.ts
 ```
 
-A single grouped read collapses to one row. Standard bounds the list via `standardRowLimit`; Detailed/Ctrl+O use `detailedMaxRows` with a `… N more files` summary.
+A single grouped read collapses to one row. Standard selects `standardMaxRows` file entries; Detailed/Ctrl+O select `detailedMaxRows` entries. The group header and `… N more files` summary are additional rows.
 
 Grouped reads (native group skinned):
 
@@ -89,7 +89,7 @@ Grouped reads (native group skinned):
 ◆ Glob `src/**/*.ts` — 12 files
 ```
 
-LSP, AST-grep, and Debug keep the native card, density-capped by `applyNativeDensityRows` (`standardOutputMaxRows`, `detailedMaxRows` on expand):
+LSP, AST-grep, and Debug keep their native Standard/Detailed rendering. Their opaque rendered rows do not expose reliable input/output boundaries, so the plugin does not guess which rows are headers:
 
 ```text
 ◆ Lsp references foo.ts — 8 results

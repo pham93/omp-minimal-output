@@ -1,10 +1,10 @@
 # omp-minimal-output
 
-Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally with a configurable 20-row default ceiling. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
+Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally with a configurable 20-content-line default allowance per section. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path.
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
-Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools retain a settled `●` indicator. Trailing blank output rows are removed; interior blanks and source indentation are preserved. One group-level cap counts headers and output together and reports a single omission total.
+Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools retain a settled `●` indicator. Trailing blank output rows are removed; interior blanks and source indentation are preserved. Each execution owns its output allowance; parent/tool headers and omission hints do not consume content lines or hide later tool headers.
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
@@ -12,7 +12,7 @@ Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/tod
 
 Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 
-`detailedMaxRows` defaults to `20` and caps both configured Detailed mode and Ctrl+O expansion.
+`standardMaxRows` (default `3`) bounds input content and `standardOutputMaxRows` (default `4`) independently bounds output content. `standardWriteMaxRows` (default `10`) retains the latest Write content lines; Edit retains `standardEditRowsPerFile` (default `10`) diff/context lines per file. Headers, separators, and omission hints are additional rows. `detailedMaxRows` (default `20`) applies per input/output section or Edit file in Detailed and Ctrl+O, not to the assembled card height. Search, Task, Hub, and native read groups select complete items instead of slicing their rendered rows. Opaque native cards retain native Standard/Detailed rendering because their content boundaries are not exposed.
 
 ## Input composer styles
 

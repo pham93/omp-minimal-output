@@ -5,7 +5,7 @@
 // at Container.addChild time repaints the card with formatRowLine while
 // leaving execution, grouping, and Ctrl+O behavior untouched.
 
-import { capRenderedRows, detailedRowLimit, detailProfile, standardRowLimit } from "../core/density.ts";
+import { detailProfile, inputRowLimit } from "../core/density.ts";
 import { tildePath } from "../core/text.ts";
 import { formatRowLine } from "../core/theme.ts";
 import { getContainerInterceptor } from "../core/container-interceptor.ts";
@@ -43,33 +43,40 @@ export function paintReadGroupLines(
       }),
     ];
   }
+  const anyError = entries.some((entry) => entry.error);
   const lines = [
     formatRowLine(theme, width, {
       body: `Read ${entries.length} files`,
       live: anyPending,
       mark: anyPending ? undefined : "●",
+      error: anyError,
     }),
   ];
-  let terminalError: string | undefined;
-  const entryLimit = profile.detailed ? detailedRowLimit() : standardRowLimit(false);
+  const entryLimit = inputRowLimit(profile);
   const visibleEntries = entries.slice(0, entryLimit);
+  const hidden = Math.max(0, entries.length - visibleEntries.length);
+  const omittedFailed = hidden > 0 && entries.slice(entryLimit).some((entry) => entry.error);
   visibleEntries.forEach((entry, index) => {
-    const line = formatRowLine(theme, width, {
-      body: entry.path,
-      tree: index === visibleEntries.length - 1 ? "last" : "mid",
-      live: entry.pending,
-      error: entry.error,
-    });
-    lines.push(line);
-    if (entry.error) terminalError = line;
+    const lastVisible = index === visibleEntries.length - 1 && hidden === 0;
+    lines.push(
+      formatRowLine(theme, width, {
+        body: entry.path,
+        tree: lastVisible ? "last" : "mid",
+        live: entry.pending,
+        error: entry.error,
+      }),
+    );
   });
-  const maxRows = profile.detailed ? detailedRowLimit() : standardRowLimit(false);
-  const hiddenRows = Math.max(1, entries.length - maxRows + 2);
-  const overflow = formatRowLine(theme, width, {
-    body: `… ${hiddenRows} more files`,
-    tree: "last",
-  });
-  return capRenderedRows(lines, maxRows, overflow, terminalError);
+  if (hidden > 0) {
+    lines.push(
+      formatRowLine(theme, width, {
+        body: `… ${hidden} more files`,
+        tree: "last",
+        error: omittedFailed,
+      }),
+    );
+  }
+  return lines;
 }
 
 // Exported for verification; the five-method combination is unique to

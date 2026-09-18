@@ -1,6 +1,10 @@
-import type { ContextUsage, ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
-import { CustomEditor } from "@oh-my-pi/pi-coding-agent/modes/components/custom-editor";
-import { theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import {
+  CustomEditor,
+  theme,
+  type ContextUsage,
+  type ExtensionAPI,
+  type ExtensionUIContext,
+} from "@oh-my-pi/pi-coding-agent";
 import {
   padding,
   sliceByColumn,

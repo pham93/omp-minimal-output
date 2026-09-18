@@ -11,7 +11,7 @@ import {
   resultDetails,
   type ParentCardLabel,
 } from "./card-primitives.ts";
-import { capRenderedRows, detailedRowLimit, standardRowLimit } from "../core/density.ts";
+import { detailedRowLimit } from "../core/density.ts";
 import { getPluginConfig } from "../core/config.ts";
 import { markFlush } from "../core/loaders.ts";
 
@@ -366,18 +366,18 @@ export function renderHubCardLines(
     settledMark: "●",
     parentLabel,
   });
-  let terminalError: string | undefined;
   if (data.rows.length === 0 && lifecycle.error) {
-    terminalError = cardTitleLine(
-      theme,
-      width,
-      conciseErrorText(result, {
-        fallback: `Hub ${data.op} failed`,
-        skipPattern: /^●?\s*Hub\b/iu,
-      }),
-      true,
+    lines.push(
+      cardTitleLine(
+        theme,
+        width,
+        conciseErrorText(result, {
+          fallback: `Hub ${data.op} failed`,
+          skipPattern: /^●?\s*Hub\b/iu,
+        }),
+        true,
+      ),
     );
-    lines.push(terminalError);
   }
   for (const row of data.rows) {
     lines.push(cardTitleLine(theme, width, row.title, row.failed));
@@ -387,12 +387,7 @@ export function renderHubCardLines(
   if (hiddenItems > 0) {
     lines.push(cardDetailLine(theme, width, `… ${hiddenItems} more items`));
   }
-  const maxRows = lifecycle.detail.detailed
-    ? detailedRowLimit()
-    : standardRowLimit(data.rowCount > 0 || lifecycle.error);
-  const hiddenRows = Math.max(1, lines.length - maxRows + 1);
-  const overflow = cardDetailLine(theme, width, `… ${hiddenRows} more rows`);
-  return capRenderedRows(lines, maxRows, overflow, terminalError);
+  return lines;
 }
 
 export function renderHubCard(

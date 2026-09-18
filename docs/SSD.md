@@ -126,48 +126,48 @@ flowchart TD
     T -->|no| OUT["one-liner"]
 ```
 
-Contract: line 1 is always the collapsed row. Dedicated cards (`write`, `edit`, `eval`, `web_search`, Task, Hub) expand from stashed text or structured native details, not the one-liner; `detailedMaxRows` caps each expanded card.
+Contract: line 1 is always the collapsed row. Dedicated cards (`write`, `edit`, `eval`, `web_search`, Task, Hub) expand from stashed text or structured native details, not the one-liner. Content is selected before headers and hints are rendered; `detailedMaxRows` applies per input/output section or Edit file, and to complete item counts for structured cards.
 
 ## 6. Card catalog
 
-| Card       | Collapsed                                    | Expanded                                      | Limit             |
-| ---------- | -------------------------------------------- | --------------------------------------------- | ----------------- |
-| Bash test  | `◆ bash \`cmd\` — Tests: P passed, F failed` | failure lines + summary                       | spill cap         |
-| Bash build | `◆ bash \`cmd\` — E errors, W warnings`      | error lines + head/tail                       | spill cap         |
-| Bash git   | `◆ git sub — stat`                           | kept lines                                    | spill cap         |
-| Read       | `◆ Read path`                                | bounded content preview                       | `detailedMaxRows` |
-| Write      | `◆ Write path — N lines`                     | latest content lines + `(...N previous lines)` hint | `standardWriteMaxRows` / `detailedMaxRows` |
-| Grep / LSP | `◆ Search \`pat\` — F files, H hits`         | bounded match groups                          | `detailedMaxRows` |
-| Glob       | `◆ Glob \`pat\` — N files`                   | bounded path list                             | `detailedMaxRows` |
-| Edit       | `Edit path — +a/−b`                          | bounded gutter diff, syntax-colored           | `standardEditRowsPerFile` / `detailedMaxRows` |
-| Eval       | `🐍 title / first line`                      | bounded input and output                      | `detailedMaxRows` |
-| Web search | `Search \`q\` — N sources`                   | bounded bold titles + dim URLs                | `webSearchMaxResults` / `detailedMaxRows` |
-| Task       | `Task N agents — completed`                  | bounded agent / status / result rows          | `taskMaxAgents` / `detailedMaxRows` |
-| Hub        | `Hub op target — summary`                    | bounded peer / job / message rows             | `hubMaxItems` / `detailedMaxRows` |
-| Read group | `● Read N files`                             | bounded file list                             | `detailedMaxRows` |
+| Card       | Collapsed                                    | Expanded                                            | Limit                                         |
+| ---------- | -------------------------------------------- | --------------------------------------------------- | --------------------------------------------- |
+| Bash test  | `◆ bash \`cmd\` — Tests: P passed, F failed` | failure lines + summary                             | spill cap                                     |
+| Bash build | `◆ bash \`cmd\` — E errors, W warnings`      | error lines + head/tail                             | spill cap                                     |
+| Bash git   | `◆ git sub — stat`                           | kept lines                                          | spill cap                                     |
+| Read       | `◆ Read path`                                | bounded content preview                             | `detailedMaxRows`                             |
+| Write      | `◆ Write path — N lines`                     | latest content lines + `(...N previous lines)` hint | `standardWriteMaxRows` / `detailedMaxRows`    |
+| Grep       | `◆ Search \`pat\` — F files, H hits`         | bounded result text                                 | `detailedMaxRows` content                     |
+| Glob       | `◆ Glob \`pat\` — N files`                   | bounded path list                                   | `detailedMaxRows`                             |
+| Edit       | `Edit path — +a/−b`                          | bounded gutter diff, syntax-colored                 | `standardEditRowsPerFile` / `detailedMaxRows` |
+| Eval       | `🐍 title / first line`                      | bounded input and output                            | `detailedMaxRows`                             |
+| Web search | `Search \`q\` — N sources`                   | bounded bold titles + dim URLs                      | `webSearchMaxResults` / `detailedMaxRows`     |
+| Task       | `Task N agents — completed`                  | bounded agent / status / result rows                | `taskMaxAgents` / `detailedMaxRows`           |
+| Hub        | `Hub op target — summary`                    | bounded peer / job / message rows                   | `hubMaxItems` / `detailedMaxRows`             |
+| Read group | `● Read N files`                             | bounded file list                                   | `detailedMaxRows`                             |
 
-LSP, AST-grep, and Debug stay on the generic native density projection (`applyNativeDensityRows`), not dedicated cards. Running rows replace the summary with the live indicator + elapsed. Error rows keep the header and add red detail lines. See [`EXAMPLES.md`](EXAMPLES.md) for row shapes.
+LSP, AST-grep, and Debug retain native Standard/Detailed rendering because their rendered rows do not expose reliable content boundaries. Minimal retains its existing single-row projection. Dedicated running rows show the live indicator and elapsed time; error rows retain identity and bounded failure detail. See [`EXAMPLES.md`](EXAMPLES.md) for row shapes.
 
 ## 7. Config (`core/config.ts` + `package.json`)
 
-| Setting                                               | Default           | Effect                                             |
-| ----------------------------------------------------- | ----------------- | -------------------------------------------------- |
-| `nativeBash/Read/Grep/Glob/Write/Edit/Eval/WebSearch` | `false`           | `true` restores native renderer per tool           |
-| `nativeTask`                                          | `false`           | `true` restores native Task, result text untouched |
-| `taskMaxAgents`                                       | `4` (`1..8`)      | Standard Task item selection                       |
-| `nativeHub`                                           | `false`           | `true` restores native Hub                         |
-| `hubMaxItems`                                         | `5` (`1..10`)     | Standard Hub item selection                        |
-| `webSearchMaxResults`                                 | `5` (`1..10`)     | Standard source selection                          |
-| `detailedMaxRows`                                     | `20` (`1..100`)   | Detailed and Ctrl+O total-row ceiling              |
-| `indicator`                                           | `diamond`         | `◈◉◎○` live, `◆` settled                           |
-| `indicatorAnimation`                                  | `true`            | spin pump on/off                                   |
-| `opacity`                                             | `0.5`             | row dim blend                                      |
-| `detailLevel`                                         | `standard`        | minimal / standard / detailed density              |
-| `standardMaxRows` / `standardOutputMaxRows`           | `3` / `4`         | Standard total rows (no output / output)           |
-| `standardEditRowsPerFile` / `standardWriteMaxRows`    | `10` / `10`       | per-file Edit rows / total Write rows              |
-| `todosHeader` / `todoHud` / `todoReminderOneLine`     | `true/false/true` | todo chrome                                        |
-| `editShowTabs` / `editShowSpaces`                     | `true/false`      | whitespace glyphs in diff                          |
-| `composerRefreshInterval`                             | `60` (`1..3600`)  | composer status refresh polling seconds            |
+| Setting                                               | Default           | Effect                                                                |
+| ----------------------------------------------------- | ----------------- | --------------------------------------------------------------------- |
+| `nativeBash/Read/Grep/Glob/Write/Edit/Eval/WebSearch` | `false`           | `true` restores native renderer per tool                              |
+| `nativeTask`                                          | `false`           | `true` restores native Task, result text untouched                    |
+| `taskMaxAgents`                                       | `4` (`1..8`)      | Standard Task item selection                                          |
+| `nativeHub`                                           | `false`           | `true` restores native Hub                                            |
+| `hubMaxItems`                                         | `5` (`1..10`)     | Standard Hub item selection                                           |
+| `webSearchMaxResults`                                 | `5` (`1..10`)     | Standard source selection                                             |
+| `detailedMaxRows`                                     | `20` (`1..100`)   | Detailed/Ctrl+O content per section/file or complete structured items |
+| `indicator`                                           | `diamond`         | `◈◉◎○` live, `◆` settled                                              |
+| `indicatorAnimation`                                  | `true`            | spin pump on/off                                                      |
+| `opacity`                                             | `0.5`             | row dim blend                                                         |
+| `detailLevel`                                         | `standard`        | minimal / standard / detailed density                                 |
+| `standardMaxRows` / `standardOutputMaxRows`           | `3` / `4`         | Independent Standard input/output content allowances                  |
+| `standardEditRowsPerFile` / `standardWriteMaxRows`    | `10` / `10`       | Per-file Edit content / latest Write content lines                    |
+| `todosHeader` / `todoHud` / `todoReminderOneLine`     | `true/false/true` | todo chrome                                                           |
+| `editShowTabs` / `editShowSpaces`                     | `true/false`      | whitespace glyphs in diff                                             |
+| `composerRefreshInterval`                             | `60` (`1..3600`)  | composer status refresh polling seconds                               |
 
 Source of truth: `~/.omp/plugins/omp-plugins.lock.json` + project overrides (`.omp/plugin-overrides.json`, `.pi/plugin-overrides.json`). Read live at render time; `turn_end` reloads on file mtime changes.
 
@@ -183,21 +183,21 @@ Source of truth: `~/.omp/plugins/omp-plugins.lock.json` + project overrides (`.o
 
 ## Appendix A. Files
 
-| File                                                                    | Owns                                                                 |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `index.ts`                                                              | entry, wiring, skin installs, interceptor lifecycle                  |
-| `core/tool-wrapper.ts`                                                  | tool wrapping, native delegation, collapse hook                      |
-| `core/card-registry.ts` → `cards/card-registry.ts`                      | unified card dispatch (grouped + dedicated adapters)                 |
-| `core/container-interceptor.ts`                                         | single `addChild` seam, subscriber registry                          |
-| `core/filters.ts`                                                       | pure collapse one-liners + truncation/spill                          |
+| File                                                                           | Owns                                                          |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `index.ts`                                                                     | entry, wiring, skin installs, interceptor lifecycle           |
+| `core/tool-wrapper.ts`                                                         | tool wrapping, native delegation, collapse hook               |
+| `core/card-registry.ts` → `cards/card-registry.ts`                             | unified card dispatch (grouped + dedicated adapters)          |
+| `core/container-interceptor.ts`                                                | single `addChild` seam, subscriber registry                   |
+| `core/filters.ts`                                                              | pure collapse one-liners + truncation/spill                   |
 | `cards/write-card.ts` / `edit-card.ts` / `eval-card.ts` / `web-search-card.ts` | wrapped-tool cards                                            |
-| `cards/task-card.ts` / `cards/hub-card.ts`                              | native-state projections                                             |
-| `cards/native-tool-card-skin.ts`                                        | fail-open `ToolExecutionComponent` bridge                            |
-| `cards/card-primitives.ts`                                              | lifecycle, header, detail, error, limit helpers                      |
-| `core/theme.ts` / `core/text.ts` / `core/results.ts` / `core/loaders.ts`| paint, labels, result readers, lazy core hooks                       |
+| `cards/task-card.ts` / `cards/hub-card.ts`                                     | native-state projections                                      |
+| `cards/native-tool-card-skin.ts`                                               | fail-open `ToolExecutionComponent` bridge                     |
+| `cards/card-primitives.ts`                                                     | lifecycle, header, detail, error, limit helpers               |
+| `core/theme.ts` / `core/text.ts` / `core/results.ts` / `core/loaders.ts`       | paint, labels, result readers, lazy core hooks                |
 | `surfaces/read-group.ts` / `surfaces/warning-skin.ts` / `surfaces/todo-hud.ts` | group + alert + todo chrome                                   |
-| `cards/card-gallery.ts`                                                 | deterministic fixtures (running / success / error / expanded)        |
-| `core/config.ts` / `package.json` / `minimal-output.yml`                | settings, entry, host flags                                          |
+| `cards/card-gallery.ts`                                                        | deterministic fixtures (running / success / error / expanded) |
+| `core/config.ts` / `package.json` / `minimal-output.yml`                       | settings, entry, host flags                                   |
 
 ## Appendix B. Glossary
 

@@ -25,8 +25,14 @@ export function detailProfile(options: unknown, config: PluginConfig = getPlugin
   };
 }
 
-export function standardRowLimit(hasOutput: boolean, config: PluginConfig = getPluginConfig()): number {
-  return hasOutput ? config.standardOutputMaxRows : config.standardMaxRows;
+export function inputRowLimit(profile: DetailProfile, config: PluginConfig = getPluginConfig()): number {
+  if (profile.minimal) return 1;
+  return profile.detailed ? config.detailedMaxRows : config.standardMaxRows;
+}
+
+export function outputRowLimit(profile: DetailProfile, config: PluginConfig = getPluginConfig()): number {
+  if (profile.minimal) return 1;
+  return profile.detailed ? config.detailedMaxRows : config.standardOutputMaxRows;
 }
 
 export function standardEditRowsPerFile(config: PluginConfig = getPluginConfig()): number {
@@ -39,14 +45,6 @@ export function standardWriteMaxRows(config: PluginConfig = getPluginConfig()): 
 
 export function detailedRowLimit(config: PluginConfig = getPluginConfig()): number {
   return config.detailedMaxRows;
-}
-
-export function profileRowLimit(
-  profile: DetailProfile,
-  standardMaxRows: number,
-  config: PluginConfig = getPluginConfig(),
-): number {
-  return profile.detailed ? config.detailedMaxRows : standardMaxRows;
 }
 
 export function thoughtRowLimit(profile: DetailProfile, config: PluginConfig = getPluginConfig()): number {

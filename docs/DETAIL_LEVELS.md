@@ -9,19 +9,19 @@ This document defines the configurable transcript-density contract implemented b
 - Make transcript density predictable across every tool surface.
 - Keep Standard useful without requiring Ctrl+O for routine work.
 - Preserve a strict one-row Minimal mode.
-- Preserve complete information in Detailed mode.
+- Preserve independently bounded input and output in Detailed mode.
 - Keep failures and omission counts visible at every bounded level.
 
 ## Settings
 
-| Setting                   | Type                                    | Default      | Range    | Effect                                          |
-| ------------------------- | --------------------------------------- | ------------ | -------- | ----------------------------------------------- |
-| `detailLevel`             | `"minimal" \| "standard" \| "detailed"` | `"standard"` | enum     | Global transcript density                       |
-| `standardMaxRows`         | number                                  | `3`          | `1..20`  | Total Standard rows for tools without output    |
-| `standardOutputMaxRows`   | number                                  | `4`          | `1..30`  | Total Standard rows for tools with output       |
-| `standardEditRowsPerFile` | number                                  | `10`         | `1..50`  | Diff/context rows retained for each edited file |
-| `standardWriteMaxRows`    | number                                  | `10`         | `1..50`  | Total Standard rows retained for Write          |
-| `detailedMaxRows`         | number                                  | `20`         | `1..100` | Maximum total rows in Detailed and Ctrl+O       |
+| Setting                   | Type                                    | Default      | Range    | Effect                                                                       |
+| ------------------------- | --------------------------------------- | ------------ | -------- | ---------------------------------------------------------------------------- |
+| `detailLevel`             | `"minimal" \| "standard" \| "detailed"` | `"standard"` | enum     | Global transcript density                                                    |
+| `standardMaxRows`         | number                                  | `3`          | `1..20`  | Input content lines; thinking lines and read-group entries                   |
+| `standardOutputMaxRows`   | number                                  | `4`          | `1..30`  | Output content lines per tool, independent of input                          |
+| `standardEditRowsPerFile` | number                                  | `10`         | `1..50`  | Diff/context content lines retained for each edited file                     |
+| `standardWriteMaxRows`    | number                                  | `10`         | `1..50`  | Latest source content lines retained for Write                               |
+| `detailedMaxRows`         | number                                  | `20`         | `1..100` | Content lines per section/file; complete structured items in Detailed/Ctrl+O |
 
 Configuration example:
 
@@ -40,25 +40,19 @@ These settings belong in the existing plugin settings object in `~/.omp/plugins/
 
 ## Counting rules
 
-- A row means one visible terminal row produced for one tool event or the sticky Todo widget.
-- Status parents and tool headers count toward total-row limits.
-- Generic omission summaries consume the final available row.
-- An error row is never hidden. When a bounded card is full, the error replaces the final preview row rather than exceeding the cap.
-- ANSI styling, wrapped terminal text, and hidden persistence metadata do not change the logical row budget.
-- Running and settled cards use the same configured density. A settled card may replace live content but must not exceed its mode's cap.
-- Generic grouped tool output is capped once, after counting parent headers, tool rows, and output rows. Trailing blank output rows do not count; interior blank rows do. Output continues beneath its tool rather than appearing as sibling tool branches.
-
-Edit is the deliberate exception to a total-card cap in Standard mode:
-
-- `standardEditRowsPerFile` applies independently to every file.
-- The status parent, Edit header, and file header do not count against the per-file allowance.
-- Context rows, changed rows, and hunk-separator rows count.
-- If a file contains additional rows, its `… N more rows` summary follows the configured allowance and does not consume one of the retained diff rows.
-
-Write keeps a total-card cap:
-
-- `standardWriteMaxRows` includes the status parent, Write header, content preview, and omission summary.
-- When content is omitted, the final available row is the omission summary.
+- Tool budgets count content, not assembled card height. Status parents, tool/file headers, decorative separators, and omission hints are additional rows.
+- Input and output have independent allowances; input cannot consume output space.
+- Each grouped execution owns its output allowance. Later tool headers cannot be hidden by earlier output.
+- Source/output blank lines count; existing trailing-blank handling is retained. ANSI styling and gutters do not consume content lines.
+- Keep tool identity and failure indication visible. Error output is bounded separately, not substituted for the header.
+- Omission counts describe omitted content lines or items, never chrome.
+- Write retains the latest N source lines; its previous-lines hint is outside N.
+- Edit applies its allowance per file in Standard and Detailed. Changed/context rows count; hunk separators, file headers and omission hints do not.
+- Eval uses input and output allowances independently. Partial output retains the tail; settled output retains the head.
+- Search, Task and Hub use their Standard item settings and `detailedMaxRows` complete items when expanded. A source title/URL pair or agent entry is not split by a second row cap.
+- Native read groups count file entries, excluding the group header and omission hint.
+- Generic native layouts have no reliable content boundary; Standard and Detailed retain native rendering instead of guessing header counts.
+- Thinking retains its existing content window. Todo is outside this tool-budget change: its existing expanded total-row cap remains unchanged.
 
 ## Modes
 
@@ -80,34 +74,34 @@ Minimal ignores all Standard row settings.
 
 Standard is the default mode.
 
-- Edit uses `standardEditRowsPerFile` for each file.
-- Write uses `standardWriteMaxRows` total rows.
-- A tool with output uses `standardOutputMaxRows` total rows.
-- A tool without output uses `standardMaxRows` total rows.
+- Edit uses `standardEditRowsPerFile` content lines for each file.
+- Write uses `standardWriteMaxRows` latest content lines.
+- Input previews use `standardMaxRows`; output previews independently use `standardOutputMaxRows`.
+- Structured cards use their explicit item settings instead of a combined card cap.
 
 ### Detailed
 
-Detailed matches the Ctrl+O-expanded representation but is bounded by `detailedMaxRows` per card. With the default, each expanded card shows at most 20 total rows, including headers and the final omission or error row.
+Detailed matches the Ctrl+O-expanded representation. `detailedMaxRows` bounds each input/output section and each Edit file independently; for Search, Task, Hub and read groups it selects complete items. Headers and hints are additional rows, so expanded tool cards can exceed 20 total terminal rows.
 
 ## Standard behavior by tool
 
-| Tool             | Standard preview                                                                           | Limit source                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| Bash             | Status, command, output head/tail, omission or error                                       | `standardOutputMaxRows` when stdout/stderr exists; otherwise `standardMaxRows` |
-| Read             | Status, file/range header, content preview, omission or error                              | `standardOutputMaxRows`                                                        |
-| Grep             | Status, pattern/count header, first matches, omission or error                             | `standardOutputMaxRows`                                                        |
-| Glob             | Status, pattern/count header, first paths, omission or error                               | `standardOutputMaxRows`                                                        |
-| Write            | Status, file/line-count header, latest content lines with `(...N previous lines)` hint     | `standardWriteMaxRows`                                                         |
-| Edit             | Status, aggregate header, every file header, bounded diff rows per file, per-file omission | `standardEditRowsPerFile`                                                      |
-| Eval             | Status, language/input header, input or output preview, omission or error                  | `standardOutputMaxRows`                                                        |
-| Web Search       | Status, query/source-count header, first source title/URL, omission or error               | `webSearchMaxResults` sources inside the `standardOutputMaxRows` card cap      |
-| Task             | Status, aggregate agent header, first agent rows, omission or error                        | `taskMaxAgents` items inside the Standard card cap; `detailedMaxRows` expanded |
-| Hub              | Status, operation summary, first peer/job/message rows, omission or error                  | `hubMaxItems` items inside the Standard card cap; `detailedMaxRows` expanded   |
-| Todo             | One summary row when collapsed; full retained list when expanded                           | Todo expand/collapse state                                                     |
-| LSP / AST Grep / Debug | Status, header, bounded native rows, omission or error                                | `standardOutputMaxRows` via the generic native density projection             |
-| Other MCP/native | Status, tool/target header, first result rows, omission or error                           | `standardOutputMaxRows` when output exists; otherwise `standardMaxRows`        |
+| Tool                                  | Standard preview                                            | Limit source                                            |
+| ------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
+| Bash                                  | Command header and bounded output per execution             | `standardOutputMaxRows`                                 |
+| Read                                  | File/range header and content preview                       | `standardOutputMaxRows`                                 |
+| Grep                                  | Pattern header and result text preview                      | `standardOutputMaxRows`                                 |
+| Glob                                  | Pattern header and result text preview                      | `standardOutputMaxRows`                                 |
+| Write                                 | Latest source lines with previous-lines hint                | `standardWriteMaxRows`                                  |
+| Edit                                  | Every file header and bounded diff/context content per file | `standardEditRowsPerFile`                               |
+| Eval                                  | Independent input and output previews                       | `standardMaxRows` input; `standardOutputMaxRows` output |
+| Web Search                            | Complete source titles and URLs                             | `webSearchMaxResults` sources                           |
+| Task                                  | Complete selected agent entries                             | `taskMaxAgents` agents                                  |
+| Hub                                   | Complete selected peer/job/message entries                  | `hubMaxItems` items                                     |
+| Native read group                     | Header and file entries                                     | `standardMaxRows` entries                               |
+| Todo                                  | Existing collapsed/expanded widget behavior                 | Unchanged; expanded total-row cap                       |
+| LSP / AST Grep / Debug / Other native | Native Standard/Detailed rendering                          | Native renderer; no guessed content boundary            |
 
-Specialized renderers keep their existing visual grammar. Unsupported native cards use a generic bounded projection and must fail open to the native renderer if their state cannot be read safely.
+Specialized renderers keep their existing visual grammar. Opaque native cards fail open to native rendering in Standard/Detailed. Minimal retains its existing single-row projection.
 
 ## Representative layouts
 
@@ -150,12 +144,17 @@ With the default `standardWriteMaxRows: 10`, the latest content lines are visibl
 ```text
 ◆ Creating the detail-level configuration
 ╰─ Write config.ts                                        42 lines
-   │ (...35 previous lines)
-   36 │ export type DetailLevel =
-   37 │   | "minimal"
-   38 │   | "standard"
-   39 │   | "detailed";
-     ╰─ … 3 more lines
+   │ (...32 previous lines)
+   33 │ export type DetailLevel =
+   34 │   | "minimal"
+   35 │   | "standard"
+   36 │   | "detailed";
+   37 │
+   38 │ export const limits = {
+   39 │   input: 3,
+   40 │   output: 4,
+   41 │   detailed: 20,
+   42 │ };
 ```
 
 With the default `standardOutputMaxRows: 4`:
@@ -164,28 +163,25 @@ With the default `standardOutputMaxRows: 4`:
 ◆ Finding references
 ╰─ Grep "detailLevel" · 6 hits
    config.ts:45 detailLevel: DetailLevel
-   … 5 more hits
+   config.ts:80 detailLevel: "standard"
+   density.ts:15 return config.detailLevel
+   density.ts:19 const level = effectiveDetailLevel(options)
+   … 2 more lines
 ```
 
-### Tool without output — Standard
+### Eval input and output — Standard
 
-With the default `standardMaxRows: 3`:
-
-```text
-◆ Updating configuration
-╰─ Write config.ts
-   42 lines written
-```
+With `standardMaxRows: 3` and `standardOutputMaxRows: 4`, three input lines and four output lines fit independently. Parent/tool headers, the output separator, and both omission hints are additional rows. A running tool without output does not spend an output allowance.
 
 ## Ctrl+O
 
-Ctrl+O is a temporary Detailed override bounded by `detailedMaxRows` (default 20, `1..100`):
+Ctrl+O is a temporary Detailed override using `detailedMaxRows` (default 20, `1..100`) per content section/file or complete structured item list:
 
-| Configured mode | Normal display | Ctrl+O display                    |
-| --------------- | -------------- | --------------------------------- |
-| Minimal         | Minimal        | Detailed, `detailedMaxRows` rows  |
-| Standard        | Standard       | Detailed, `detailedMaxRows` rows  |
-| Detailed        | Detailed       | Detailed, `detailedMaxRows` rows  |
+| Configured mode | Normal display | Ctrl+O display                  |
+| --------------- | -------------- | ------------------------------- |
+| Minimal         | Minimal        | Detailed content/item allowance |
+| Standard        | Standard       | Detailed content/item allowance |
+| Detailed        | Detailed       | Detailed content/item allowance |
 
 Leaving the override restores the configured mode. Ctrl+O does not rewrite `detailLevel` or any row-limit setting.
 
