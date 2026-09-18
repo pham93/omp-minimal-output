@@ -776,6 +776,8 @@ test("extension registers all commands and shortcuts on initial load", async () 
   expect(registeredCommands.has("todos-show")).toBe(true);
   expect(registeredCommands.has("todos")).toBe(true);
   expect(registeredCommands.has("demo-write")).toBe(true);
+  expect(registeredCommands.has("demo")).toBe(true);
+  expect(registeredCommands.has("demo-all")).toBe(true);
   expect(registeredCommands.has("minimal-status")).toBe(true);
   expect(registeredShortcuts.has("ctrl+alt+t")).toBe(true);
 });

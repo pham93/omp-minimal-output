@@ -9,7 +9,7 @@ import { detailProfile, inputRowLimit } from "../core/density.ts";
 import { tildePath } from "../core/text.ts";
 import { formatRowLine } from "../core/theme.ts";
 import { getContainerInterceptor } from "../core/container-interceptor.ts";
-
+import { TOOL_EXECUTION_PADDING_X } from "../cards/native-tool-card-skin.ts";
 export type ReadSkinEntry = {
   id: string;
   path: string;
@@ -31,26 +31,28 @@ export function paintReadGroupLines(
   if (entries.length === 0) return [];
   const profile = detailProfile(options);
   const anyPending = entries.some((entry) => entry.pending === true);
+  const prefix = " ".repeat(Math.max(0, TOOL_EXECUTION_PADDING_X));
+  const innerWidth = Math.max(1, width - prefix.length * 2);
   if (entries.length === 1 || profile.minimal) {
     const only = entries[0];
     if (!only) return [];
     return [
-      formatRowLine(theme, width, {
+      `${prefix}${formatRowLine(theme, innerWidth, {
         body: entries.length === 1 ? `Read ${only.path}` : `Read ${entries.length} files`,
         live: anyPending,
         mark: anyPending ? undefined : "●",
         error: entries.some((entry) => entry.error),
-      }),
+      })}`,
     ];
   }
   const anyError = entries.some((entry) => entry.error);
   const lines = [
-    formatRowLine(theme, width, {
+    `${prefix}${formatRowLine(theme, innerWidth, {
       body: `Read ${entries.length} files`,
       live: anyPending,
       mark: anyPending ? undefined : "●",
       error: anyError,
-    }),
+    })}`,
   ];
   const entryLimit = inputRowLimit(profile);
   const visibleEntries = entries.slice(0, entryLimit);
@@ -59,21 +61,21 @@ export function paintReadGroupLines(
   visibleEntries.forEach((entry, index) => {
     const lastVisible = index === visibleEntries.length - 1 && hidden === 0;
     lines.push(
-      formatRowLine(theme, width, {
+      `${prefix}${formatRowLine(theme, innerWidth, {
         body: entry.path,
         tree: lastVisible ? "last" : "mid",
         live: entry.pending,
         error: entry.error,
-      }),
+      })}`,
     );
   });
   if (hidden > 0) {
     lines.push(
-      formatRowLine(theme, width, {
+      `${prefix}${formatRowLine(theme, innerWidth, {
         body: `… ${hidden} more files`,
         tree: "last",
         error: omittedFailed,
-      }),
+      })}`,
     );
   }
   return lines;

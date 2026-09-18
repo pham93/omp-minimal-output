@@ -8,7 +8,9 @@ Generic grouped tools keep output indented beneath each tool, with continuation 
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
-Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/demo-write`; shortcut `ctrl+alt+t` toggles Todo expand/collapse.
+Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/demo-write`, `/demo`, `/demo-all`; shortcut `ctrl+alt+t` toggles Todo expand/collapse.
+
+Development demo: `/demo` (or `/demo-all`) runs a live interactive showcase of minimal cards and surfaces without LLM or network requests. Inspect individual components via `/demo <write|edit|eval|grouped|task|hub|todo|search>` or dismiss early with `/demo stop`.
 
 Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 
@@ -65,7 +67,7 @@ Live reasoning streams in the animated widget above the composer; `registerAssis
 
 Pulse: working rows cycle `◈ → ◉ → ◎ → ○` at 120 ms via managed `ctx.setInterval` while a tool runs. General rows settle to the configured indicator; web search settles to `●` and uses the error token on failure. `/minimal-off` mid-run stops the pump immediately. `minimal-output.yml` (`shimmer: disabled`, `showProgress: false`) is untouched.
 
-Background: `Container` is a passthrough and `Text` paints no fill unless given a custom bg fn (never called here); core also clears the wrapper bg (`setBgFn(undefined)`) for custom `renderCall`/`renderResult`. The only filled rows were native `grep`/`glob` ones (`toolSuccessBg` via the native renderer) — both are now shadowed to the same single-`Container` shape as `bash`/`read`.
+Background & padding: `Container` is a passthrough and `Text` paints no fill unless given a custom bg fn (never called here). Tool execution wrappers and read groups enforce `setBgFn(undefined)` and a consistent 1-character horizontal padding (`setPaddingX(1)`), keeping output readable, aligned, and free of rectangular background fills (`toolSuccessBg`/`toolErrorBg`) even when OMP re-applies `stateBgFn`.
 
 ## Collapse pipeline (`core/filters.ts`)
 

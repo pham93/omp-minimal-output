@@ -6,6 +6,7 @@ export interface CommandDelegates {
   todosShow: (ctx: ExtensionContext) => Promise<void> | void;
   todos: (ctx: ExtensionContext) => Promise<void> | void;
   demoWrite: (ctx: ExtensionContext) => Promise<void> | void;
+  demo: (args: string | undefined, ctx: ExtensionContext) => Promise<void> | void;
   minimalStatus: (ctx: ExtensionContext) => Promise<void> | void;
   toggleTodosShortcut: (ctx: ExtensionContext) => Promise<void> | void;
 }
@@ -58,6 +59,21 @@ export function registerPluginCommands(
     handler: async (_args, ctx) => {
       await ensureActivated(ctx);
       await commandDelegates?.demoWrite(ctx);
+    },
+  });
+  pi.registerCommand("demo", {
+    description: "Interactive demonstration of minimal output cards (e.g. /demo, /demo edit, /demo eval, /demo grouped)",
+    handler: async (args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.demo(args, ctx);
+    },
+  });
+
+  pi.registerCommand("demo-all", {
+    description: "Interactive demonstration tour of all minimal output cards and surfaces",
+    handler: async (_args, ctx) => {
+      await ensureActivated(ctx);
+      await commandDelegates?.demo("all", ctx);
     },
   });
 

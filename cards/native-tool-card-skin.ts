@@ -4,10 +4,87 @@ import { compactCardText } from "./card-primitives.ts";
 import { getContainerInterceptor } from "../core/container-interceptor.ts";
 import { isWrappedTool } from "../core/config.ts";
 import { detailProfile } from "../core/density.ts";
+import { tryCaptureFramedSymbol } from "../core/loaders.ts";
 import { isHubCardData, renderHubCardLines } from "./hub-card.ts";
 import { fingerprintForToolCall, identityForToolCall, toolFingerprint, toolFpBase } from "../core/results.ts";
 import { renderTaskCardLines, isTaskCardData } from "./task-card.ts";
 
+export const TOOL_EXECUTION_PADDING_X = 1;
+const strippedBoxes = new WeakSet<object>();
+
+export function stripToolExecutionBackground(target: unknown, deps: { active?: () => boolean }): void {
+  if (typeof target !== "object" || target === null) return;
+  tryCaptureFramedSymbol(target);
+
+  const box = target as {
+    setBgFn?: (fn?: ((text: string) => string) | undefined) => void;
+    setPaddingX?: (padding: number) => void;
+    setPaddingY?: (padding: number) => void;
+    setCustomBgFn?: (fn?: ((text: string) => string) | undefined) => void;
+    children?: unknown[];
+  };
+
+  if (typeof box.setBgFn === "function" && typeof box.setPaddingX === "function") {
+    if (!strippedBoxes.has(box)) {
+      strippedBoxes.add(box);
+      const nativeSetBgFn = box.setBgFn;
+      const nativeSetPaddingX = box.setPaddingX;
+      const nativeSetPaddingY = typeof box.setPaddingY === "function" ? box.setPaddingY : undefined;
+
+      box.setBgFn = function (bgFn) {
+        if (deps.active?.() !== false) {
+          return nativeSetBgFn.call(this, undefined);
+        }
+        return nativeSetBgFn.call(this, bgFn);
+      };
+
+      box.setPaddingX = function (paddingX) {
+        if (deps.active?.() !== false) {
+          return nativeSetPaddingX.call(this, TOOL_EXECUTION_PADDING_X);
+        }
+        return nativeSetPaddingX.call(this, paddingX);
+      };
+
+      if (nativeSetPaddingY) {
+        box.setPaddingY = function (paddingY) {
+          if (deps.active?.() !== false) {
+            return nativeSetPaddingY.call(this, 0);
+          }
+          return nativeSetPaddingY.call(this, paddingY);
+        };
+      }
+    }
+    if (deps.active?.() !== false) {
+      box.setBgFn(undefined);
+      box.setPaddingX(TOOL_EXECUTION_PADDING_X);
+      box.setPaddingY?.(0);
+    }
+  }
+
+  if (typeof box.setCustomBgFn === "function") {
+    if (!strippedBoxes.has(box)) {
+      strippedBoxes.add(box);
+      const nativeSetCustomBgFn = box.setCustomBgFn;
+      box.setCustomBgFn = function (bgFn) {
+        if (deps.active?.() !== false) {
+          return nativeSetCustomBgFn.call(this, undefined);
+        }
+        return nativeSetCustomBgFn.call(this, bgFn);
+      };
+    }
+    if (deps.active?.() !== false) {
+      box.setCustomBgFn(undefined);
+    }
+  }
+
+  if (Array.isArray(box.children)) {
+    for (const child of box.children) {
+      if (typeof child === "object" && child !== null) {
+        tryCaptureFramedSymbol(child);
+      }
+    }
+  }
+}
 export const NATIVE_TOOL_CARD_KIND = {
   hub: "hub",
   task: "task",
@@ -225,7 +302,27 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
     }
 
     component["render"] = (...args: unknown[]): unknown => {
+      try {
+        const containerObj = child as { children?: unknown[] };
+        if (Array.isArray(containerObj.children)) {
+          for (const c of containerObj.children) {
+            stripToolExecutionBackground(c, deps);
+          }
+        }
+      } catch {
+        // Child traversal is display-only.
+      }
       const native = render.apply(child, args);
+      try {
+        const containerObj = child as { children?: unknown[] };
+        if (Array.isArray(containerObj.children)) {
+          for (const c of containerObj.children) {
+            stripToolExecutionBackground(c, deps);
+          }
+        }
+      } catch {
+        // Child traversal is display-only.
+      }
       try {
         const selected = selectedCard(state, native);
         state.kind = selected?.kind;
@@ -249,7 +346,11 @@ function skinToolExecution(child: object, deps: NativeToolCardSkinDeps): void {
           selected.kind === NATIVE_TOOL_CARD_KIND.task
             ? renderTaskCardLines(deps.theme(), width, selected.args, state.result, options, fingerprint, parentLabel)
             : renderHubCardLines(deps.theme(), width, selected.args, state.result, options, fingerprint, parentLabel);
-        return painted ?? native;
+        if (painted) {
+          const prefix = " ".repeat(TOOL_EXECUTION_PADDING_X);
+          return painted.map((line) => `${prefix}${line}`);
+        }
+        return native;
       } catch {
         return native;
       }
@@ -289,7 +390,12 @@ export function installNativeToolCardSkin(ContainerCtor: unknown, deps: NativeTo
   const unregister = interceptor.registerHook((container, args) => {
     if (deps.active?.() === false) return;
     try {
-      if (isToolExecutionComponentLike(container)) skinToolExecution(container as object, deps);
+      if (isToolExecutionComponentLike(container)) {
+        skinToolExecution(container as object, deps);
+        for (const child of args) {
+          stripToolExecutionBackground(child, deps);
+        }
+      }
     } catch {
       // Constructor-time parent probing is display-only.
     }

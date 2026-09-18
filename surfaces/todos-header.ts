@@ -351,7 +351,7 @@ export function renderTodoHeader(
     const hiddenCount = group.items.length - visibleItems.length;
     if (phased) {
       const hot = visibleItems.some((item) => {
-        const started = anim?.completingAt.get(todoItemKey(item));
+        const started = anim?.completingAt?.get?.(todoItemKey(item));
         return started !== undefined && now - started < TODO_DONE_ANIM_MS;
       });
       const name = group.name || "Todos";
@@ -363,7 +363,7 @@ export function renderTodoHeader(
     const taskIndent = phased ? "    " : "  ";
     for (const [index, item] of visibleItems.entries()) {
       const key = todoItemKey(item);
-      const completingStarted = anim?.completingAt.get(key);
+      const completingStarted = anim?.completingAt?.get?.(key);
       const completing = completingStarted !== undefined && now - completingStarted < TODO_DONE_ANIM_MS;
       const glyph = completing ? "○" : statusGlyph(item.status, anim);
       const branch = phased ? (index === visibleItems.length - 1 ? "╰─" : "├─") : "";

@@ -15,12 +15,14 @@ import {
   intentFromEvent,
   intentFromAssistantMessage,
   summarizeEvent,
+  nativeToolCardSkinActive,
 } from "./core/tool-wrapper.ts";
 import { GroupedToolManager } from "./cards/grouped-tool-card.ts";
 import { ThinkingWidget, extractThinking } from "./surfaces/thinking-widget.ts";
 import { TodoWidget, parseTodoResult, todoRawText } from "./surfaces/todo-widget.ts";
 import { registerPluginCommands } from "./surfaces/commands.ts";
 import { renderSkillPrompt } from "./surfaces/skill-prompt-renderer.ts";
+import { runPluginDemo } from "./surfaces/demo-showcase.ts";
 import {
   registerMinimalComposerShapes,
   installMinimalPromptEditor,
@@ -184,13 +186,13 @@ export default function (pi: ExtensionAPI) {
       });
 
       const disposeNativeToolCardSkin = installNativeToolCardSkin(containerInterceptor, {
-        enabled: () => runtimeOwner.owns() && (toolWrapper.isWrapped("task") || toolWrapper.isWrapped("hub")),
+        enabled: (kind) => runtimeOwner.owns() && nativeToolCardSkinActive(kind, enabled),
         genericEnabled: (toolName) => runtimeOwner.owns() && enabled && genericNativeDensityEligible(toolName),
         theme: () => readGroupTheme,
         pump: () => kickAlertPump(),
         parentLabel: (toolCallId, fingerprint, result) =>
           activityTracker.parentLabelForToolCall(toolCallId, fingerprint, result),
-        active: runtimeOwner.owns,
+        active: () => runtimeOwner.owns() && enabled,
       });
 
       const disposeWarningSkin = installWarningSkin(containerInterceptor, {
@@ -617,66 +619,11 @@ export default function (pi: ExtensionAPI) {
       },
       demoWrite: async (_ctx) => {
         if (!runtimeOwner.owns() || !_ctx.hasUI) return;
-        const demoLines = [
-          'import { Database } from "bun:sqlite";',
-          'import * as fs from "node:fs/promises";',
-          'import { resolve } from "node:path";',
-          "",
-          "export interface ServerConfig {",
-          "  port: number;",
-          "  host: string;",
-          "  ssl: boolean;",
-          "  workers: number;",
-          "}",
-          "",
-          "export class MicroserviceServer {",
-          "  private isRunning = false;",
-          "  private connections = 0;",
-          "",
-          "  constructor(private readonly config: ServerConfig) {}",
-          "",
-          "  public async start(): Promise<void> {",
-          "    this.isRunning = true;",
-          "    console.log(`Server starting on port ${this.config.port}...`);",
-          "  }",
-          "",
-          "  public async stop(): Promise<void> {",
-          "    this.isRunning = false;",
-          "    console.log('Server stopped gracefully.');",
-          "  }",
-          "",
-          "  public getStats(): { connections: number; active: boolean } {",
-          "    return { connections: this.connections, active: this.isRunning };",
-          "  }",
-          "}",
-          "",
-          "export default new MicroserviceServer({ port: 8080, host: '0.0.0.0', ssl: false, workers: 4 });",
-        ];
-
-        _ctx.ui.notify("Streaming Write card demo starting...", "info");
-        for (let count = 1; count <= demoLines.length; count += 1) {
-          const partialContent = demoLines.slice(0, count).join("\n");
-          const isLast = count === demoLines.length;
-          _ctx.ui.setWidget(
-            "minimal-write-demo",
-            (_tui: unknown, theme: unknown) =>
-              renderWriteCard(
-                theme,
-                { path: "src/server.ts", content: partialContent },
-                isLast ? "ok" : undefined,
-                { isPartial: !isLast },
-                "demo:write:stream",
-              ),
-            { placement: "above-editor" },
-          );
-          if (typeof _ctx.ui.requestRender === "function") _ctx.ui.requestRender();
-          await new Promise((r) => setTimeout(r, 80));
-        }
-
-        await new Promise((r) => setTimeout(r, 2000));
-        _ctx.ui.setWidget("minimal-write-demo", undefined);
-        if (typeof _ctx.ui.requestRender === "function") _ctx.ui.requestRender();
-        _ctx.ui.notify("Write streaming demo finished", "info");
+        await runPluginDemo(_ctx, "write");
+      },
+      demo: async (args, _ctx) => {
+        if (!runtimeOwner.owns() || !_ctx.hasUI) return;
+        await runPluginDemo(_ctx, args);
       },
       minimalStatus: (_ctx) => {
         if (!runtimeOwner.owns()) return;
