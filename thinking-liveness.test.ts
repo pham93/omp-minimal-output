@@ -781,65 +781,8 @@ test("extension registers all commands and shortcuts on initial load", async () 
   expect(registeredCommands.has("demo-all")).toBe(true);
   expect(registeredCommands.has("minimal-status")).toBe(true);
   expect(registeredCommands.has("inspect")).toBe(true);
-  expect(registeredCommands.has("images")).toBe(true);
   expect(registeredShortcuts.has("ctrl+alt+i")).toBe(true);
   expect(registeredShortcuts.has("ctrl+alt+t")).toBe(true);
-  expect(registeredShortcuts.has("ctrl+alt+m")).toBe(true);
-});
-
-test("toggleImagesCollapsed toggles visibility on live assistant message components", async () => {
-  const { skinAssistantMessageComponent, toggleImagesCollapsed, areImagesCollapsed, resetImagesStateForTest } =
-    await import("./surfaces/assistant-commentary-skin.ts");
-
-  resetImagesStateForTest();
-  let imagesVisible = true;
-  let toolImagesVisible = true;
-
-  const component = {
-    transcriptBlockMode: "appendOnly" as const,
-    updateContent: () => {},
-    setTextColorTransform: () => {},
-    setLinkTargets: () => {},
-    setCacheInvalidation: () => {},
-    setImagesVisible: (v: boolean) => {
-      imagesVisible = v;
-    },
-    setToolResultImagesVisible: (v: boolean) => {
-      toolImagesVisible = v;
-    },
-  };
-
-  skinAssistantMessageComponent(component, { enabled: () => true, active: () => true });
-  expect(areImagesCollapsed()).toBe(false);
-
-  // Toggle images off
-  let clearedImages = false;
-  let renderRequested = false;
-  const fakeUi = {
-    clearInlineImages: () => {
-      clearedImages = true;
-    },
-    requestRender: () => {
-      renderRequested = true;
-    },
-  };
-
-  const collapsed = toggleImagesCollapsed(fakeUi);
-  expect(collapsed).toBe(true);
-  expect(areImagesCollapsed()).toBe(true);
-  expect(imagesVisible).toBe(false);
-  expect(toolImagesVisible).toBe(false);
-  expect(clearedImages).toBe(true);
-  expect(renderRequested).toBe(true);
-
-  // Toggle images back on
-  const expanded = toggleImagesCollapsed(fakeUi);
-  expect(expanded).toBe(false);
-  expect(areImagesCollapsed()).toBe(false);
-  expect(imagesVisible).toBe(true);
-  expect(toolImagesVisible).toBe(true);
-
-  resetImagesStateForTest();
 });
 
 test("wrapped cards propagate adapter failures and request native fallback when disabled", async () => {

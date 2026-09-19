@@ -33,58 +33,6 @@ const MAX_PHASE_CACHE_ENTRIES = 256;
 const phaseCache = new Map<string, AssistantTextPhase | null>();
 let installed = false;
 let skinned = new WeakSet<object>();
-const liveAssistantMessages = new Set<object>();
-let imagesCollapsed = false;
-
-export function areImagesCollapsed(): boolean {
-  return imagesCollapsed;
-}
-
-export function setImagesCollapsed(collapsed: boolean, ui?: unknown): boolean {
-  imagesCollapsed = collapsed;
-  applyImagesVisibility(!collapsed, ui);
-  return imagesCollapsed;
-}
-
-export function toggleImagesCollapsed(ui?: unknown): boolean {
-  return setImagesCollapsed(!imagesCollapsed, ui);
-}
-
-export function resetImagesStateForTest(): void {
-  imagesCollapsed = false;
-  liveAssistantMessages.clear();
-}
-
-export function applyImagesVisibility(visible: boolean, ui?: unknown): void {
-  for (const target of liveAssistantMessages) {
-    try {
-      const setToolResultImagesVisible = methodOf(target as Record<string, unknown>, "setToolResultImagesVisible");
-      if (typeof setToolResultImagesVisible === "function") {
-        setToolResultImagesVisible.call(target, visible);
-      }
-      const setImagesVisible = methodOf(target as Record<string, unknown>, "setImagesVisible");
-      if (typeof setImagesVisible === "function") {
-        setImagesVisible.call(target, visible);
-      }
-    } catch {
-      // Component may be disposed
-    }
-  }
-
-  if (typeof ui === "object" && ui !== null) {
-    try {
-      const u = ui as { clearInlineImages?: () => void; requestRender?: (force?: boolean) => void };
-      if (!visible && typeof u.clearInlineImages === "function") {
-        u.clearInlineImages();
-      }
-      if (typeof u.requestRender === "function") {
-        u.requestRender(true);
-      }
-    } catch {
-      // Best-effort UI repaint
-    }
-  }
-}
 
 function methodOf(record: Record<string, unknown>, name: string): ((...args: unknown[]) => unknown) | undefined {
   const value = record[name];
@@ -272,17 +220,6 @@ export function skinAssistantMessageComponent(target: object, deps: AssistantCom
   const nativeUpdate = methodOf(component, "updateContent");
   if (!nativeUpdate) return;
 
-  liveAssistantMessages.add(target);
-  if (imagesCollapsed) {
-    try {
-      const setToolResultImagesVisible = methodOf(component, "setToolResultImagesVisible");
-      setToolResultImagesVisible?.call(target, false);
-      const setImagesVisible = methodOf(component, "setImagesVisible");
-      setImagesVisible?.call(target, false);
-    } catch {
-      // Best effort
-    }
-  }
   const targetRecord = target as Record<symbol, ReturnType<typeof createThoughtSlot>>;
   let thoughtSlot = targetRecord[THOUGHT_SLOT_KEY];
   if (!thoughtSlot) {
@@ -372,8 +309,6 @@ export function installAssistantCommentarySkin(Container: unknown, deps: Assista
     unregister();
     installed = false;
     skinned = new WeakSet<object>();
-    liveAssistantMessages.clear();
-    imagesCollapsed = false;
     phaseCache.clear();
   };
 }

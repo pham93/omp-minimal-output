@@ -31,12 +31,7 @@ import {
   type MinimalWorkingStatus,
 } from "./surfaces/composer-shapes.ts";
 import { installReadGroupSkin } from "./surfaces/read-group.ts";
-import {
-  commentaryStatusFromMessage,
-  installAssistantCommentarySkin,
-  toggleImagesCollapsed,
-} from "./surfaces/assistant-commentary-skin.ts";
-import { openInspectOverlay } from "./surfaces/inspect-overlay.ts";
+import { commentaryStatusFromMessage, installAssistantCommentarySkin } from "./surfaces/assistant-commentary-skin.ts";
 import {
   genericNativeDensityEligible,
   installNativeToolCardSkin,
@@ -664,15 +659,6 @@ export default function (pi: ExtensionAPI) {
         if (!runtimeOwner.owns()) return;
         todoWidget.todosCollapsed = !todoWidget.todosCollapsed;
         todoWidget.refreshWidget();
-      },
-      inspect: async (ctx) => {
-        if (!runtimeOwner.owns()) return;
-        await openInspectOverlay(ctx, readGroupTheme);
-      },
-      toggleImages: (ctx) => {
-        if (!runtimeOwner.owns()) return;
-        const collapsed = toggleImagesCollapsed(pump.getUi());
-        ctx.ui.notify(collapsed ? "Images collapsed (fast scroll mode)" : "Images visible (graphics on)", "info");
       },
     });
 
