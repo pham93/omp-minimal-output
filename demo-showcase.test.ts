@@ -128,11 +128,39 @@ describe("runPluginDemo", () => {
     await hubPromise;
   });
 
+  test("renders image demo card with pleasing placeholder box", async () => {
+    const { ctx, widgets, notifications } = createMockCtx();
+    const promise = runPluginDemo(ctx as never, "image");
+    expect(widgets.has("minimal-demo")).toBe(true);
+    const factory = widgets.get("minimal-demo") as (_tui: unknown, theme: unknown) => unknown;
+    expect(typeof factory).toBe("function");
+
+    const component = factory({}, null);
+    expect(component).toBeDefined();
+
+    const host = component as {
+      render?: (w: number) => readonly string[];
+      children?: Array<{ render?: (w: number) => readonly string[] }>;
+    };
+    const rendered = (host.render?.(80) ?? host.children?.[0]?.render?.(80) ?? []).map(Bun.stripANSI).join("\n");
+    expect(rendered).toContain("Read attachment://1");
+    expect(rendered).toContain("🖼");
+    expect(rendered).toContain("image/webp");
+    expect(rendered).toContain("inspect to view image");
+
+    await runPluginDemo(ctx as never, "stop");
+    await promise;
+    expect(notifications.some((n) => n.message.includes("Image card"))).toBe(true);
+  });
+
   test("renders todo and web search demo cards", async () => {
     const { ctx, widgets, notifications } = createMockCtx();
     const todoPromise = runPluginDemo(ctx as never, "todo");
     expect(widgets.has("minimal-demo")).toBe(true);
-    const todoFactory = widgets.get("minimal-demo") as (_tui: unknown, theme: unknown) => { render?: (w: number) => unknown; children?: unknown[] };
+    const todoFactory = widgets.get("minimal-demo") as (
+      _tui: unknown,
+      theme: unknown,
+    ) => { render?: (w: number) => unknown; children?: unknown[] };
     const todoComp = todoFactory({}, {});
     expect(todoComp).toBeDefined();
 
@@ -171,7 +199,10 @@ describe("runPluginDemo", () => {
     const { ctx, widgets } = createMockCtx();
     const thinkingPromise = runPluginDemo(ctx as never, "thinking");
     expect(widgets.has("minimal-demo")).toBe(true);
-    const thinkingFactory = widgets.get("minimal-demo") as (_tui: unknown, theme: unknown) => { children?: Array<{ render?: (w: number) => unknown }> };
+    const thinkingFactory = widgets.get("minimal-demo") as (
+      _tui: unknown,
+      theme: unknown,
+    ) => { children?: Array<{ render?: (w: number) => unknown }> };
     const thinkingComp = thinkingFactory({}, {});
     const thinkingLines = thinkingComp?.children?.[0]?.render?.(100);
     expect(Array.isArray(thinkingLines)).toBe(true);
@@ -180,7 +211,10 @@ describe("runPluginDemo", () => {
 
     const warningPromise = runPluginDemo(ctx as never, "warning");
     expect(widgets.has("minimal-demo")).toBe(true);
-    const warningFactory = widgets.get("minimal-demo") as (_tui: unknown, theme: unknown) => { children?: Array<{ render?: (w: number) => unknown }> };
+    const warningFactory = widgets.get("minimal-demo") as (
+      _tui: unknown,
+      theme: unknown,
+    ) => { children?: Array<{ render?: (w: number) => unknown }> };
     const warningComp = warningFactory({}, {});
     const warningLines = warningComp?.children?.[0]?.render?.(100);
     expect(Array.isArray(warningLines)).toBe(true);
@@ -192,10 +226,7 @@ describe("runPluginDemo", () => {
     const mockTheme = {
       fg: (_token: string, text: string) => text,
     };
-    const rawLines = [
-      "src/config.ts: 1 hit (first 1 shown)",
-      "src/config.ts:14:export const DEFAULT_PORT = 3000;",
-    ];
+    const rawLines = ["src/config.ts: 1 hit (first 1 shown)", "src/config.ts:14:export const DEFAULT_PORT = 3000;"];
 
     const formatted = formatSearchDetails(mockTheme, rawLines, "DEFAULT_PORT");
     expect(formatted).toHaveLength(2);
@@ -216,7 +247,7 @@ describe("runPluginDemo", () => {
     const ompGrepLines = [
       "      # /home/redbull/.bun/install/cache/@oh-my-pi/pi-coding-agent@18.2.4@@@1/src/modes/",
       "      ## interactive-mode.ts#CDE3",
-      "       1290:                    icon: getSlashCommandTypeIcon(\"extension\"),",
+      '       1290:                    icon: getSlashCommandTypeIcon("extension"),',
       "      *1291:                    getArgumentCompletions: cmd.getArgumentCompletions,",
       "      … 3 more lines",
       "",

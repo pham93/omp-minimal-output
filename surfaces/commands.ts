@@ -64,7 +64,7 @@ export function registerPluginCommands(
   });
   pi.registerCommand("demo", {
     description:
-      "Interactive demo of minimal output (targets: all, grouped, write, edit, eval, grep, task, hub, todo, thinking, warning, web_search, stop)",
+      "Interactive demo of minimal output (targets: all, grouped, write, edit, eval, grep, image, task, hub, todo, thinking, warning, web_search, stop)",
     getArgumentCompletions: (argumentPrefix: string) => {
       const prefix = argumentPrefix.trim().toLowerCase();
       const matches = DEMO_OPTIONS.filter((opt) => opt.value.toLowerCase().startsWith(prefix));

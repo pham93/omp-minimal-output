@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { Container } from "@oh-my-pi/pi-tui";
+import { renderImagePlaceholderBox } from "../cards/card-primitives.ts";
 import { renderWriteCard } from "../cards/write-card.ts";
 import { renderPrettyEditCard } from "../cards/edit-card.ts";
 import { renderEvalCard } from "../cards/eval-card.ts";
@@ -257,6 +258,36 @@ function renderHubDemo(theme: unknown): Container {
   );
 }
 
+export function renderImageDemo(theme: unknown): Container {
+  const groups = new GroupedToolManager({
+    rowIsLive: () => false,
+    activityLabel: () => "Reading inspect overlay preview",
+    activityRunId: () => "demo:image",
+    activityStartedAt: () => Date.now() - 42,
+  });
+  const frozen = {
+    gid: "demo:image",
+    label: "Reading inspect overlay preview",
+  };
+  const placeholderLines = renderImagePlaceholderBox(theme, 48, {
+    mimeType: "image/webp",
+    dimensions: "1231×788",
+  });
+  groups.renderToolVisual(
+    theme,
+    "demo:read:image",
+    {
+      body: "Read attachment://1",
+      live: false,
+      error: false,
+      right: "(42ms)",
+      details: placeholderLines,
+    },
+    frozen,
+  );
+  return groups.paintGroup(theme, "demo:image");
+}
+
 function renderTodoDemo(theme: unknown, width: number): readonly string[] {
   return renderDensityTodoHeader(
     theme,
@@ -347,6 +378,7 @@ export const DEMO_OPTIONS: readonly DemoOption[] = [
   { value: "all", label: "all", description: "Sequential tour of all cards and surfaces" },
   { value: "search", label: "search", description: "Code search (grep) with syntax highlighting and pattern emphasis" },
   { value: "grep", label: "grep", description: "Alias for code search (grep)" },
+  { value: "image", label: "image", description: "Image read card with pleasing placeholder box and inspect hint" },
   { value: "grouped", label: "grouped", description: "Grouped tools tree (bash, read, grep) with continuation rails" },
   { value: "write", label: "write", description: "Interactive streaming Write card with latest-lines projection" },
   { value: "edit", label: "edit", description: "Edit card diff with line numbers and soft diff bands" },
@@ -369,6 +401,9 @@ export type DemoTarget =
   | "grouped"
   | "grep"
   | "search"
+  | "image"
+  | "images"
+  | "img"
   | "web_search"
   | "task"
   | "hub"
@@ -485,6 +520,15 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
     clearDemo();
     return;
   }
+
+  if (target === "image" || target === "images" || target === "img") {
+    ctx.ui.notify("Demo: Image card placeholder & inspect hint", "info");
+    setDemoComponent((_tui, theme) => renderImageDemo(theme));
+    await sleep(3500, currentSeq);
+    if (currentSeq !== activeDemoSeq) return;
+    clearDemo();
+    return;
+  }
   if (target === "search" || target === "grep") {
     ctx.ui.notify("Demo: Code search (grep) with syntax highlighting", "info");
     setDemoComponent((_tui, theme) => renderSearchDemo(theme));
@@ -584,21 +628,28 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
 
   // Step 2: Grouped tools (bash, read, grep)
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[2/8] Grouped Tools & Continuation Rails", "info");
+  ctx.ui.notify("[2/9] Grouped Tools & Continuation Rails", "info");
   setDemoComponent((_tui, theme) => renderGroupedDemo(theme));
+  await sleep(2200, currentSeq);
+  if (currentSeq !== activeDemoSeq) return;
+
+  // Step 3: Image read card placeholder & inspect hint
+  if (currentSeq !== activeDemoSeq) return;
+  ctx.ui.notify("[3/9] Image Card Placeholder & Inspect Hint", "info");
+  setDemoComponent((_tui, theme) => renderImageDemo(theme));
   await sleep(2200, currentSeq);
   if (currentSeq !== activeDemoSeq) return;
 
   // Step 3: Code search (grep) with syntax highlighting
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[3/8] Code Search (grep) with Syntax Highlighting", "info");
+  ctx.ui.notify("[4/9] Code Search (grep) with Syntax Highlighting", "info");
   setDemoComponent((_tui, theme) => renderSearchDemo(theme));
   await sleep(2200, currentSeq);
   if (currentSeq !== activeDemoSeq) return;
 
   // Step 4: Write card streaming
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[4/8] Streaming Write Card", "info");
+  ctx.ui.notify("[5/9] Streaming Write Card", "info");
   for (let count = 1; count <= DEMO_WRITE_LINES.length; count += 2) {
     if (currentSeq !== activeDemoSeq) return;
     const partialContent = DEMO_WRITE_LINES.slice(0, count).join("\n");
@@ -619,21 +670,21 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
 
   // Step 4: Edit card diff
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[5/8] Edit Card (Diff & Line Markers)", "info");
+  ctx.ui.notify("[6/9] Edit Card (Diff & Line Markers)", "info");
   setDemoComponent((_tui, theme) => renderEditDemo(theme));
   await sleep(2200, currentSeq);
   if (currentSeq !== activeDemoSeq) return;
 
   // Step 5: Eval card
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[6/8] Eval Card (Code & Execution Output)", "info");
+  ctx.ui.notify("[7/9] Eval Card (Code & Execution Output)", "info");
   setDemoComponent((_tui, theme) => renderEvalDemo(theme));
   await sleep(2200, currentSeq);
   if (currentSeq !== activeDemoSeq) return;
 
   // Step 6: Task and Hub cards
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[7/8] Task & Hub Cards", "info");
+  ctx.ui.notify("[8/9] Task & Hub Cards", "info");
   setDemoComponent((_tui, theme) => {
     const combined = new Container();
     combined.addChild(renderTaskDemo(theme));
@@ -645,7 +696,7 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
 
   // Step 7: Todos, Warning, and Web Search
   if (currentSeq !== activeDemoSeq) return;
-  ctx.ui.notify("[8/8] Todos, Warning Banner & Search", "info");
+  ctx.ui.notify("[9/9] Todos, Warning Banner & Search", "info");
   setDemoComponent((_tui, theme) => {
     const combined = new Container();
     combined.addChild({

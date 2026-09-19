@@ -10,7 +10,7 @@ Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-outpu
 
 Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/inspect`, `/demo-write`, `/demo`, `/demo-all`; shortcut `ctrl+alt+t` toggles Todo expand/collapse; `ctrl+alt+i` opens the inspect overlay.
 
-Development demo: `/demo` (or `/demo-all`) runs a live interactive showcase of minimal cards and surfaces without LLM or network requests. Inspect individual components via `/demo <write|edit|eval|grouped|grep|task|hub|todo|search>` or dismiss early with `/demo stop`.
+Development demo: `/demo` (or `/demo-all`) runs a live interactive showcase of minimal cards and surfaces without LLM or network requests. Inspect individual components via `/demo <write|edit|eval|grouped|grep|image|task|hub|todo|search>` or dismiss early with `/demo stop`.
 
 Inspect overlay: `/inspect` replays this session's tool cards fullscreen with the same plugin chrome as the transcript. ↑/↓ (or `j`/`k`) outlines one card, Enter/`l` toggles that card's Detailed window, `h` collapses it, Esc closes. Ctrl+O in the overlay is not a global expand.
 
