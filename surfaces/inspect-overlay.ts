@@ -118,6 +118,19 @@ export function inspectItemImage(item: InspectToolItem): InspectImageInfo | unde
   }
   return undefined;
 }
+export function itemSearchText(item: InspectToolItem): string {
+  const parts: string[] = [item.toolName];
+  if (item.userPrompt) parts.push(item.userPrompt);
+  if (typeof item.args === "object" && item.args !== null) {
+    for (const val of Object.values(item.args as Record<string, unknown>)) {
+      if (typeof val === "string") parts.push(val);
+      else if (typeof val === "number" || typeof val === "boolean") parts.push(String(val));
+    }
+  }
+  const resultText = stashedOrResultText(item.result);
+  if (resultText) parts.push(resultText);
+  return parts.join(" ").toLowerCase();
+}
 
 function renderHost(card: unknown, width: number): string[] {
   const host = card as {
@@ -151,8 +164,18 @@ function searchPattern(args: unknown): string {
   return typeof raw === "string" ? raw : "";
 }
 
-function paintGroupedInspect(theme: unknown, width: number, item: InspectToolItem, expanded: boolean): string[] {
-  const options = expanded ? { expanded: true } : {};
+function paintGroupedInspect(
+  theme: unknown,
+  width: number,
+  item: InspectToolItem,
+  expanded: boolean,
+  minimized = false,
+): string[] {
+  const options = expanded
+    ? { expanded: true, detailedMaxRows: Number.MAX_SAFE_INTEGER }
+    : minimized
+      ? { minimal: true }
+      : {};
   const profile = detailProfile(options);
   const error = isToolError(item.result, options);
   const header = formatRowLine(theme, width, {
@@ -161,7 +184,9 @@ function paintGroupedInspect(theme: unknown, width: number, item: InspectToolIte
     error,
     fadeKey: item.id,
     right: durationSuffix(item.result),
+    mark: "●",
   });
+  if (minimized && !expanded) return [header];
   if (profile.minimal && !expanded) return [header];
 
   if (item.toolName === "read") {
@@ -185,7 +210,7 @@ function paintGroupedInspect(theme: unknown, width: number, item: InspectToolIte
               imageInfo.data,
               imageInfo.mimeType,
               { fallbackColor: (s: string) => paintAt(theme, s, "dim", 0.7) },
-              { maxWidthCells: Math.max(10, width - 6), maxHeightCells: 25 },
+              { maxWidthCells: Math.max(10, width - 6), maxHeightCells: 30 },
             );
             const imageLines = img.render(Math.max(10, width - 6));
             if (imageLines.length > 0) {
@@ -204,7 +229,8 @@ function paintGroupedInspect(theme: unknown, width: number, item: InspectToolIte
     }
   }
 
-  const bounded = boundedTextLines(stashedOrResultText(item.result), outputRowLimit(profile));
+  const cap = expanded ? Number.MAX_SAFE_INTEGER : outputRowLimit(profile);
+  const bounded = boundedTextLines(stashedOrResultText(item.result), cap);
   let details = bounded.lines;
   if (item.toolName === "grep" || item.toolName === "ast_grep") {
     details = formatSearchDetails(theme, details, searchPattern(item.args));
@@ -220,8 +246,26 @@ function paintGroupedInspect(theme: unknown, width: number, item: InspectToolIte
   return trimBlankEdges(lines);
 }
 
-function paintToolCard(theme: unknown, width: number, item: InspectToolItem, expanded: boolean): string[] {
-  const options = expanded ? { expanded: true } : {};
+function paintToolCard(
+  theme: unknown,
+  width: number,
+  item: InspectToolItem,
+  expanded: boolean,
+  minimized = false,
+): string[] {
+  if (minimized && !expanded) {
+    const header = formatRowLine(theme, width, {
+      body: toolActionLabel(item.toolName, item.args),
+      live: false,
+      error: isToolError(item.result),
+      fadeKey: item.id,
+      right: durationSuffix(item.result),
+      mark: "●",
+    });
+    return [header];
+  }
+
+  const options = expanded ? { expanded: true, detailedMaxRows: Number.MAX_SAFE_INTEGER } : {};
   const inner = Math.max(8, width);
   try {
     if (item.toolName === "task") {
@@ -234,7 +278,7 @@ function paintToolCard(theme: unknown, width: number, item: InspectToolItem, exp
       (item.toolName === "bash" || item.toolName === "read" || item.toolName === "grep" || item.toolName === "glob") &&
       wrapTool(item.toolName)
     ) {
-      return paintGroupedInspect(theme, inner, item, expanded);
+      return paintGroupedInspect(theme, inner, item, expanded, minimized);
     } else if (isWrappedTool(item.toolName) && wrapTool(item.toolName)) {
       const groupedTools = new GroupedToolManager({
         rowIsLive: () => false,
@@ -308,8 +352,19 @@ export class InspectOverlay {
   readonly #rows: number;
   #index = 0;
   #expanded = new Set<string>();
+  #minimized = new Set<string>();
+  #allMinimized = false;
   #scroll = 0;
-  readonly #painted = new Map<string, { inner: number; expanded: boolean; lines: readonly string[] }>();
+  readonly #searchIndex: readonly string[];
+  #searchMode = false;
+  #searchQuery = "";
+  #searchActive = false;
+  #matchingIndices: number[] = [];
+  #searchMatchPointer = 0;
+  readonly #painted = new Map<
+    string,
+    { inner: number; expanded: boolean; minimized: boolean; lines: readonly string[] }
+  >();
 
   constructor(options: {
     tui: InspectHost;
@@ -324,6 +379,7 @@ export class InspectOverlay {
     this.#done = options.done;
     this.#rows = Math.max(8, Math.floor(options.rows ?? process.stdout.rows ?? 24));
     this.#index = Math.max(0, options.items.length - 1);
+    this.#searchIndex = options.items.map((item) => itemSearchText(item));
   }
 
   #repaint(): void {
@@ -334,26 +390,170 @@ export class InspectOverlay {
     }
   }
 
-  #cardLines(item: InspectToolItem, inner: number, expanded: boolean): readonly string[] {
+  isExpanded(index: number): boolean {
+    const item = this.#items[index];
+    return item ? this.#expanded.has(item.id) : false;
+  }
+
+  isMinimized(index: number): boolean {
+    const item = this.#items[index];
+    return item ? this.#minimized.has(item.id) : false;
+  }
+
+  isSearching(): boolean {
+    return this.#searchMode;
+  }
+
+  searchQuery(): string {
+    return this.#searchQuery;
+  }
+
+  matchingIndices(): readonly number[] {
+    return this.#matchingIndices;
+  }
+
+  #applySearch(query: string): void {
+    this.#searchQuery = query;
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) {
+      this.#clearSearch();
+      return;
+    }
+    this.#searchActive = true;
+    const matches: number[] = [];
+    for (let i = 0; i < this.#searchIndex.length; i++) {
+      if (this.#searchIndex[i]!.includes(trimmed)) {
+        matches.push(i);
+      }
+    }
+    this.#matchingIndices = matches;
+    if (matches.length > 0) {
+      const nextMatchIndex = matches.findIndex((idx) => idx >= this.#index);
+      this.#searchMatchPointer = nextMatchIndex >= 0 ? nextMatchIndex : 0;
+      this.#index = matches[this.#searchMatchPointer]!;
+    }
+  }
+
+  #clearSearch(): void {
+    this.#searchActive = false;
+    this.#searchQuery = "";
+    this.#matchingIndices = [];
+    this.#searchMatchPointer = 0;
+  }
+
+  #cardLines(item: InspectToolItem, inner: number, expanded: boolean, minimized: boolean): readonly string[] {
     const hit = this.#painted.get(item.id);
-    if (hit && hit.inner === inner && hit.expanded === expanded) return hit.lines;
-    const lines = paintToolCard(this.#theme, inner, item, expanded);
-    this.#painted.set(item.id, { inner, expanded, lines });
+    if (hit && hit.inner === inner && hit.expanded === expanded && hit.minimized === minimized) return hit.lines;
+    const lines = paintToolCard(this.#theme, inner, item, expanded, minimized);
+    this.#painted.set(item.id, { inner, expanded, minimized, lines });
     return lines;
   }
 
-  #cardHeight(item: InspectToolItem, inner: number, expanded: boolean, selected: boolean): number {
+  #cardHeight(item: InspectToolItem, inner: number, expanded: boolean, minimized: boolean, selected: boolean): number {
     const hit = this.#painted.get(item.id);
-    const body = hit && hit.inner === inner && hit.expanded === expanded ? hit.lines.length : 1;
+    const body =
+      hit && hit.inner === inner && hit.expanded === expanded && hit.minimized === minimized ? hit.lines.length : 1;
     return (selected ? body + 2 : body) + 1;
   }
 
   handleInput(data: string): void {
+    if (this.#searchMode) {
+      if (isCancel(data)) {
+        this.#searchMode = false;
+        if (!this.#searchQuery.trim()) {
+          this.#clearSearch();
+        }
+        this.#repaint();
+        return;
+      }
+      if (data === "\r" || data === "\n" || matchesKey(data, "enter")) {
+        this.#searchMode = false;
+        if (!this.#searchQuery.trim()) {
+          this.#clearSearch();
+        }
+        this.#repaint();
+        return;
+      }
+      if (data === "\x7f" || data === "\b" || matchesKey(data, "backspace")) {
+        this.#applySearch(this.#searchQuery.slice(0, -1));
+        this.#repaint();
+        return;
+      }
+      if (data === "\x15" || data === "\x17") {
+        this.#applySearch("");
+        this.#repaint();
+        return;
+      }
+      if (data.length === 1 && data >= " " && data !== "\x1b") {
+        this.#applySearch(this.#searchQuery + data);
+        this.#repaint();
+        return;
+      }
+      return;
+    }
+
     if (isCancel(data)) {
+      if (this.#searchActive) {
+        this.#clearSearch();
+        this.#repaint();
+        return;
+      }
       this.#done(undefined);
       return;
     }
     if (this.#items.length === 0) return;
+
+    if (data === "/") {
+      this.#searchMode = true;
+      this.#searchQuery = "";
+      this.#repaint();
+      return;
+    }
+
+    if (data === "n" && this.#searchActive) {
+      if (this.#matchingIndices.length > 0) {
+        this.#searchMatchPointer = (this.#searchMatchPointer + 1) % this.#matchingIndices.length;
+        this.#index = this.#matchingIndices[this.#searchMatchPointer]!;
+        this.#repaint();
+      }
+      return;
+    }
+
+    if (data === "N" && this.#searchActive) {
+      if (this.#matchingIndices.length > 0) {
+        this.#searchMatchPointer =
+          (this.#searchMatchPointer - 1 + this.#matchingIndices.length) % this.#matchingIndices.length;
+        this.#index = this.#matchingIndices[this.#searchMatchPointer]!;
+        this.#repaint();
+      }
+      return;
+    }
+
+    if (data === "m") {
+      const selected = this.#items[this.#index];
+      if (selected) {
+        this.#expanded.delete(selected.id);
+        if (this.#minimized.has(selected.id)) {
+          this.#minimized.delete(selected.id);
+        } else {
+          this.#minimized.add(selected.id);
+        }
+        this.#repaint();
+      }
+      return;
+    }
+
+    if (data === "M") {
+      this.#allMinimized = !this.#allMinimized;
+      this.#minimized.clear();
+      this.#expanded.clear();
+      if (this.#allMinimized) {
+        for (const it of this.#items) this.#minimized.add(it.id);
+      }
+      this.#repaint();
+      return;
+    }
+
     if (isUp(data)) {
       if (this.#index === 0) return;
       this.#index -= 1;
@@ -369,12 +569,20 @@ export class InspectOverlay {
     const selected = this.#items[this.#index];
     if (!selected) return;
     if (isCollapse(data)) {
-      if (!this.#expanded.has(selected.id)) return;
-      this.#expanded.delete(selected.id);
-      this.#repaint();
+      if (this.#expanded.has(selected.id)) {
+        this.#expanded.delete(selected.id);
+        this.#repaint();
+        return;
+      }
+      if (!this.#minimized.has(selected.id)) {
+        this.#minimized.add(selected.id);
+        this.#repaint();
+        return;
+      }
       return;
     }
     if (isConfirm(data)) {
+      this.#minimized.delete(selected.id);
       if (this.#expanded.has(selected.id)) this.#expanded.delete(selected.id);
       else this.#expanded.add(selected.id);
       this.#repaint();
@@ -384,18 +592,33 @@ export class InspectOverlay {
   render(width: number): readonly string[] {
     const cols = Math.max(20, Math.floor(width) || 80);
     const inner = Math.max(8, cols - 4);
-    const header = paintAt(this.#theme, "Inspect · pick a tool card to expand", "accent", 1);
-    const footer = paintAt(
-      this.#theme,
-      this.#items.length === 0
-        ? "esc close"
-        : `${this.#index + 1}/${this.#items.length}  ↑/↓ step  enter expand  h collapse  esc close`,
-      "dim",
-      1,
-    );
+    let headerText = "Inspect · pick a tool card to expand";
+    if (this.#searchActive) {
+      headerText = `Inspect · ${this.#matchingIndices.length} match${this.#matchingIndices.length === 1 ? "" : "es"} for "${this.#searchQuery}"`;
+    }
+    const header = paintAt(this.#theme, headerText, "accent", 1);
+
+    let footerText: string;
+    if (this.#searchMode) {
+      const matchCount = this.#matchingIndices.length;
+      footerText = `/ ${this.#searchQuery}█  (${matchCount} match${matchCount === 1 ? "" : "es"})  enter commit  esc cancel`;
+    } else if (this.#searchActive) {
+      const matchCount = this.#matchingIndices.length;
+      const currentMatch = matchCount > 0 ? this.#searchMatchPointer + 1 : 0;
+      footerText = `${this.#index + 1}/${this.#items.length}  [match ${currentMatch}/${matchCount}]  n/N step  enter expand  m min  esc clear`;
+    } else if (this.#items.length === 0) {
+      footerText = "esc close";
+    } else {
+      footerText = `${this.#index + 1}/${this.#items.length}  ↑/↓ step  enter expand  m min  M all  / search  esc close`;
+    }
+    const footer = paintAt(this.#theme, footerText, "dim", 1);
     const bodyHeight = Math.max(1, this.#rows - 2);
+
+    const isExpanded = (id: string): boolean => this.#expanded.has(id);
+    const isMinimized = (id: string): boolean => this.#minimized.has(id);
+
     const selectedItem = this.#items[this.#index];
-    if (selectedItem) this.#cardLines(selectedItem, inner, this.#expanded.has(selectedItem.id));
+    if (selectedItem) this.#cardLines(selectedItem, inner, isExpanded(selectedItem.id), isMinimized(selectedItem.id));
 
     const layout = (): { starts: number[]; promptAt: Array<string | undefined>; total: number } => {
       const starts: number[] = [];
@@ -408,7 +631,7 @@ export class InspectOverlay {
         promptAt[i] = prompt;
         starts[i] = cursor;
         if (prompt) cursor += 2;
-        cursor += this.#cardHeight(item, inner, this.#expanded.has(item.id), i === this.#index);
+        cursor += this.#cardHeight(item, inner, isExpanded(item.id), isMinimized(item.id), i === this.#index);
       }
       return { starts, promptAt, total: cursor };
     };
@@ -419,7 +642,10 @@ export class InspectOverlay {
       const item = this.#items[this.#index];
       if (!item) return { start, end: start };
       const prompt = promptAt[this.#index] ? 2 : 0;
-      return { start, end: start + prompt + this.#cardHeight(item, inner, this.#expanded.has(item.id), true) };
+      return {
+        start,
+        end: start + prompt + this.#cardHeight(item, inner, isExpanded(item.id), isMinimized(item.id), true),
+      };
     };
     const clampScroll = (range: { start: number; end: number }, doc: number): void => {
       if (range.start < this.#scroll) this.#scroll = range.start;
@@ -434,10 +660,12 @@ export class InspectOverlay {
       for (const [i, item] of this.#items.entries()) {
         const start = starts[i] ?? 0;
         const end =
-          start + (promptAt[i] ? 2 : 0) + this.#cardHeight(item, inner, this.#expanded.has(item.id), i === this.#index);
+          start +
+          (promptAt[i] ? 2 : 0) +
+          this.#cardHeight(item, inner, isExpanded(item.id), isMinimized(item.id), i === this.#index);
         if (end <= viewTop) continue;
         if (start >= viewBottom) break;
-        this.#cardLines(item, inner, this.#expanded.has(item.id));
+        this.#cardLines(item, inner, isExpanded(item.id), isMinimized(item.id));
       }
     };
     paintVisible(this.#scroll, this.#scroll + bodyHeight);
@@ -453,12 +681,13 @@ export class InspectOverlay {
     for (const [i, item] of this.#items.entries()) {
       const start = starts[i] ?? 0;
       const prompt = promptAt[i];
-      const expanded = this.#expanded.has(item.id);
+      const expanded = isExpanded(item.id);
+      const minimized = isMinimized(item.id);
       const selected = i === this.#index;
-      const estimated = start + (prompt ? 2 : 0) + this.#cardHeight(item, inner, expanded, selected);
+      const estimated = start + (prompt ? 2 : 0) + this.#cardHeight(item, inner, expanded, minimized, selected);
       if (estimated <= top) continue;
       if (start >= bottom) break;
-      const painted = this.#cardLines(item, inner, expanded);
+      const painted = this.#cardLines(item, inner, expanded, minimized);
       const chunk: string[] = [];
       if (prompt) {
         chunk.push(paintAt(this.#theme, `❯ ${truncatePlain(prompt, cols - 2)}`, "dim", 1), "");

@@ -12,7 +12,13 @@ Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/tod
 
 Development demo: `/demo` (or `/demo-all`) runs a live interactive showcase of minimal cards and surfaces without LLM or network requests. Inspect individual components via `/demo <write|edit|eval|grouped|grep|image|task|hub|todo|search>` or dismiss early with `/demo stop`.
 
-Inspect overlay: `/inspect` replays this session's tool cards fullscreen with the same plugin chrome as the transcript. ↑/↓ (or `j`/`k`) outlines one card, Enter/`l` toggles that card's Detailed window, `h` collapses it, Esc closes. Ctrl+O in the overlay is not a global expand.
+Inspect overlay: `/inspect` (or `ctrl+alt+i`) replays this session's tool cards fullscreen with the same plugin chrome as the transcript.
+
+- **Full expansion**: Enter (or `l`) expands everything without the 20-line limit, revealing complete outputs.
+- **1-line minimize**: `m` toggles the focused card down to a single-line summary; `M` minimizes/restores all cards.
+- **Fast search**: `/` opens an instant search across tool names, arguments, outputs, and user prompts. `n` steps to the next match, `N` to the previous match, `Enter` commits, and `Esc` clears the search.
+- **Images**: Read image cards show a clean placeholder box in the transcript and render full graphic pixels in inspect view when expanded.
+- **Navigation**: ↑/↓ (or `j`/`k`) steps between cards, `h` collapses, and `Esc` closes without rewriting transcript scrollback.
 
 Configurable detail levels: [`docs/DETAIL_LEVELS.md`](docs/DETAIL_LEVELS.md).
 

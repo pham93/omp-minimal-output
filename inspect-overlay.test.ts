@@ -217,7 +217,7 @@ describe("InspectOverlay", () => {
     const expandedB = paint();
     expect(expandedB).toContain("bravo_0");
     expect(expandedB).toContain("bravo_3");
-    expect(expandedB).not.toContain("bravo_4");
+    expect(expandedB).toContain("bravo_19");
     expect(expandedB).not.toContain("alpha_3");
 
     view.handleInput("k");
@@ -338,5 +338,108 @@ describe("inspectItemImage and image tool card rendering", () => {
     view.handleInput("\r");
     const expandedView = paint();
     expect(expandedView).toContain("attachment://1");
+  });
+});
+
+describe("InspectOverlay card minimization and fast search", () => {
+  test("m key toggles 1-line minimization on the focused card", () => {
+    const tools = [
+      { id: "a", name: "bash", args: { command: "git status" }, text: "line 1\nline 2\nline 3\nline 4" },
+      { id: "b", name: "read", args: { path: "src/server.ts" }, text: "line A\nline B\nline C" },
+    ];
+    const items = collectInspectItems(sessionWithTools(tools));
+    const { view, paint } = overlayFor(items, 60);
+
+    // Starts on card b (standard view with details)
+    const normalB = paint();
+    expect(normalB).toContain("line A");
+    expect(view.isMinimized(1)).toBe(false);
+
+    // Press m -> minimizes card b to 1-line header
+    view.handleInput("m");
+    expect(view.isMinimized(1)).toBe(true);
+    const minB = paint();
+    expect(minB).not.toContain("line A");
+    expect(minB).toContain("src/server.ts");
+
+    // Press m again -> restores standard view
+    view.handleInput("m");
+    expect(view.isMinimized(1)).toBe(false);
+    const restoredB = paint();
+    expect(restoredB).toContain("line A");
+  });
+
+  test("M key toggles 1-line minimization on all session cards", () => {
+    const tools = [
+      { id: "a", name: "bash", args: { command: "git status" }, text: "status output" },
+      { id: "b", name: "read", args: { path: "src/server.ts" }, text: "server output" },
+    ];
+    const items = collectInspectItems(sessionWithTools(tools));
+    const { view, paint } = overlayFor(items, 60);
+
+    expect(view.isMinimized(0)).toBe(false);
+    expect(view.isMinimized(1)).toBe(false);
+
+    // Press M -> minimizes all cards
+    view.handleInput("M");
+    expect(view.isMinimized(0)).toBe(true);
+    expect(view.isMinimized(1)).toBe(true);
+    const minAll = paint();
+    expect(minAll).not.toContain("status output");
+    expect(minAll).not.toContain("server output");
+
+    // Press M again -> restores all cards
+    view.handleInput("M");
+    expect(view.isMinimized(0)).toBe(false);
+    expect(view.isMinimized(1)).toBe(false);
+  });
+
+  test("/ opens search, types query in real time, n/N steps matches, and esc clears", () => {
+    const tools = [
+      { id: "a", name: "bash", args: { command: "git diff" }, text: "diff content" },
+      { id: "b", name: "read", args: { path: "src/config.ts" }, text: "config content" },
+      { id: "c", name: "bash", args: { command: "git log" }, text: "log commit" },
+    ];
+    const items = collectInspectItems(sessionWithTools(tools));
+    const { view, paint } = overlayFor(items, 60);
+
+    expect(view.isSearching()).toBe(false);
+
+    // Press / to enter search mode
+    view.handleInput("/");
+    expect(view.isSearching()).toBe(true);
+    const searchPrompt = paint();
+    expect(searchPrompt).toContain("/ █");
+
+    // Type "git"
+    view.handleInput("g");
+    view.handleInput("i");
+    view.handleInput("t");
+    expect(view.searchQuery()).toBe("git");
+    expect(view.matchingIndices()).toEqual([0, 2]); // Matches cards a and c
+
+    // Press Enter to commit search
+    view.handleInput("\r");
+    expect(view.isSearching()).toBe(false);
+    const searchCommitted = paint();
+    expect(searchCommitted).toContain("match 2/2");
+
+    // Step next match with n (wraps to first match)
+    view.handleInput("n");
+    const stepNext = paint();
+    expect(stepNext).toContain("match 1/2");
+    expect(stepNext).toContain("git diff");
+
+    // Step previous match with N (wraps back to second match)
+    view.handleInput("N");
+    const stepPrev = paint();
+    expect(stepPrev).toContain("match 2/2");
+    expect(stepPrev).toContain("git log");
+
+    // Press esc -> clears search and restores normal footer
+    view.handleInput("\x1b");
+    const cleared = paint();
+    expect(cleared).not.toContain("match");
+    expect(cleared).toContain("/ search");
   });
 });
