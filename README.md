@@ -8,7 +8,7 @@ Generic grouped tools keep output indented beneath each tool, with continuation 
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
-Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/inspect`, `/demo-write`, `/demo`, `/demo-all`; shortcut `ctrl+alt+t` toggles Todo expand/collapse; `ctrl+alt+i` opens the inspect overlay.
+Commands: `/minimal-on`, `/minimal-off`, `/minimal-status`, `/todos-show`, `/todos`, `/inspect`, `/images`, `/demo-write`, `/demo`, `/demo-all`; shortcut `ctrl+alt+t` toggles Todo expand/collapse; `ctrl+alt+i` opens the inspect overlay; `ctrl+alt+m` toggles transcript images on/off for zero-lag text scrolling.
 
 Development demo: `/demo` (or `/demo-all`) runs a live interactive showcase of minimal cards and surfaces without LLM or network requests. Inspect individual components via `/demo <write|edit|eval|grouped|grep|task|hub|todo|search>` or dismiss early with `/demo stop`.
 
