@@ -205,6 +205,44 @@ export function cardDetailLine(
   return `${prefixPainted}${paintAt(theme, truncated, error ? "error" : "dim", cfg.opacity)}`;
 }
 
+export interface ImagePlaceholderMeta {
+  mimeType?: string;
+  dimensions?: string;
+  label?: string;
+}
+
+export function renderImagePlaceholderBox(theme: unknown, width: number, meta?: ImagePlaceholderMeta): string[] {
+  const boxWidth = Math.max(30, Math.min(width, 52));
+  const innerWidth = boxWidth - 2;
+
+  const detailParts: string[] = [];
+  if (meta?.mimeType) detailParts.push(meta.mimeType);
+  if (meta?.dimensions) detailParts.push(meta.dimensions);
+  else if (meta?.label) detailParts.push(meta.label);
+
+  const titleText = detailParts.length > 0 ? `🖼  ${detailParts.join(" · ")}` : "🖼  Image";
+  const hintText = "inspect to view image (/inspect)";
+
+  const padCenter = (content: string, visibleLen: number, targetWidth: number): string => {
+    if (visibleLen >= targetWidth) return content;
+    const totalPad = targetWidth - visibleLen;
+    const leftPad = Math.floor(totalPad / 2);
+    const rightPad = totalPad - leftPad;
+    return " ".repeat(leftPad) + content + " ".repeat(rightPad);
+  };
+
+  const topBorder = `╭${"─".repeat(innerWidth)}╮`;
+  const bottomBorder = `╰${"─".repeat(innerWidth)}╯`;
+
+  const titleStyled = paintAt(theme, titleText, "accent", 0.95);
+  const hintStyled = paintAt(theme, hintText, "dim", 0.7);
+
+  const row1 = `│${padCenter(titleStyled, visibleWidth(titleText), innerWidth)}│`;
+  const row2 = `│${padCenter(hintStyled, visibleWidth(hintText), innerWidth)}│`;
+
+  return [topBorder, row1, row2, bottomBorder];
+}
+
 const HAS_SGR_RE = /\x1b\[[0-9;]*m/;
 const DIFF_ADD_RE = /^\s*\+[^+]/;
 const DIFF_DEL_RE = /^\s*-[^-]/;

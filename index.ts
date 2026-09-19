@@ -31,11 +31,7 @@ import {
   type MinimalWorkingStatus,
 } from "./surfaces/composer-shapes.ts";
 import { installReadGroupSkin } from "./surfaces/read-group.ts";
-import {
-  commentaryStatusFromMessage,
-  installAssistantCommentarySkin,
-  toggleImagesCollapsed,
-} from "./surfaces/assistant-commentary-skin.ts";
+import { commentaryStatusFromMessage, installAssistantCommentarySkin } from "./surfaces/assistant-commentary-skin.ts";
 import { openInspectOverlay } from "./surfaces/inspect-overlay.ts";
 import {
   genericNativeDensityEligible,
@@ -668,10 +664,6 @@ export default function (pi: ExtensionAPI) {
       inspect: async (ctx) => {
         if (!runtimeOwner.owns()) return;
         await openInspectOverlay(ctx, readGroupTheme);
-      },
-      toggleImages: (_ctx) => {
-        if (!runtimeOwner.owns()) return;
-        toggleImagesCollapsed(pump.getUi());
       },
     });
 

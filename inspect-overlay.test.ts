@@ -18,8 +18,8 @@ mock.module("@oh-my-pi/pi-tui", () => ({
 }));
 
 type InspectToolItem = import("./surfaces/inspect-overlay.ts").InspectToolItem;
-const { collectInspectItems, InspectOverlay, openInspectOverlay } = await import("./surfaces/inspect-overlay.ts");
-
+const { collectInspectItems, inspectItemImage, InspectOverlay, openInspectOverlay } =
+  await import("./surfaces/inspect-overlay.ts");
 function strip(lines: readonly string[]): string[] {
   return lines.map((line) => Bun.stripANSI(line));
 }
@@ -303,5 +303,40 @@ describe("openInspectOverlay", () => {
     } as never);
     expect(options[0]?.overlay).toBe(true);
     expect(options[0]?.overlayOptions?.fullscreen).toBe(true);
+  });
+});
+
+describe("inspectItemImage and image tool card rendering", () => {
+  test("detects image in read tool result and renders placeholder collapsed and full image expanded", () => {
+    const fakeImageItem: InspectToolItem = {
+      id: "call-img",
+      toolName: "read",
+      args: { path: "attachment://1" },
+      result: {
+        role: "toolResult",
+        toolCallId: "call-img",
+        content: [
+          { type: "text", text: "Read image file [image/png]\n1231x788" },
+          { type: "image", data: "base64data", mimeType: "image/png" },
+        ],
+      },
+    };
+
+    const imageInfo = inspectItemImage(fakeImageItem);
+    expect(imageInfo).toBeDefined();
+    expect(imageInfo?.mimeType).toBe("image/png");
+    expect(imageInfo?.data).toBe("base64data");
+
+    // In overlay: when collapsed, shows placeholder box
+    const { view, paint } = overlayFor([fakeImageItem], 60);
+    const collapsedView = paint();
+    expect(collapsedView).toContain("attachment://1");
+    expect(collapsedView).toContain("🖼");
+    expect(collapsedView).toContain("inspect to view image");
+
+    // Press Enter to expand -> expands card
+    view.handleInput("\r");
+    const expandedView = paint();
+    expect(expandedView).toContain("attachment://1");
   });
 });

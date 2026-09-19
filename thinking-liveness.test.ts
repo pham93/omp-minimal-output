@@ -781,19 +781,20 @@ test("extension registers all commands and shortcuts on initial load", async () 
   expect(registeredCommands.has("demo-all")).toBe(true);
   expect(registeredCommands.has("minimal-status")).toBe(true);
   expect(registeredCommands.has("inspect")).toBe(true);
-  expect(registeredCommands.has("images")).toBe(true);
   expect(registeredShortcuts.has("ctrl+alt+i")).toBe(true);
   expect(registeredShortcuts.has("ctrl+alt+t")).toBe(true);
-  expect(registeredShortcuts.has("ctrl+alt+m")).toBe(true);
 });
 
-test("toggleImagesCollapsed toggles visibility on live assistant message components", async () => {
-  const { skinAssistantMessageComponent, toggleImagesCollapsed, areImagesCollapsed, resetImagesStateForTest } =
+test("images are collapsed by default in transcript and render pleasing placeholder", async () => {
+  const { skinAssistantMessageComponent, areImagesCollapsed, resetImagesStateForTest } =
     await import("./surfaces/assistant-commentary-skin.ts");
+  const { renderImagePlaceholderBox } = await import("./cards/card-primitives.ts");
 
   resetImagesStateForTest();
-  let imagesVisible = true;
-  let toolImagesVisible = true;
+  expect(areImagesCollapsed()).toBe(true);
+
+  let imagesVisible: boolean | undefined = undefined;
+  let toolImagesVisible: boolean | undefined = undefined;
 
   const component = {
     transcriptBlockMode: "appendOnly" as const,
@@ -810,34 +811,19 @@ test("toggleImagesCollapsed toggles visibility on live assistant message compone
   };
 
   skinAssistantMessageComponent(component, { enabled: () => true, active: () => true });
-  expect(areImagesCollapsed()).toBe(false);
-
-  // Toggle images off
-  let clearedImages = false;
-  let renderRequested = false;
-  const fakeUi = {
-    clearInlineImages: () => {
-      clearedImages = true;
-    },
-    requestRender: () => {
-      renderRequested = true;
-    },
-  };
-
-  const collapsed = toggleImagesCollapsed(fakeUi);
-  expect(collapsed).toBe(true);
-  expect(areImagesCollapsed()).toBe(true);
   expect(imagesVisible).toBe(false);
   expect(toolImagesVisible).toBe(false);
-  expect(clearedImages).toBe(true);
-  expect(renderRequested).toBe(true);
 
-  // Toggle images back on
-  const expanded = toggleImagesCollapsed(fakeUi);
-  expect(expanded).toBe(false);
-  expect(areImagesCollapsed()).toBe(false);
-  expect(imagesVisible).toBe(true);
-  expect(toolImagesVisible).toBe(true);
+  // Verify pleasing placeholder box has borders, image icon, and inspect hint
+  const placeholder = renderImagePlaceholderBox(null, 50, { mimeType: "image/webp" });
+  expect(placeholder).toHaveLength(4);
+  expect(placeholder[0]).toContain("╭");
+  expect(placeholder[0]).toContain("╮");
+  expect(placeholder[1]).toContain("🖼");
+  expect(placeholder[1]).toContain("image/webp");
+  expect(placeholder[2]).toContain("inspect to view image");
+  expect(placeholder[3]).toContain("╰");
+  expect(placeholder[3]).toContain("╯");
 
   resetImagesStateForTest();
 });

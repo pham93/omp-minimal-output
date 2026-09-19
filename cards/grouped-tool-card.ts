@@ -10,7 +10,14 @@ import {
 import { formatRowLine, elapsedSuffix, paintAt, TOOL_INDENT } from "../core/theme.ts";
 import { markFlush } from "../core/loaders.ts";
 import { highlightCell, languageForPath } from "./edit-card.ts";
-import { cardDetailLine, cardIsPartial, colorizeConsoleLine, stashedOrResultText } from "./card-primitives.ts";
+import {
+  cardDetailLine,
+  cardIsPartial,
+  colorizeConsoleLine,
+  renderImagePlaceholderBox,
+  stashedOrResultText,
+  type ImagePlaceholderMeta,
+} from "./card-primitives.ts";
 import { formatSettledThought } from "../surfaces/scrolling-text.ts";
 import { thinkingRailLines } from "../surfaces/thinking-widget.ts";
 import { durationSuffix, isToolError } from "../core/results.ts";
@@ -351,6 +358,37 @@ function frozenGroupOf(result: unknown): FrozenGroup | undefined {
   } catch {}
   return undefined;
 }
+export function extractImageMeta(result: unknown, args?: unknown): ImagePlaceholderMeta | undefined {
+  if (typeof result === "object" && result !== null) {
+    const res = result as { content?: unknown; details?: unknown };
+    if (Array.isArray(res.content)) {
+      for (const block of res.content) {
+        if (typeof block === "object" && block !== null && (block as { type?: unknown }).type === "image") {
+          const b = block as { mimeType?: unknown };
+          const mimeType = typeof b.mimeType === "string" ? b.mimeType : undefined;
+          return { mimeType };
+        }
+      }
+    }
+    const details = res.details as Record<string, unknown> | undefined;
+    if (details && typeof details["contentType"] === "string" && details["contentType"].startsWith("image/")) {
+      return { mimeType: details["contentType"] };
+    }
+  }
+  if (typeof args === "object" && args !== null) {
+    const rawPath = (args as Record<string, unknown>)["path"] ?? (args as Record<string, unknown>)["file_path"];
+    if (typeof rawPath === "string") {
+      if (rawPath.startsWith("attachment://")) {
+        return { label: rawPath };
+      }
+      if (/\.(png|jpe?g|webp|gif|svg|bmp|ico)(:\S+)?$/i.test(rawPath)) {
+        const ext = rawPath.match(/\.([a-z0-9]+)/i)?.[1]?.toLowerCase();
+        return { mimeType: ext ? `image/${ext}` : "image" };
+      }
+    }
+  }
+  return undefined;
+}
 
 export function renderGroupedToolCard(context: CardRenderContext): Container {
   const { theme, toolName, args, result, options, fingerprint, phase, groupedTools } = context;
@@ -359,16 +397,28 @@ export function renderGroupedToolCard(context: CardRenderContext): Container {
   let details: string[] = [];
   let detailTotal = 0;
   if (!isCall && !profile.minimal) {
-    const bounded = groupedOutputWindow(result, outputRowLimit(profile));
-    details = bounded.lines;
-    detailTotal = bounded.total;
-    if (toolName === "grep" || toolName === "ast_grep") {
-      const rawPattern =
-        typeof args === "object" && args !== null
-          ? ((args as Record<string, unknown>)["pattern"] ?? (args as Record<string, unknown>)["query"] ?? "")
-          : "";
-      const pattern = typeof rawPattern === "string" ? rawPattern : "";
-      details = formatSearchDetails(theme, details, pattern);
+    if (toolName === "read") {
+      const imgMeta = extractImageMeta(result, args);
+      if (imgMeta) {
+        details = renderImagePlaceholderBox(theme, 48, imgMeta);
+        detailTotal = details.length;
+      } else {
+        const bounded = groupedOutputWindow(result, outputRowLimit(profile));
+        details = bounded.lines;
+        detailTotal = bounded.total;
+      }
+    } else {
+      const bounded = groupedOutputWindow(result, outputRowLimit(profile));
+      details = bounded.lines;
+      detailTotal = bounded.total;
+      if (toolName === "grep" || toolName === "ast_grep") {
+        const rawPattern =
+          typeof args === "object" && args !== null
+            ? ((args as Record<string, unknown>)["pattern"] ?? (args as Record<string, unknown>)["query"] ?? "")
+            : "";
+        const pattern = typeof rawPattern === "string" ? rawPattern : "";
+        details = formatSearchDetails(theme, details, pattern);
+      }
     }
   }
   return groupedTools.renderToolVisual(

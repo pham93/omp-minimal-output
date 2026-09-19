@@ -34,7 +34,7 @@ const phaseCache = new Map<string, AssistantTextPhase | null>();
 let installed = false;
 let skinned = new WeakSet<object>();
 const liveAssistantMessages = new Set<object>();
-let imagesCollapsed = false;
+let imagesCollapsed = true;
 
 export function areImagesCollapsed(): boolean {
   return imagesCollapsed;
@@ -51,7 +51,7 @@ export function toggleImagesCollapsed(ui?: unknown): boolean {
 }
 
 export function resetImagesStateForTest(): void {
-  imagesCollapsed = false;
+  imagesCollapsed = true;
   liveAssistantMessages.clear();
 }
 

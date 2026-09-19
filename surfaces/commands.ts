@@ -10,7 +10,6 @@ export interface CommandDelegates {
   minimalStatus: (ctx: ExtensionContext) => Promise<void> | void;
   toggleTodosShortcut: (ctx: ExtensionContext) => Promise<void> | void;
   inspect: (ctx: ExtensionContext) => Promise<void> | void;
-  toggleImages: (ctx: ExtensionContext) => Promise<void> | void;
 }
 
 export interface PluginCommandHandle {
@@ -102,14 +101,6 @@ export function registerPluginCommands(
       await commandDelegates?.inspect(ctx);
     },
   });
-  pi.registerCommand("images", {
-    description: "Toggle transcript images on/off for fast scrolling",
-    handler: async (_args, ctx) => {
-      await ensureActivated(ctx);
-      await commandDelegates?.toggleImages(ctx);
-    },
-  });
-
   pi.registerShortcut("ctrl+alt+t", {
     description: "Toggle todos widget expand/collapse",
     handler: async (ctx) => {
@@ -125,14 +116,6 @@ export function registerPluginCommands(
       await commandDelegates?.inspect(ctx);
     },
   });
-  pi.registerShortcut("ctrl+alt+m", {
-    description: "Toggle transcript images on/off for fast scrolling",
-    handler: async (ctx) => {
-      await ensureActivated(ctx);
-      await commandDelegates?.toggleImages(ctx);
-    },
-  });
-
   return {
     setDelegates: (delegates: CommandDelegates) => {
       commandDelegates = delegates;

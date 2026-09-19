@@ -4,8 +4,13 @@ import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { visibleWidth, type TUI } from "@oh-my-pi/pi-tui";
 import * as PiTui from "@oh-my-pi/pi-tui";
 import { CARD_RENDER_PHASE, CardRegistry } from "../cards/card-registry.ts";
-import { cardDetailLine, colorizeConsoleLine, stashedOrResultText } from "../cards/card-primitives.ts";
-import { formatSearchDetails, GroupedToolManager } from "../cards/grouped-tool-card.ts";
+import {
+  cardDetailLine,
+  colorizeConsoleLine,
+  renderImagePlaceholderBox,
+  stashedOrResultText,
+} from "../cards/card-primitives.ts";
+import { extractImageMeta, formatSearchDetails, GroupedToolManager } from "../cards/grouped-tool-card.ts";
 import { renderHubCardLines } from "../cards/hub-card.ts";
 import { renderTaskCardLines } from "../cards/task-card.ts";
 import { isWrappedTool, wrapTool } from "../core/config.ts";
@@ -92,6 +97,27 @@ export function collectInspectItems(entries: readonly unknown[]): InspectToolIte
   }
   return items;
 }
+export interface InspectImageInfo {
+  data: string;
+  mimeType: string;
+}
+
+export function inspectItemImage(item: InspectToolItem): InspectImageInfo | undefined {
+  if (!isRecord(item.result)) return undefined;
+  const content = item.result.content;
+  if (!Array.isArray(content)) return undefined;
+  for (const block of content) {
+    if (
+      isRecord(block) &&
+      block.type === "image" &&
+      typeof block.data === "string" &&
+      typeof block.mimeType === "string"
+    ) {
+      return { data: block.data, mimeType: block.mimeType };
+    }
+  }
+  return undefined;
+}
 
 function renderHost(card: unknown, width: number): string[] {
   const host = card as {
@@ -136,7 +162,48 @@ function paintGroupedInspect(theme: unknown, width: number, item: InspectToolIte
     fadeKey: item.id,
     right: durationSuffix(item.result),
   });
-  if (profile.minimal) return [header];
+  if (profile.minimal && !expanded) return [header];
+
+  if (item.toolName === "read") {
+    const imgMeta = extractImageMeta(item.result, item.args);
+    const imageInfo = inspectItemImage(item);
+    if (imgMeta || imageInfo) {
+      if (expanded && imageInfo) {
+        const ImageCtor = (
+          PiTui as unknown as {
+            Image?: new (
+              data: string,
+              mime: string,
+              theme: unknown,
+              opts: unknown,
+            ) => { render: (w: number) => readonly string[] };
+          }
+        ).Image;
+        if (ImageCtor) {
+          try {
+            const img = new ImageCtor(
+              imageInfo.data,
+              imageInfo.mimeType,
+              { fallbackColor: (s: string) => paintAt(theme, s, "dim", 0.7) },
+              { maxWidthCells: Math.max(10, width - 6), maxHeightCells: 25 },
+            );
+            const imageLines = img.render(Math.max(10, width - 6));
+            if (imageLines.length > 0) {
+              const prefix = `${TOOL_INDENT}   `;
+              return [header, ...imageLines.map((l) => `${prefix}${l}`)];
+            }
+          } catch {
+            // Fall through to placeholder
+          }
+        }
+      }
+      const placeholderLines = renderImagePlaceholderBox(theme, 48, imgMeta ?? { mimeType: imageInfo?.mimeType });
+      const prefix = `${TOOL_INDENT}   `;
+      const lines = [header, ...placeholderLines.map((l) => cardDetailLine(theme, width, l, prefix, error))];
+      return trimBlankEdges(lines);
+    }
+  }
+
   const bounded = boundedTextLines(stashedOrResultText(item.result), outputRowLimit(profile));
   let details = bounded.lines;
   if (item.toolName === "grep" || item.toolName === "ast_grep") {
