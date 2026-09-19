@@ -166,13 +166,13 @@ export class GroupedToolManager {
         for (const [idx, row] of rows.entries()) {
           const live = this.#deps.rowIsLive(row.fp);
           const isThought = row.fp.startsWith("thought:");
-          if (isThought && isHideThinkingBlock(sessionCtx)) continue;
+          if (isThought && live) continue;
           const isLastTool = idx === rows.length - 1;
           const rowLine = formatRowLine(theme, width, {
             body: row.body,
             indent: !isStandalone,
             tree: isStandalone ? undefined : isLastTool ? "last" : "mid",
-            live,
+            live: isThought ? false : live,
             error: row.error,
             fadeKey: row.fp,
             right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
@@ -180,16 +180,16 @@ export class GroupedToolManager {
           });
           lines.push(rowLine);
           if (isThought) {
-            const rawThought = typeof row.detail === "string" && row.detail ? row.detail : row.details.join("\n");
-            const thoughtLines = live
-              ? thinkingRailLines(theme, width, rawThought, !isStandalone)
-              : formatSettledThought(rawThought, {
-                  maxLines: thoughtRowLimit(profile),
-                  width,
-                  theme,
-                  indent: !isStandalone,
-                });
-            lines.push(...thoughtLines);
+            if (!isHideThinkingBlock(sessionCtx)) {
+              const rawThought = typeof row.detail === "string" && row.detail ? row.detail : row.details.join("\n");
+              const thoughtLines = formatSettledThought(rawThought, {
+                maxLines: thoughtRowLimit(profile),
+                width,
+                theme,
+                indent: !isStandalone,
+              });
+              lines.push(...thoughtLines);
+            }
             continue;
           }
           const detailPrefix = isStandalone || isLastTool ? `${TOOL_INDENT}   ` : "│    ";

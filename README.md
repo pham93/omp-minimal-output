@@ -71,7 +71,7 @@ The literal tool argument `i` is never discarded. Generic wrapped tools (`bash`,
 
 The sticky Todo widget is the single Todo surface after a successful widget mount. Its native transcript card is suppressed only while that widget is active; headless, disabled, or failed widget mounts retain the transcript card as the safe fallback.
 
-Live reasoning streams in the animated widget above the composer; `registerAssistantThinkingRenderer` is supplemental-only. With `hideThinkingBlock: true` (the shipped `minimal-output.yml`), the native thinking block is hidden and settled thought rows are suppressed from the transcript. Spill files land in `$TMPDIR/omp-minimal-*.log`.
+Live reasoning streams in the animated widget above the composer (placed above the AI working status message); `registerAssistantThinkingRenderer` is supplemental-only. In the transcript, the thought block is hidden while live; once settled, with `hideThinkingBlock: true` (the shipped `minimal-output.yml`), it displays a single line (`Thought` with duration), and with `hideThinkingBlock: false`, it displays the thought block with the bounded latest lines. Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
 Pulse: working rows cycle `◈ → ◉ → ◎ → ○` at 120 ms via managed `ctx.setInterval` while a tool runs. General rows settle to the configured indicator; web search settles to `●` and uses the error token on failure. `/minimal-off` mid-run stops the pump immediately. `minimal-output.yml` (`shimmer: disabled`, `showProgress: false`) is untouched.
 

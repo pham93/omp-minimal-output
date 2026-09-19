@@ -587,12 +587,101 @@ describe("transcript settled thought block rendering", () => {
     }
   });
 
-  test("hideThinkingBlock suppresses thought from transcript group", async () => {
-    const { applyOverlay, DEFAULT_CONFIG } = await import("./core/config.ts");
-    const cfg = applyOverlay(DEFAULT_CONFIG, { hideThinkingBlock: true });
-    expect(cfg.hideThinkingBlock).toBe(true);
-  });
+  test("when hideThinkingBlock is true, settled thought renders exactly 1 line (Thought with duration)", async () => {
+    type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
+    const eventHandlers = new Map<string, EventHandler[]>();
+    interface WrappedToolDef {
+      name: string;
+      renderCall: (args: unknown, options: unknown, theme: unknown) => RenderableComponent;
+    }
+    const tools = new Map<string, WrappedToolDef>();
 
+    const fakePi = {
+      on: (event: string, handler: EventHandler) => {
+        const list = eventHandlers.get(event) ?? [];
+        list.push(handler);
+        eventHandlers.set(event, list);
+      },
+      registerTool: (def: WrappedToolDef) => tools.set(def.name, def),
+      registerCommand: () => {},
+      registerShortcut: () => {},
+      registerMessageRenderer: () => {},
+      registerComposerShape: () => {},
+      registerAssistantThinkingRenderer: () => {},
+      getAllTools: () => [{ name: "read", parameters: {} }],
+    } as unknown as ExtensionAPI;
+
+    const fakeCtx = {
+      hasUI: true,
+      ui: {
+        setWidget: () => {},
+        requestRender: () => {},
+        notify: () => {},
+        setEditorComponent: () => {},
+      },
+      hideThinkingBlock: true,
+      settings: { get: (k: string) => (k === "hideThinkingBlock" ? true : undefined) },
+    } as unknown as ExtensionContext;
+
+    registerExtension(fakePi);
+
+    const emit = async (event: string, payload: unknown) => {
+      for (const handler of eventHandlers.get(event) ?? []) {
+        await handler(payload, fakeCtx);
+      }
+    };
+
+    await emit("session_start", fakeCtx);
+
+    const thoughtLines = Array.from({ length: 10 }, (_, i) => `Thought reason ${i + 1}`).join("\n");
+
+    await emit("message_update", {
+      message: {
+        content: [{ type: "thinking", thinking: thoughtLines }],
+      },
+      assistantMessageEvent: { type: "thinking_start" },
+    });
+
+    await emit("message_update", {
+      message: {
+        content: [
+          { type: "thinking", thinking: thoughtLines },
+          { type: "toolCall", toolCallId: "call_t2", toolName: "read", args: { path: "xyz.ts" } },
+        ],
+      },
+      assistantMessageEvent: { type: "toolcall_start" },
+    });
+
+    await emit("tool_execution_start", {
+      toolCallId: "call_t2",
+      toolName: "read",
+      args: { path: "xyz.ts" },
+    });
+
+    await emit("tool_execution_end", {
+      toolCallId: "call_t2",
+      toolName: "read",
+      args: { path: "xyz.ts" },
+    });
+
+    settleAt.clear();
+
+    const readTool = tools.get("read");
+    expect(readTool).toBeDefined();
+
+    const callContainer = readTool!.renderCall({ path: "xyz.ts" }, {}, null) as unknown as MockContainer;
+    const groupRender = callContainer.children[0]?.render;
+    expect(groupRender).toBeDefined();
+    const renderedLines = groupRender!(80).map((l: string) => Bun.stripANSI(l));
+
+    // Contains Thought header with duration
+    const thoughtRow = renderedLines.find((l: string) => l.includes("Thought"));
+    expect(thoughtRow).toBeDefined();
+
+    // With hideThinkingBlock: true, must NOT contain any thought detail lines or previous lines hint
+    expect(renderedLines.some((l: string) => l.includes("previous lines"))).toBe(false);
+    expect(renderedLines.some((l: string) => l.includes("Thought reason"))).toBe(false);
+  });
   test("standalone assistant message with thinking renders thought block", async () => {
     const { skinAssistantMessageComponent } = await import("./surfaces/assistant-commentary-skin.ts");
 
@@ -640,6 +729,120 @@ describe("transcript settled thought block rendering", () => {
     expect(rendered.some((l: string) => l.includes("previous lines"))).toBe(true);
     expect(rendered.some((l: string) => l.includes("Standalone thought 8"))).toBe(true);
     expect(rendered.some((l: string) => l.includes("Here is the answer."))).toBe(true);
+  });
+
+  test("standalone assistant message with hideThinkingBlock: true renders exactly 1 line", async () => {
+    const { skinAssistantMessageComponent } = await import("./surfaces/assistant-commentary-skin.ts");
+
+    class FakeAssistantMessageComponent {
+      transcriptBlockMode = "appendOnly" as const;
+      hideThinkingBlock = true;
+      children: Array<{ render?: (w: number) => readonly string[] }> = [];
+      addChild(c: { render?: (w: number) => readonly string[] }) {
+        this.children.push(c);
+      }
+      updateContent(msg: unknown, opts?: unknown) {}
+      setTextColorTransform() {}
+      setLinkTargets() {}
+      setCacheInvalidation() {}
+      render(w: number): readonly string[] {
+        const lines: string[] = [];
+        for (const child of this.children) {
+          if (child.render) lines.push(...child.render(w));
+        }
+        return lines;
+      }
+    }
+
+    const component = new FakeAssistantMessageComponent();
+    skinAssistantMessageComponent(component, {
+      enabled: () => true,
+      active: () => true,
+      thoughtDuration: () => " (15s)",
+    });
+    const textContainer = {
+      render: () => ["Here is the answer."],
+    };
+    component.addChild(textContainer);
+
+    const thinking = Array.from({ length: 8 }, (_, i) => `Standalone thought ${i + 1}`).join("\n");
+    component.updateContent({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking },
+        { type: "text", text: "Here is the answer." },
+      ],
+    });
+
+    const rendered = component.render(80).map((l: string) => Bun.stripANSI(l));
+    // Contains Thought header with duration
+    expect(rendered.some((l: string) => l.includes("Thought"))).toBe(true);
+    expect(rendered.some((l: string) => l.includes("(15s)"))).toBe(true);
+    // Does NOT contain any thought detail lines or previous lines hint
+    expect(rendered.some((l: string) => l.includes("previous lines"))).toBe(false);
+    expect(rendered.some((l: string) => l.includes("Standalone thought"))).toBe(false);
+    expect(rendered.some((l: string) => l.includes("Here is the answer."))).toBe(true);
+  });
+
+  test("ensureThinkingAboveStatus reorders hookWidgetContainerAbove before statusContainer, and restoreStatusOrder restores it", async () => {
+    const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
+
+    class StatusHudContainer {
+      render() {
+        return ["Working..."];
+      }
+    }
+    class EditorTopGap {
+      render() {
+        return [""];
+      }
+    }
+    class HookContainer {
+      children = [new EditorTopGap()];
+      render() {
+        return ["Thinking..."];
+      }
+    }
+    class EditorContainer {
+      render() {
+        return ["Prompt box"];
+      }
+    }
+
+    const status = new StatusHudContainer();
+    const hookAbove = new HookContainer();
+    const editor = new EditorContainer();
+
+    let invalidated = false;
+    const mockTui = {
+      children: [status, hookAbove, editor],
+      invalidate() {
+        invalidated = true;
+      },
+    };
+
+    // Initial native OMP order: statusContainer is before hookWidgetContainerAbove
+    expect(mockTui.children[0]).toBe(status);
+    expect(mockTui.children[1]).toBe(hookAbove);
+
+    // Reorder: hookWidgetContainerAbove should now be before statusContainer!
+    ensureThinkingAboveStatus(mockTui);
+    expect(invalidated).toBe(true);
+    expect(mockTui.children[0]).toBe(hookAbove);
+    expect(mockTui.children[1]).toBe(status);
+    expect(mockTui.children[2]).toBe(editor);
+
+    // Calling again when already reordered is a no-op
+    invalidated = false;
+    ensureThinkingAboveStatus(mockTui);
+    expect(mockTui.children[0]).toBe(hookAbove);
+    expect(mockTui.children[1]).toBe(status);
+
+    // Restore: should put hookWidgetContainerAbove back after statusContainer
+    restoreStatusOrder(mockTui);
+    expect(mockTui.children[0]).toBe(status);
+    expect(mockTui.children[1]).toBe(hookAbove);
+    expect(mockTui.children[2]).toBe(editor);
   });
 });
 

@@ -195,6 +195,7 @@ export default function (pi: ExtensionAPI) {
       const disposeAssistantCommentarySkin = installAssistantCommentarySkin(containerInterceptor, {
         enabled: () => runtimeOwner.owns() && enabled,
         active: runtimeOwner.owns,
+        thoughtDuration: () => thinkingWidget.lastThoughtDuration,
       });
 
       const disposeNativeToolCardSkin = installNativeToolCardSkin(containerInterceptor, {

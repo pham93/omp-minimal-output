@@ -6,7 +6,7 @@ import { detailProfile, thoughtRowLimit } from "../core/density.ts";
 import { formatSettledThought } from "./scrolling-text.ts";
 import { formatRowLine } from "../core/theme.ts";
 import { getContainerInterceptor } from "../core/container-interceptor.ts";
-
+import { extractThinking } from "./thinking-widget.ts";
 export const ASSISTANT_TEXT_PHASE = {
   commentary: "commentary",
   finalAnswer: "final_answer",
@@ -17,6 +17,7 @@ export type AssistantTextPhase = (typeof ASSISTANT_TEXT_PHASE)[keyof typeof ASSI
 export interface AssistantCommentarySkinDeps {
   enabled: () => boolean;
   active?: () => boolean;
+  thoughtDuration?: () => string;
 }
 
 interface AssistantMessageContent {
@@ -157,6 +158,19 @@ export function messageHasToolCall(message: unknown): boolean {
   return content.some(isToolCall);
 }
 
+export function messageHasGroupedToolCall(message: unknown): boolean {
+  const content = contentOf(message);
+  if (!content) return false;
+  for (const block of content) {
+    if (isToolCall(block)) {
+      const name = typeof (block as { name?: unknown }).name === "string" ? (block as { name: string }).name : "";
+      if (name === "bash" || name === "read" || name === "grep" || name === "glob") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 export function extractThinkingFromMessage(message: unknown): string | undefined {
   const content = contentOf(message);
   if (!content) return undefined;
@@ -184,41 +198,45 @@ const THOUGHT_SLOT_KEY = Symbol("minimalOutputThoughtSlot");
 
 interface ThoughtSlotState {
   thinkingText?: string;
+  live?: boolean;
   options?: unknown;
 }
 
-function createThoughtSlot(target: object): {
+function createThoughtSlot(target: object, deps: AssistantCommentarySkinDeps): {
   render: (width: number) => readonly string[];
-  setThought: (text: string | undefined, hasToolCall: boolean, options?: unknown) => void;
+  setThought: (text: string | undefined, hasGroupedToolCall: boolean, live: boolean, options?: unknown) => void;
 } {
   let state: ThoughtSlotState = {};
   return {
-    setThought(text, hasToolCall, options) {
-      if (hasToolCall || !text) {
+    setThought(text, hasGroupedToolCall, live, options) {
+      if (hasGroupedToolCall || !text) {
         state = {};
       } else {
-        state = { thinkingText: text, options };
+        state = { thinkingText: text, live, options };
       }
     },
     render(width: number): readonly string[] {
-      if (!state.thinkingText) return [];
-      if (isHideThinkingBlock(target)) return [];
+      if (!state.thinkingText || state.live) return [];
       const cfg = getPluginConfig();
       const profile = detailProfile(state.options, cfg);
       const maxLines = thoughtRowLimit(profile, cfg);
+      const duration = deps.thoughtDuration?.() ?? "";
       const lines: string[] = [
         formatRowLine(null, width, {
           body: "Thought",
+          right: duration,
           live: false,
         }),
       ];
-      lines.push(
-        ...formatSettledThought(state.thinkingText, {
-          maxLines,
-          width,
-          indent: false,
-        }),
-      );
+      if (!isHideThinkingBlock(target)) {
+        lines.push(
+          ...formatSettledThought(state.thinkingText, {
+            maxLines,
+            width,
+            indent: false,
+          }),
+        );
+      }
       return lines;
     },
   };
@@ -286,7 +304,7 @@ export function skinAssistantMessageComponent(target: object, deps: AssistantCom
   const targetRecord = target as Record<symbol, ReturnType<typeof createThoughtSlot>>;
   let thoughtSlot = targetRecord[THOUGHT_SLOT_KEY];
   if (!thoughtSlot) {
-    thoughtSlot = createThoughtSlot(target);
+    thoughtSlot = createThoughtSlot(target, deps);
     targetRecord[THOUGHT_SLOT_KEY] = thoughtSlot;
     const children = (target as { children?: unknown[] }).children;
     if (Array.isArray(children)) {
@@ -298,15 +316,15 @@ export function skinAssistantMessageComponent(target: object, deps: AssistantCom
 
   const patchedUpdate = function (this: unknown, message: unknown, options?: unknown): unknown {
     const thinking = extractThinkingFromMessage(message);
-    const hasToolCall = messageHasToolCall(message);
-    thoughtSlot.setThought(thinking, hasToolCall, options);
+    const hasGroupedTool = messageHasGroupedToolCall(message);
+    const isLive = extractThinking(message).live;
+    thoughtSlot.setThought(thinking, hasGroupedTool, isLive, options);
 
     if (deps.active?.() === false || !deps.enabled()) {
       return nativeUpdate.call(this, message, options);
     }
 
-    const hideNativeThinking = !isHideThinkingBlock(target);
-    const displayContent = contentWithoutCommentary(message, hideNativeThinking);
+    const displayContent = contentWithoutCommentary(message, true);
     if (!displayContent || typeof message !== "object" || message === null) {
       return nativeUpdate.call(this, message, options);
     }

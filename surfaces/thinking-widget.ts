@@ -49,6 +49,81 @@ export function thinkingRailLines(theme: unknown, width: number, text: string, i
   }
   return lines;
 }
+
+export function ensureThinkingAboveStatus(tui: unknown): void {
+  if (!tui || typeof tui !== "object" || !("children" in tui)) return;
+  const children = (tui as { children: unknown[]; invalidate?: () => void }).children;
+  if (!Array.isArray(children)) return;
+
+  const statusIdx = children.findIndex(
+    (c) =>
+      c &&
+      typeof c === "object" &&
+      (c.constructor?.name === "StatusHudContainer" || "statusRowOccupied" in (c as Record<string, unknown>)),
+  );
+  if (statusIdx < 0) return;
+
+  const hookIdx = children.findIndex(
+    (c, i) =>
+      i > statusIdx &&
+      c &&
+      typeof c === "object" &&
+      "children" in (c as Record<string, unknown>) &&
+      Array.isArray((c as { children: unknown[] }).children) &&
+      (c as { children: unknown[] }).children.some(
+        (ch) =>
+          ch &&
+          typeof ch === "object" &&
+          (ch.constructor?.name === "EditorTopGap" || ch.constructor?.name === "Spacer"),
+      ),
+  );
+
+  if (hookIdx > statusIdx) {
+    const [hookContainer] = children.splice(hookIdx, 1);
+    if (hookContainer) {
+      children.splice(statusIdx, 0, hookContainer);
+      (tui as { invalidate?: () => void }).invalidate?.();
+    }
+  }
+}
+
+export function restoreStatusOrder(tui: unknown): void {
+  if (!tui || typeof tui !== "object" || !("children" in tui)) return;
+  const children = (tui as { children: unknown[]; invalidate?: () => void }).children;
+  if (!Array.isArray(children)) return;
+
+  const statusIdx = children.findIndex(
+    (c) =>
+      c &&
+      typeof c === "object" &&
+      (c.constructor?.name === "StatusHudContainer" || "statusRowOccupied" in (c as Record<string, unknown>)),
+  );
+  if (statusIdx < 0) return;
+
+  const hookIdx = children.findIndex(
+    (c, i) =>
+      i < statusIdx &&
+      c &&
+      typeof c === "object" &&
+      "children" in (c as Record<string, unknown>) &&
+      Array.isArray((c as { children: unknown[] }).children) &&
+      (c as { children: unknown[] }).children.some(
+        (ch) =>
+          ch &&
+          typeof ch === "object" &&
+          (ch.constructor?.name === "EditorTopGap" || ch.constructor?.name === "Spacer"),
+      ),
+  );
+
+  if (hookIdx >= 0 && hookIdx < statusIdx) {
+    const [hookContainer] = children.splice(hookIdx, 1);
+    if (hookContainer) {
+      children.splice(statusIdx, 0, hookContainer);
+      (tui as { invalidate?: () => void }).invalidate?.();
+    }
+  }
+}
+
 export class ThinkingWidget {
   readonly #scroller = new TextScroller({
     maxLines: THOUGHT_PREVIEW_LINES,
@@ -58,11 +133,12 @@ export class ThinkingWidget {
     staggerOpacities: [0.35, 0.7, 1.0],
   });
 
-
   #ui: unknown = undefined;
+  #tui: unknown = undefined;
   #widgetOn = false;
   #live = false;
   #startedAt = 0;
+  #lastDurationSec = 0;
   #text = "";
   #settledLabel = "";
   readonly #deps: ThinkingWidgetDeps;
@@ -103,6 +179,9 @@ export class ThinkingWidget {
     return this.#widgetOn;
   }
 
+  get lastThoughtDuration(): string {
+    return this.#lastDurationSec > 0 ? ` (${this.#lastDurationSec}s)` : "";
+  }
   isAnimating(): boolean {
     return this.#scroller.isAnimating();
   }
@@ -134,7 +213,13 @@ export class ThinkingWidget {
     return lines;
   }
 
-  paintThinkingVisual(theme: unknown): Container {
+  paintThinkingVisual(tuiOrTheme: unknown, theme?: unknown): Container {
+    const effectiveTheme = theme !== undefined ? theme : tuiOrTheme;
+    const tui = theme !== undefined ? tuiOrTheme : undefined;
+    if (tui) {
+      this.#tui = tui;
+      ensureThinkingAboveStatus(tui);
+    }
     const c = new Container();
     c.addChild({
       render: (width: number): readonly string[] => {
@@ -143,14 +228,14 @@ export class ThinkingWidget {
           return ["", "", "", ""];
         }
         const lines: string[] = [
-          formatRowLine(theme, width, {
+          formatRowLine(effectiveTheme, width, {
             body: "Thinking...",
             live: true,
             fadeKey: this.thoughtFadeKey(),
             right: this.#startedAt > 0 ? elapsedSuffix(this.#startedAt) : "",
           }),
         ];
-        lines.push(...this.animatedThinkingRailLines(theme, width, this.#text));
+        lines.push(...this.animatedThinkingRailLines(effectiveTheme, width, this.#text));
         return lines;
       },
     });
@@ -178,7 +263,7 @@ export class ThinkingWidget {
       }
       (ui as { setWidget: (key: string, fn: unknown, opts: unknown) => void }).setWidget(
         THOUGHT_WIDGET_KEY,
-        (_tui: unknown, theme: unknown) => this.paintThinkingVisual(theme),
+        (tui: unknown, theme: unknown) => this.paintThinkingVisual(tui, theme),
         { placement: "aboveEditor" },
       );
       this.#widgetOn = true;
@@ -218,6 +303,7 @@ export class ThinkingWidget {
       return;
     }
     const sec = this.#startedAt > 0 ? Math.max(0, Math.floor((Date.now() - this.#startedAt) / 1000)) : 0;
+    this.#lastDurationSec = sec;
     this.#settledLabel = sec > 0 ? `Thought for ${sec}s` : "Thought";
     this.#deps.onSyncThought?.(fp, {
       body: "Thought",
@@ -247,6 +333,10 @@ export class ThinkingWidget {
 
   dispose(): void {
     this.setWidget(false);
+    if (this.#tui) {
+      restoreStatusOrder(this.#tui);
+      this.#tui = undefined;
+    }
     this.#ui = undefined;
     this.reset();
   }
