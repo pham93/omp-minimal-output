@@ -669,10 +669,9 @@ export default function (pi: ExtensionAPI) {
         if (!runtimeOwner.owns()) return;
         await openInspectOverlay(ctx, readGroupTheme);
       },
-      toggleImages: (ctx) => {
+      toggleImages: (_ctx) => {
         if (!runtimeOwner.owns()) return;
-        const collapsed = toggleImagesCollapsed(pump.getUi());
-        ctx.ui.notify(collapsed ? "Images collapsed (fast scroll mode)" : "Images visible (graphics on)", "info");
+        toggleImagesCollapsed(pump.getUi());
       },
     });
 

@@ -78,7 +78,7 @@ export function applyImagesVisibility(visible: boolean, ui?: unknown): void {
         u.clearInlineImages();
       }
       if (typeof u.requestRender === "function") {
-        u.requestRender(true);
+        u.requestRender();
       }
     } catch {
       // Best-effort UI repaint
