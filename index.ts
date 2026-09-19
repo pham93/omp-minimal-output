@@ -254,6 +254,7 @@ export default function (pi: ExtensionAPI) {
           try {
             (ui as { setWidget: (key: string, fn: unknown) => void }).setWidget(PUMP_WIDGET_KEY, (tui: unknown) => {
               pump.bindUi(tui);
+              thinkingWidget.setTui(tui);
               const c = new Container();
               c.addChild({ render: (): readonly string[] => [] });
               return c;

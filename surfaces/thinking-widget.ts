@@ -50,35 +50,79 @@ export function thinkingRailLines(theme: unknown, width: number, text: string, i
   return lines;
 }
 
-export function ensureThinkingAboveStatus(tui: unknown): void {
+export function ensureThinkingAboveStatus(tui: unknown, visualContainer?: unknown): void {
   if (!tui || typeof tui !== "object" || !("children" in tui)) return;
   const children = (tui as { children: unknown[]; invalidate?: () => void }).children;
-  if (!Array.isArray(children)) return;
+  if (!Array.isArray(children) || children.length < 3) return;
 
-  const statusIdx = children.findIndex(
+  // 1. Locate hookWidgetContainerAbove
+  let hookIdx = -1;
+  if (visualContainer) {
+    hookIdx = children.findIndex((c) => {
+      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
+      const ch = (c as { children: unknown[] }).children;
+      return (
+        Array.isArray(ch) &&
+        (ch.includes(visualContainer) ||
+          ch.some((item: unknown) => (item as Record<string, unknown>)?.isThinkingWidget || item === visualContainer))
+      );
+    });
+  }
+
+  if (hookIdx < 0) {
+    hookIdx = children.findIndex((c) => {
+      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
+      const ch = (c as { children: unknown[] }).children;
+      return (
+        Array.isArray(ch) &&
+        ch.some(
+          (item: unknown) =>
+            (item as Record<string, unknown>)?.isThinkingWidget ||
+            (item as Record<string, unknown>)?.constructor?.name === "EditorTopGap" ||
+            (item as Record<string, unknown>)?.constructor?.name === "Spacer",
+        )
+      );
+    });
+  }
+
+  if (hookIdx < 0) {
+    const editorIdx = children.findIndex((c) => {
+      if (!c || typeof c !== "object") return false;
+      if ("getText" in (c as Record<string, unknown>) || "handleInput" in (c as Record<string, unknown>)) return true;
+      const ch = (c as { children?: unknown[] }).children;
+      return (
+        Array.isArray(ch) &&
+        ch.some(
+          (item: unknown) =>
+            item &&
+            typeof item === "object" &&
+            ("getText" in (item as Record<string, unknown>) || "handleInput" in (item as Record<string, unknown>)),
+        )
+      );
+    });
+    if (editorIdx > 0) {
+      hookIdx = editorIdx - 1;
+    }
+  }
+
+  if (hookIdx < 0) return;
+
+  // 2. Locate statusContainer
+  let statusIdx = children.findIndex(
     (c) =>
       c &&
       typeof c === "object" &&
-      (c.constructor?.name === "StatusHudContainer" || "statusRowOccupied" in (c as Record<string, unknown>)),
-  );
-  if (statusIdx < 0) return;
-
-  const hookIdx = children.findIndex(
-    (c, i) =>
-      i > statusIdx &&
-      c &&
-      typeof c === "object" &&
-      "children" in (c as Record<string, unknown>) &&
-      Array.isArray((c as { children: unknown[] }).children) &&
-      (c as { children: unknown[] }).children.some(
-        (ch) =>
-          ch &&
-          typeof ch === "object" &&
-          (ch.constructor?.name === "EditorTopGap" || ch.constructor?.name === "Spacer"),
-      ),
+      ((c as Record<string, unknown>).mode?.statusContainer === c ||
+        (c as Record<string, unknown>).mode?.statusRowOccupied !== undefined ||
+        (c as Record<string, unknown>).constructor?.name === "StatusHudContainer" ||
+        "statusRowOccupied" in (c as Record<string, unknown>)),
   );
 
-  if (hookIdx > statusIdx) {
+  if (statusIdx < 0 && hookIdx >= 2) {
+    statusIdx = hookIdx - 2;
+  }
+
+  if (statusIdx >= 0 && hookIdx > statusIdx) {
     const [hookContainer] = children.splice(hookIdx, 1);
     if (hookContainer) {
       children.splice(statusIdx, 0, hookContainer);
@@ -87,35 +131,57 @@ export function ensureThinkingAboveStatus(tui: unknown): void {
   }
 }
 
-export function restoreStatusOrder(tui: unknown): void {
+export function restoreStatusOrder(tui: unknown, visualContainer?: unknown): void {
   if (!tui || typeof tui !== "object" || !("children" in tui)) return;
   const children = (tui as { children: unknown[]; invalidate?: () => void }).children;
-  if (!Array.isArray(children)) return;
+  if (!Array.isArray(children) || children.length < 3) return;
 
-  const statusIdx = children.findIndex(
+  let hookIdx = -1;
+  if (visualContainer) {
+    hookIdx = children.findIndex((c) => {
+      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
+      const ch = (c as { children: unknown[] }).children;
+      return (
+        Array.isArray(ch) &&
+        (ch.includes(visualContainer) ||
+          ch.some((item: unknown) => (item as Record<string, unknown>)?.isThinkingWidget || item === visualContainer))
+      );
+    });
+  }
+
+  if (hookIdx < 0) {
+    hookIdx = children.findIndex((c) => {
+      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
+      const ch = (c as { children: unknown[] }).children;
+      return (
+        Array.isArray(ch) &&
+        ch.some(
+          (item: unknown) =>
+            (item as Record<string, unknown>)?.isThinkingWidget ||
+            (item as Record<string, unknown>)?.constructor?.name === "EditorTopGap" ||
+            (item as Record<string, unknown>)?.constructor?.name === "Spacer",
+        )
+      );
+    });
+  }
+
+  if (hookIdx < 0) return;
+
+  let statusIdx = children.findIndex(
     (c) =>
       c &&
       typeof c === "object" &&
-      (c.constructor?.name === "StatusHudContainer" || "statusRowOccupied" in (c as Record<string, unknown>)),
-  );
-  if (statusIdx < 0) return;
-
-  const hookIdx = children.findIndex(
-    (c, i) =>
-      i < statusIdx &&
-      c &&
-      typeof c === "object" &&
-      "children" in (c as Record<string, unknown>) &&
-      Array.isArray((c as { children: unknown[] }).children) &&
-      (c as { children: unknown[] }).children.some(
-        (ch) =>
-          ch &&
-          typeof ch === "object" &&
-          (ch.constructor?.name === "EditorTopGap" || ch.constructor?.name === "Spacer"),
-      ),
+      ((c as Record<string, unknown>).mode?.statusContainer === c ||
+        (c as Record<string, unknown>).mode?.statusRowOccupied !== undefined ||
+        (c as Record<string, unknown>).constructor?.name === "StatusHudContainer" ||
+        "statusRowOccupied" in (c as Record<string, unknown>)),
   );
 
-  if (hookIdx >= 0 && hookIdx < statusIdx) {
+  if (statusIdx < 0 && hookIdx >= 0 && hookIdx + 1 < children.length) {
+    statusIdx = hookIdx + 1;
+  }
+
+  if (statusIdx >= 0 && hookIdx < statusIdx) {
     const [hookContainer] = children.splice(hookIdx, 1);
     if (hookContainer) {
       children.splice(statusIdx, 0, hookContainer);
@@ -135,6 +201,7 @@ export class ThinkingWidget {
 
   #ui: unknown = undefined;
   #tui: unknown = undefined;
+  #visualContainer: unknown = undefined;
   #widgetOn = false;
   #live = false;
   #startedAt = 0;
@@ -182,10 +249,21 @@ export class ThinkingWidget {
   get lastThoughtDuration(): string {
     return this.#lastDurationSec > 0 ? ` (${this.#lastDurationSec}s)` : "";
   }
+
+  setTui(tui: unknown): void {
+    if (tui && typeof tui === "object") {
+      this.#tui = tui;
+      if (this.#visualContainer) {
+        ensureThinkingAboveStatus(tui, this.#visualContainer);
+      } else {
+        ensureThinkingAboveStatus(tui);
+      }
+    }
+  }
+
   isAnimating(): boolean {
     return this.#scroller.isAnimating();
   }
-
   thoughtFadeKey(): string {
     const runId = this.#deps.activityRunId();
     return runId ? `thought:${runId}` : "thought:live";
@@ -218,11 +296,18 @@ export class ThinkingWidget {
     const tui = theme !== undefined ? tuiOrTheme : undefined;
     if (tui) {
       this.#tui = tui;
-      ensureThinkingAboveStatus(tui);
     }
     const c = new Container();
+    (c as Record<string, unknown>).isThinkingWidget = true;
+    this.#visualContainer = c;
+    if (this.#tui) {
+      ensureThinkingAboveStatus(this.#tui, c);
+    }
     c.addChild({
       render: (width: number): readonly string[] => {
+        if (this.#tui) {
+          ensureThinkingAboveStatus(this.#tui, c);
+        }
         if (!this.#deps.owns()) return [];
         if (!this.#live) {
           return ["", "", "", ""];
@@ -247,6 +332,9 @@ export class ThinkingWidget {
     const ui = (ctx as { ui?: unknown }).ui;
     if (ui) {
       this.#ui = ui;
+      if (typeof ui === "object" && "children" in (ui as Record<string, unknown>)) {
+        this.setTui(ui);
+      }
       this.installWidget();
     }
   }
@@ -334,9 +422,10 @@ export class ThinkingWidget {
   dispose(): void {
     this.setWidget(false);
     if (this.#tui) {
-      restoreStatusOrder(this.#tui);
+      restoreStatusOrder(this.#tui, this.#visualContainer);
       this.#tui = undefined;
     }
+    this.#visualContainer = undefined;
     this.#ui = undefined;
     this.reset();
   }

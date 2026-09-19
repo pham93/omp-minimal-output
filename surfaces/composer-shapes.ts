@@ -19,7 +19,7 @@ import {
   type TUI,
 } from "@oh-my-pi/pi-tui";
 import { getPluginConfig, indicatorFrames } from "../core/config.ts";
-
+import { ensureThinkingAboveStatus } from "./thinking-widget.ts";
 export const MINIMAL_COMPOSER_STYLE = {
   bottomDock: "minimal-bottom-dock",
   topDock: "minimal-top-dock",
@@ -978,7 +978,10 @@ export function installMinimalPromptEditor(
   getWorkingStatus?: () => MinimalWorkingStatus | undefined,
 ): () => void {
   updateMinimalPromptEditorProviders(getContextUsage, getPlanStatus, getWorkingStatus);
-  ui.setEditorComponent((tui, theme, keybindings) => new MinimalPromptEditor(tui, theme, keybindings));
+  ui.setEditorComponent((tui, theme, keybindings) => {
+    ensureThinkingAboveStatus(tui);
+    return new MinimalPromptEditor(tui, theme, keybindings);
+  });
   let active = true;
   return () => {
     if (!active) return;

@@ -844,6 +844,57 @@ describe("transcript settled thought block rendering", () => {
     expect(mockTui.children[1]).toBe(hookAbove);
     expect(mockTui.children[2]).toBe(editor);
   });
+
+  test("ensureThinkingAboveStatus reorders with minified class names using visualContainer and mode", async () => {
+    const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
+
+    // Minified class names in real bun binary: constructor.name is "e", "t", etc.
+    class e {
+      mode = { statusRowOccupied: false, statusContainer: this };
+      render() {
+        return ["Working..."];
+      }
+    }
+    class t {
+      children: unknown[] = [];
+      render() {
+        return ["Thinking..."];
+      }
+    }
+    class n {
+      children = [{ getText: () => "" }];
+      render() {
+        return ["Prompt box"];
+      }
+    }
+
+    const visual = { isThinkingWidget: true };
+    const status = new e();
+    const hookAbove = new t();
+    hookAbove.children.push(visual);
+    const editor = new n();
+
+    let invalidated = false;
+    const mockTui = {
+      children: [status, hookAbove, editor],
+      invalidate() {
+        invalidated = true;
+      },
+    };
+
+    // Even with minified class names, ensureThinkingAboveStatus finds visualContainer and mode!
+    ensureThinkingAboveStatus(mockTui, visual);
+    expect(invalidated).toBe(true);
+    expect(mockTui.children[0]).toBe(hookAbove);
+    expect(mockTui.children[1]).toBe(status);
+    expect(mockTui.children[2]).toBe(editor);
+
+    // Restore also works with minified class names!
+    restoreStatusOrder(mockTui, visual);
+    expect(mockTui.children[0]).toBe(status);
+    expect(mockTui.children[1]).toBe(hookAbove);
+    expect(mockTui.children[2]).toBe(editor);
+  });
 });
 
 test("headless bindings never acquire or tear down the interactive UI", async () => {
