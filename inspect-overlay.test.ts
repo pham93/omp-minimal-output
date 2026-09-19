@@ -18,7 +18,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
 }));
 
 type InspectToolItem = import("./surfaces/inspect-overlay.ts").InspectToolItem;
-const { collectInspectItems, inspectItemImage, InspectOverlay, openInspectOverlay } =
+const { collectInspectItems, highlightMatchesInLine, inspectItemImage, InspectOverlay, openInspectOverlay } =
   await import("./surfaces/inspect-overlay.ts");
 function strip(lines: readonly string[]): string[] {
   return lines.map((line) => Bun.stripANSI(line));
@@ -441,5 +441,33 @@ describe("InspectOverlay card minimization and fast search", () => {
     const cleared = paint();
     expect(cleared).not.toContain("match");
     expect(cleared).toContain("/ search");
+  });
+
+  test("highlights matching characters with bold reverse video in search mode", () => {
+    const res = highlightMatchesInLine("git status -s", "stat");
+    expect(res).toBe("git \x1b[1;7mstat\x1b[27;22mus -s");
+
+    // When line has existing ANSI, escape sequences are preserved
+    const colored = "\x1b[32m✔ git status\x1b[0m";
+    const coloredRes = highlightMatchesInLine(colored, "stat");
+    expect(coloredRes).toBe("\x1b[32m✔ git \x1b[1;7mstat\x1b[27;22mus\x1b[0m");
+
+    // In overlay, active search query highlights matching characters in rendered lines
+    const tools = [{ id: "a", name: "bash", args: { command: "git diff" }, text: "diff content" }];
+    const items = collectInspectItems(sessionWithTools(tools));
+    const overlay = new InspectOverlay({
+      tui: { requestRender() {} },
+      theme: null,
+      items,
+      done: () => {},
+    });
+    overlay.handleInput("/");
+    overlay.handleInput("d");
+    overlay.handleInput("i");
+    overlay.handleInput("f");
+    overlay.handleInput("f");
+
+    const rawLines = overlay.render(60).join("\n");
+    expect(rawLines).toContain("\x1b[1;7mdiff\x1b[27;22m");
   });
 });

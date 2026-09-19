@@ -308,6 +308,26 @@ function paintToolCard(
   return fallbackLines(theme, item);
 }
 
+export function highlightMatchesInLine(line: string, query: string): string {
+  const trimmed = query.trim();
+  if (!trimmed) return line;
+  try {
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(${escaped})`, "gi");
+    const ANSI_RE = /(\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))/g;
+    const parts = line.split(ANSI_RE);
+
+    const highlighted = parts.map((part) => {
+      if (part.startsWith("\x1b")) return part;
+      return part.replace(re, "\x1b[1;7m$1\x1b[27;22m");
+    });
+
+    return highlighted.join("");
+  } catch {
+    return line;
+  }
+}
+
 function outlineBlock(lines: readonly string[], width: number, theme: unknown): string[] {
   const core = trimBlankEdges(lines);
   const rows = core.length > 0 ? core : [""];
@@ -687,10 +707,13 @@ export class InspectOverlay {
       const estimated = start + (prompt ? 2 : 0) + this.#cardHeight(item, inner, expanded, minimized, selected);
       if (estimated <= top) continue;
       if (start >= bottom) break;
-      const painted = this.#cardLines(item, inner, expanded, minimized);
+      const rawPainted = this.#cardLines(item, inner, expanded, minimized);
+      const query = this.#searchQuery.trim();
+      const painted = query ? rawPainted.map((line) => highlightMatchesInLine(line, query)) : rawPainted;
       const chunk: string[] = [];
       if (prompt) {
-        chunk.push(paintAt(this.#theme, `❯ ${truncatePlain(prompt, cols - 2)}`, "dim", 1), "");
+        const styledPrompt = paintAt(this.#theme, `❯ ${truncatePlain(prompt, cols - 2)}`, "dim", 1);
+        chunk.push(query ? highlightMatchesInLine(styledPrompt, query) : styledPrompt, "");
       }
       const block = selected
         ? outlineBlock(painted, cols, this.#theme)
