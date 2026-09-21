@@ -19,10 +19,10 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   matchesKey: (data: string, key: string) => data === key,
 }));
 
-const { TODO_DONE_ANIM_MS, TODO_STRIKE_HOLD_MS, renderTodoHeader, todoItemKey, todoStatusBox } = await import(
-  "./surfaces/todos-header.ts"
-);
+const { TODO_DONE_ANIM_MS, TODO_STRIKE_HOLD_MS, renderDensityTodoHeader, renderTodoHeader, todoItemKey, todoStatusBox } =
+  await import("./surfaces/todos-header.ts");
 const { paintAt } = await import("./core/theme.ts");
+const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
 
 /** Minimal theme shape the renderer uses: `fg(token, text)` plus the host's checkbox glyphs. */
 const BOX_THEME = {
@@ -143,5 +143,18 @@ describe("todo row painting", () => {
       Bun.stripANSI(line).includes("Pending item"),
     )!;
     expect(Bun.stripANSI(row).indexOf("Pending item")).toBe(contentColumn);
+  });
+
+  test("the expanded overflow row keeps the header row's indent", () => {
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, detailedMaxRows: 2 });
+    try {
+      const rows = renderDensityTodoHeader(BOX_THEME, 100, state(), true).map((line) => Bun.stripANSI(line));
+      const lead = (row: string) => row.length - row.trimStart().length;
+      // `capRenderedRows` replaces the tail, so the overflow row is a peer of the header row.
+      expect(rows.at(-1)).toContain("more rows");
+      expect(lead(rows.at(-1)!)).toBe(lead(rows[0]!));
+    } finally {
+      setPluginConfigForTest(null);
+    }
   });
 });

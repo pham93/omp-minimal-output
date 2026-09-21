@@ -457,7 +457,7 @@ export function renderDensityTodoHeader(
   const hiddenRows = Math.max(1, lines.length - maxRows + 1);
   const overflow = formatRowLine(theme, width, {
     body: `Todos — … ${hiddenRows} more rows`,
-    indent: true,
+    indent: TODO_ROW_INDENT,
   });
   return capRenderedRows(lines, maxRows, overflow);
 }
