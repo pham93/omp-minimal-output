@@ -356,7 +356,7 @@ function renderThinkingDemo(theme: unknown, width: number): readonly string[] {
     "Checking tool execution wrapper seams and theme background tokens.",
     "Enforcing 1-character padding and transparent row background.",
   ].join("\n");
-  const rails = thinkingRailLines(theme, width, text, false);
+  const rails = thinkingRailLines(theme, width, text);
   return [header, ...rails];
 }
 

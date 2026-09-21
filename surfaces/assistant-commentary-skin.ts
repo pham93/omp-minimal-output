@@ -18,6 +18,8 @@ export interface AssistantCommentarySkinDeps {
   enabled: () => boolean;
   active?: () => boolean;
   thoughtDuration?: () => string;
+  /** Live theme, so thought rows are painted with the same tokens as card rows. */
+  theme?: () => unknown;
 }
 
 interface AssistantMessageContent {
@@ -221,8 +223,9 @@ function createThoughtSlot(target: object, deps: AssistantCommentarySkinDeps): {
       const profile = detailProfile(state.options, cfg);
       const maxLines = thoughtRowLimit(profile, cfg);
       const duration = deps.thoughtDuration?.() ?? "";
+      const theme = deps.theme?.();
       const lines: string[] = [
-        formatRowLine(null, width, {
+        formatRowLine(theme, width, {
           body: "Thought",
           right: duration,
           live: false,
@@ -233,7 +236,7 @@ function createThoughtSlot(target: object, deps: AssistantCommentarySkinDeps): {
           ...formatSettledThought(state.thinkingText, {
             maxLines,
             width,
-            indent: false,
+            theme,
           }),
         );
       }

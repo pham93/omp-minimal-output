@@ -196,6 +196,7 @@ export default function (pi: ExtensionAPI) {
         enabled: () => runtimeOwner.owns() && enabled,
         active: runtimeOwner.owns,
         thoughtDuration: () => thinkingWidget.lastThoughtDuration,
+        theme: () => readGroupTheme,
       });
 
       const disposeNativeToolCardSkin = installNativeToolCardSkin(containerInterceptor, {

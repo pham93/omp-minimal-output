@@ -43,6 +43,32 @@ interface WrappedToolDef {
 }
 
 describe("thought row formatting", () => {
+  test("thought rails sit on the card content column and use the card rest opacity", async () => {
+    const { thinkingRailLines, ThinkingWidget } = await import("./surfaces/thinking-widget.ts");
+    const { THOUGHT_RAIL_PREFIX, cardDetailLine } = await import("./cards/card-primitives.ts");
+    const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
+    const sgrTail = (line: string) => [...line.matchAll(/\x1b\[38;2;\d+;\d+;\d+m/g)].at(-1)?.[0];
+
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.4 });
+    try {
+      const card = cardDetailLine(null, 80, "thought text");
+      const [rail] = thinkingRailLines(null, 80, "thought text");
+      // Same content column as a card detail row...
+      expect(Bun.stripANSI(rail!).indexOf("thought text")).toBe(Bun.stripANSI(card).indexOf("thought text"));
+      // ...and the same paint for the same text (same token and configured opacity).
+      expect(sgrTail(rail!)).toBe(sgrTail(card));
+
+      // Fading rails keep the column while the stagger runs.
+      const widget = new ThinkingWidget({ owns: () => true, activityRunId: () => null });
+      const railColumn = Bun.stripANSI(THOUGHT_RAIL_PREFIX).indexOf("│");
+      for (const line of widget.animatedThinkingRailLines(null, 80, "thought text")) {
+        expect(Bun.stripANSI(line).indexOf("│")).toBe(railColumn);
+      }
+    } finally {
+      setPluginConfigForTest(null);
+    }
+  });
+
   test("settled thought row with mid tree has no animated indicator", () => {
     setSpinFrame(0);
     const line0 = Bun.stripANSI(
@@ -794,6 +820,55 @@ describe("transcript settled thought block rendering", () => {
     expect(rendered.some((l: string) => l.includes("previous lines"))).toBe(true);
     expect(rendered.some((l: string) => l.includes("Standalone thought 8"))).toBe(true);
     expect(rendered.some((l: string) => l.includes("Here is the answer."))).toBe(true);
+  });
+
+  test("standalone thought rows paint with the provided theme tokens", async () => {
+    const { skinAssistantMessageComponent } = await import("./surfaces/assistant-commentary-skin.ts");
+    const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
+
+    class FakeAssistantMessageComponent {
+      transcriptBlockMode = "appendOnly" as const;
+      children: Array<{ render?: (w: number) => readonly string[] }> = [];
+      addChild(c: { render?: (w: number) => readonly string[] }) {
+        this.children.push(c);
+      }
+      updateContent(msg: unknown, opts?: unknown) {}
+      setTextColorTransform() {}
+      setLinkTargets() {}
+      setCacheInvalidation() {}
+      render(w: number): readonly string[] {
+        const lines: string[] = [];
+        for (const child of this.children) {
+          if (child.render) lines.push(...child.render(w));
+        }
+        return lines;
+      }
+    }
+
+    const component = new FakeAssistantMessageComponent();
+    skinAssistantMessageComponent(component, {
+      enabled: () => true,
+      active: () => true,
+      // Minimal theme contract: `fg(token, text)` returns the SGR the row should use.
+      theme: () => ({ fg: (_kind: string, text: string) => `\x1b[38;2;200;100;50m${text}\x1b[39m` }),
+    });
+    component.addChild({ render: () => ["Here is the answer."] });
+    component.updateContent({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Theme painted thought" },
+        { type: "text", text: "Here is the answer." },
+      ],
+    });
+
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.4 });
+    try {
+      const raw = component.render(80).join("\n");
+      // Token [200,100,50] at rest opacity 0.4 over the dark background.
+      expect(raw).toContain("\x1b[38;2;80;40;20m");
+    } finally {
+      setPluginConfigForTest(null);
+    }
   });
 
   test("standalone assistant message with hideThinkingBlock: true renders exactly 1 line", async () => {

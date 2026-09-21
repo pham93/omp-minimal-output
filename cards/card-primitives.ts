@@ -191,18 +191,35 @@ export function cardDetailLine(
   text: string,
   prefix = `${TOOL_INDENT}   `,
   error = false,
+  opacity = getPluginConfig().opacity,
 ): string {
-  const cfg = getPluginConfig();
   const rowWidth = Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO));
   const budget = Math.max(0, rowWidth - visibleWidth(prefix));
   if (budget === 0) return " ".repeat(rowWidth);
   const truncated = truncatePlain(text, budget);
-  const prefixPainted = paintAt(theme, prefix, "dim", cfg.opacity);
+  const prefixPainted = paintAt(theme, prefix, "dim", opacity);
   if (/\x1b\[[0-9;]*m/.test(truncated)) {
-    const dimmed = dimAnsi(theme, truncated, cfg.opacity);
+    const dimmed = dimAnsi(theme, truncated, opacity);
     return `${prefixPainted}${dimmed}\x1b[0m`;
   }
-  return `${prefixPainted}${paintAt(theme, truncated, error ? "error" : "dim", cfg.opacity)}`;
+  return `${prefixPainted}${paintAt(theme, truncated, error ? "error" : "dim", opacity)}`;
+}
+
+/** Rail prefix for thought/thinking rows: the rail sits on the card content column. */
+export const THOUGHT_RAIL_PREFIX = `${TOOL_INDENT} │ `;
+
+/**
+ * One thought/thinking rail row. Composed through {@link cardDetailLine} so the block inherits the
+ * card content indent, `dim` token, rest opacity and truncation budget instead of inventing its own;
+ * `opacity` carries the animated widget's per-line fade.
+ */
+export function thoughtRailLine(
+  theme: unknown,
+  width: number,
+  text: string,
+  opacity = getPluginConfig().opacity,
+): string {
+  return cardDetailLine(theme, width, text, THOUGHT_RAIL_PREFIX, false, opacity);
 }
 
 export interface ImagePlaceholderMeta {

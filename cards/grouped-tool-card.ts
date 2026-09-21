@@ -186,7 +186,6 @@ export class GroupedToolManager {
                 maxLines: thoughtRowLimit(profile),
                 width,
                 theme,
-                indent: !isStandalone,
               });
               lines.push(...thoughtLines);
             }

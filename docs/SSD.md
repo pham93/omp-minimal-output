@@ -87,7 +87,7 @@ sequenceDiagram
     Note over Core,Reg: Ctrl+O expands
 ```
 
-Live rows pulse `◈ → ◉ → ◎ → ○` at 120 ms. Settled rows use the configured indicator (`◆` default); web search, Task, Hub settle to `●`. Errors use the error token.
+Live rows pulse `◈ → ◉ → ◎ → ○` at 120 ms. Settled rows use the configured indicator (`◆` default); web search, Task, Hub settle to `●`. Errors use the error token. Thought and thinking rows (`formatSettledThought`, `thinkingRailLines`, `animatedThinkingRailLines`) are built from `cardDetailLine` via `thoughtRailLine`: one rail prefix (`THOUGHT_RAIL_PREFIX`) puts the rail and text on the card content column, and the `dim` token at the configured `opacity` paints them — the animated widget passes its per-line fade as the row opacity, the commentary skin passes the live theme.
 
 `CardRegistry.render` throws a native-fallback error when the plugin is disabled, a `native*` setting wins, or an adapter throws; OMP's host renderer catches construction/deferred errors and restores native output. Returning a falsy component would instead suppress the transcript, so the registry never does that. Renderers are resolved when a row is built: live rows re-style on the next frame after `/minimal-on`, but rows constructed while the plugin was off keep native rendering until the transcript is rebuilt (`/reload`, `/resume`, restart) — the accompanying `Tool renderer failed … native rendering required` warning is that expected signal.
 

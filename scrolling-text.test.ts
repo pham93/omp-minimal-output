@@ -1,6 +1,12 @@
 import { describe, expect, mock, test } from "bun:test";
 
 mock.module("@oh-my-pi/pi-tui", () => ({
+  Container: class {
+    children: unknown[] = [];
+    addChild(child: unknown) {
+      this.children.push(child);
+    }
+  },
   visibleWidth: (s: string) => Bun.stripANSI(s).length,
   padding: (w: number) => " ".repeat(Math.max(0, w)),
   sliceByColumn: (s: string, start: number, len: number) => s.slice(start, start + len),
@@ -9,6 +15,11 @@ mock.module("@oh-my-pi/pi-tui", () => ({
 }));
 
 const { TextScroller, createTextScroller, defaultSlotOpacities, formatSettledThought } = await import("./surfaces/scrolling-text.ts");
+const { cardDetailLine } = await import("./cards/card-primitives.ts");
+const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
+
+/** Last foreground SGR sequence of a rendered row: the body paint, after the prefix paint. */
+const sgrTail = (line: string): string | undefined => [...line.matchAll(/\x1b\[38;2;\d+;\d+;\d+m/g)].at(-1)?.[0];
 
 describe("defaultSlotOpacities", () => {
   test("returns empty array for 0 lines", () => {
@@ -261,11 +272,34 @@ describe("formatSettledThought", () => {
     expect(lines[20]).toContain("│ Step 25");
   });
 
-  test("custom indentation is applied to rail bar", () => {
-    const text = "Single thought line";
-    const lines = formatSettledThought(text, { maxLines: 5, width: 80, indent: "    " }).map(Bun.stripANSI);
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toBe("");
-    expect(lines[0]).toBe("    │ Single thought line");
+  test("thought rows land on the card content column and paint like card detail rows", () => {
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.4 });
+    try {
+      const [thought] = formatSettledThought("thought text", { maxLines: 5, width: 80 });
+      const card = cardDetailLine(null, 80, "detail text");
+
+      // The rail sits on the card content column: text starts where card detail text starts.
+      expect(Bun.stripANSI(thought!).indexOf("thought text")).toBe(Bun.stripANSI(card).indexOf("detail text"));
+      // The row is painted by the card primitive: same token, same configured opacity.
+      expect(sgrTail(thought!)).toBe(sgrTail(card));
+      expect(sgrTail(thought!)).not.toBe("");
+    } finally {
+      setPluginConfigForTest(null);
+    }
+  });
+
+  test("thought text follows the configured opacity", () => {
+    try {
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.25 });
+      const faint = sgrTail(formatSettledThought("thought text", { maxLines: 5, width: 80 })[0]!);
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.95 });
+      const bright = sgrTail(formatSettledThought("thought text", { maxLines: 5, width: 80 })[0]!);
+
+      expect(faint).toBeDefined();
+      expect(bright).toBeDefined();
+      expect(faint).not.toBe(bright);
+    } finally {
+      setPluginConfigForTest(null);
+    }
   });
 });

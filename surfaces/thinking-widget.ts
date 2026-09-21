@@ -2,7 +2,8 @@ import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import { TextScroller } from "./scrolling-text.ts";
 import { getPluginConfig } from "../core/config.ts";
 import { wrapLatestLines } from "../core/text.ts";
-import { LINE_WIDTH_RATIO, TOOL_INDENT, paintAt, formatRowLine, elapsedSuffix } from "../core/theme.ts";
+import { LINE_WIDTH_RATIO, formatRowLine, elapsedSuffix } from "../core/theme.ts";
+import { THOUGHT_RAIL_PREFIX, thoughtRailLine } from "../cards/card-primitives.ts";
 
 export const THOUGHT_PREVIEW_LINES = 3;
 export const THOUGHT_WIDGET_KEY = "minimal-thinking";
@@ -39,18 +40,13 @@ export function extractThinking(message: unknown): { text: string; live: boolean
   }
 }
 
-export function thinkingRailLines(theme: unknown, width: number, text: string, indent: boolean): string[] {
+export function thinkingRailLines(theme: unknown, width: number, text: string): string[] {
   if (!text.trim()) return [];
-  const pad = indent ? TOOL_INDENT : "  ";
-  const bar = `${pad}│ `;
-  const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
-  const lines: string[] = [];
-  const op = getPluginConfig().opacity;
-  const barOp = Math.max(0.05, op - 0.25);
-  for (const preview of wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES)) {
-    lines.push(`${paintAt(theme, bar, "toolOutput", barOp)}${paintAt(theme, preview, "toolOutput", op)}`);
-  }
-  return lines;
+  const innerW = Math.max(
+    8,
+    Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THOUGHT_RAIL_PREFIX),
+  );
+  return wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES).map((preview) => thoughtRailLine(theme, width, preview));
 }
 
 interface ComposerLike {
@@ -258,24 +254,19 @@ export class ThinkingWidget {
   }
 
   animatedThinkingRailLines(theme: unknown, width: number, text: string): string[] {
-    const pad = "  ";
-    const bar = `${pad}│ `;
-    const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(bar));
+    const innerW = Math.max(
+      8,
+      Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THOUGHT_RAIL_PREFIX),
+    );
     this.#scroller.update(text, innerW);
-    const rendered = this.#scroller.render();
     const cfgOp = getPluginConfig().opacity;
     const lines: string[] = [];
 
-    for (const item of rendered) {
-      if (item.isPlaceholder) {
-        lines.push(paintAt(theme, bar, "toolOutput", Math.max(0.05, cfgOp - 0.25) * 0.35));
-      } else {
-        const effectiveOp = item.opacity * cfgOp;
-        const barOp = Math.max(0.05, effectiveOp - 0.25);
-        lines.push(
-          `${paintAt(theme, bar, "toolOutput", barOp)}${paintAt(theme, item.text, "toolOutput", effectiveOp)}`,
-        );
-      }
+    for (const item of this.#scroller.render()) {
+      // The stagger rides on a card detail row, so the animated block keeps the card rail, `dim`
+      // token and configured rest opacity instead of painting its own brighter rail.
+      const effectiveOp = item.isPlaceholder ? Math.max(0.05, cfgOp - 0.25) * 0.35 : item.opacity * cfgOp;
+      lines.push(thoughtRailLine(theme, width, item.isPlaceholder ? "" : item.text, effectiveOp));
     }
 
     return lines;
