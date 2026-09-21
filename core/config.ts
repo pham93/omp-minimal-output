@@ -162,14 +162,18 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
       }
       if (key === "indicator") {
         const v = src[key];
-        if (typeof v === "string" && v in INDICATOR) {
+        // `hasOwnProperty`, not `in`: `in` walks the prototype chain, so "toString"/"constructor"
+        // would pass and `indicatorFrames()` would then read `.frames` off a function.
+        if (typeof v === "string" && Object.prototype.hasOwnProperty.call(INDICATOR, v)) {
           next.indicator = v as IndicatorId;
         }
         continue;
       }
       if (key === "detailLevel") {
         const v = src[key];
-        if (typeof v === "string" && v in DETAIL_LEVEL) next.detailLevel = v as DetailLevel;
+        if (typeof v === "string" && Object.prototype.hasOwnProperty.call(DETAIL_LEVEL, v)) {
+          next.detailLevel = v as DetailLevel;
+        }
         continue;
       }
       if (key === "standardMaxRows") {

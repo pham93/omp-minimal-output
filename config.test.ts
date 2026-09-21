@@ -4,9 +4,32 @@ import {
   CONFIG_MTIME_CHECK_INTERVAL_MS,
   DEFAULT_CONFIG,
   getPluginConfig,
+  indicatorFrames,
+  indicatorSettled,
   maybeReloadConfig,
   setPluginConfigForTest,
 } from "./core/config.ts";
+
+describe("enum settings reject prototype-chain names", () => {
+  test("prototype members are not accepted as indicator or detail level", () => {
+    for (const name of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      const config = applyOverlay(DEFAULT_CONFIG, { indicator: name, detailLevel: name });
+      expect(config.indicator).toBe(DEFAULT_CONFIG.indicator);
+      expect(config.detailLevel).toBe(DEFAULT_CONFIG.detailLevel);
+    }
+  });
+
+  test("a rejected indicator still yields usable frames", () => {
+    const config = applyOverlay(DEFAULT_CONFIG, { indicator: "constructor" });
+    expect(indicatorFrames(config).length).toBeGreaterThan(0);
+    expect(typeof indicatorSettled(config)).toBe("string");
+  });
+
+  test("valid enum values are still accepted", () => {
+    expect(applyOverlay(DEFAULT_CONFIG, { indicator: "dot" }).indicator).toBe("dot");
+    expect(applyOverlay(DEFAULT_CONFIG, { detailLevel: "minimal" }).detailLevel).toBe("minimal");
+  });
+});
 
 describe("composerRefreshInterval config", () => {
   test("defaults to 60 seconds", () => {

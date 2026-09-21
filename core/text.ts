@@ -99,7 +99,8 @@ export function boundedTextLines(
 export function truncatePlain(text: string, max: number): string {
   if (max <= 0) return "";
   if (visibleWidth(text) <= max) return text;
-  const budget = Math.max(1, max - 1);
+  // Reserve one cell for the ellipsis; at max === 1 that leaves a budget of 0, which yields just "…".
+  const budget = Math.max(0, max - 1);
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
@@ -109,8 +110,11 @@ export function truncatePlain(text: string, max: number): string {
   }
   // Never cut inside an escape sequence: back off to before its ESC.
   const head = text.slice(0, lo);
-  const esc = head.lastIndexOf("");
-  const end = esc !== -1 && !head.slice(esc).includes("m") ? esc : lo;
+  const esc = head.lastIndexOf("\x1b");
+  let end = esc !== -1 && !head.slice(esc).includes("m") ? esc : lo;
+  // Never cut inside a surrogate pair: a lone high surrogate renders as a replacement glyph.
+  const unit = text.charCodeAt(end - 1);
+  if (unit >= 0xd800 && unit <= 0xdbff) end -= 1;
   return `${text.slice(0, end)}…`;
 }
 
