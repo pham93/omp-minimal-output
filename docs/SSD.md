@@ -89,7 +89,7 @@ sequenceDiagram
 
 Live rows pulse `◈ → ◉ → ◎ → ○` at 120 ms. Settled rows use the configured indicator (`◆` default); web search, Task, Hub settle to `●`. Errors use the error token.
 
-`CardRegistry.render` throws a native-fallback error when the plugin is disabled, a `native*` setting wins, or an adapter throws; OMP's host renderer catches construction/deferred errors and restores native output. Returning a falsy component would instead suppress the transcript, so the registry never does that.
+`CardRegistry.render` throws a native-fallback error when the plugin is disabled, a `native*` setting wins, or an adapter throws; OMP's host renderer catches construction/deferred errors and restores native output. Returning a falsy component would instead suppress the transcript, so the registry never does that. Renderers are resolved when a row is built: live rows re-style on the next frame after `/minimal-on`, but rows constructed while the plugin was off keep native rendering until the transcript is rebuilt (`/reload`, `/resume`, restart) — the accompanying `Tool renderer failed … native rendering required` warning is that expected signal.
 
 ### 5.2 Task / Hub observed path
 

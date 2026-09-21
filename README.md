@@ -49,6 +49,8 @@ Each fallback is independent. `nativeTask` and `nativeHub` restore the host rend
 
 Grouped and dedicated wrapped cards dispatch through `cards/card-registry.ts`. Renderer failures use OMP's native fallback rather than hiding the transcript. The five native surface skins share one `core/container-interceptor.ts` hook; `/minimal-off` removes its subscribers and `/minimal-on` reinstalls them. Task and Hub remain native tools.
 
+`/minimal-off` therefore stops card rendering: rows already on screen re-style on the next frame after `/minimal-on`, while rows *created* during the disabled window keep the host's native rendering until the transcript is rebuilt (`/reload`, `/resume`, or a restart). The `Tool renderer failed … native rendering required` warnings from that window are the expected fail-open signal, not a fault.
+
 ```mermaid
 flowchart LR
     call["tool call"] --> rc["shadow renderCall\nlive ◈→◉→◎→○ @ 120ms"]

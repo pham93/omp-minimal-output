@@ -352,6 +352,10 @@ export default function (pi: ExtensionAPI) {
       todoWidget.agentRunning = false;
       todoWidget.resetSessionState();
       todoWidget.bindUi(ctx);
+      // A session change can run through OMP's `clearHookWidgets()`, which drops every extension
+      // widget without telling us; re-register instead of trusting the previous registration.
+      thinkingWidget.resetRegistration();
+      thinkingWidget.bindUi(ctx);
       todoWidget.bindSource(ctx);
       todoWidget.sessionVisible = true;
       todoWidget.syncFromSession(ctx);
@@ -600,6 +604,7 @@ export default function (pi: ExtensionAPI) {
         enabled = true;
         activityTracker.clearRun();
         todoWidget.installWidget();
+        thinkingWidget.installWidget();
         _ctx.ui.notify("Minimal output enabled", "info");
       },
       minimalOff: (_ctx) => {
@@ -610,6 +615,8 @@ export default function (pi: ExtensionAPI) {
         resetNativeToolCardPump();
         activityTracker.clearRun();
         todoWidget.setWidget(false);
+        // Unmounting the widget restores the native composer order (hook container after the status row).
+        thinkingWidget.setWidget(false);
         thinkingWidget.reset();
         pump.stopIfIdle(_ctx);
         _ctx.ui.notify("Minimal output disabled", "warning");

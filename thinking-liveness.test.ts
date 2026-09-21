@@ -477,6 +477,71 @@ describe("thinking widget 4-line placeholder above editor", () => {
     expect(Bun.stripANSI(liveLines[2])).toContain("│");
     expect(Bun.stripANSI(liveLines[3])).toContain("│");
   });
+
+  test("a host widget wipe does not orphan the thinking widget across a session switch", async () => {
+    type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
+    const eventHandlers = new Map<string, EventHandler[]>();
+    const widgets = new Map<
+      string,
+      { factory: (tui: unknown, theme: unknown) => RenderableComponent; placement?: string }
+    >();
+
+    const fakePi = {
+      on: (event: string, handler: EventHandler) => {
+        const list = eventHandlers.get(event) ?? [];
+        list.push(handler);
+        eventHandlers.set(event, list);
+      },
+      registerTool: () => {},
+      registerCommand: () => {},
+      registerShortcut: () => {},
+      registerMessageRenderer: () => {},
+      registerComposerShape: () => {},
+      registerAssistantThinkingRenderer: () => {},
+      getAllTools: () => [],
+      sendMessage: () => {},
+    } as unknown as ExtensionAPI;
+
+    const fakeCtx = {
+      hasUI: true,
+      ui: {
+        setWidget: (
+          key: string,
+          factory: ((tui: unknown, theme: unknown) => RenderableComponent) | undefined,
+          options?: { placement?: string },
+        ) => {
+          if (factory) {
+            widgets.set(key, { factory, placement: options?.placement });
+          } else {
+            widgets.delete(key);
+          }
+        },
+        requestRender: () => {},
+        notify: () => {},
+        setEditorComponent: () => {},
+      },
+    } as unknown as ExtensionContext;
+
+    registerExtension(fakePi);
+
+    const emit = async (event: string, payload: unknown) => {
+      for (const handler of eventHandlers.get(event) ?? []) {
+        await handler(payload, fakeCtx);
+      }
+    };
+
+    await emit("session_start", fakeCtx);
+    expect(widgets.has("minimal-thinking")).toBe(true);
+
+    // OMP's clearHookWidgets() disposes and forgets every extension widget on session changes.
+    widgets.clear();
+    expect(widgets.has("minimal-thinking")).toBe(false);
+
+    // The session-switch path must register again instead of trusting the stale flag.
+    await emit("session_switch", fakeCtx);
+    expect(widgets.has("minimal-thinking")).toBe(true);
+    expect(typeof widgets.get("minimal-thinking")?.factory).toBe("function");
+  });
 });
 
 describe("transcript settled thought block rendering", () => {
@@ -784,116 +849,143 @@ describe("transcript settled thought block rendering", () => {
     expect(rendered.some((l: string) => l.includes("Here is the answer."))).toBe(true);
   });
 
-  test("ensureThinkingAboveStatus reorders hookWidgetContainerAbove before statusContainer, and restoreStatusOrder restores it", async () => {
-    const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
-
-    class StatusHudContainer {
-      render() {
-        return ["Working..."];
+  describe("thinking above composer status", () => {
+    function createHost() {
+      const statusContainer = {
+        mode: undefined as unknown,
+        children: [] as Array<{ render: (w: number) => readonly string[] }>,
+        render: () => ["◈ 12s Working… (esc to interrupt)"],
+      };
+      const hookAbove = {
+        children: [] as Array<{ render: (w: number) => readonly string[] }>,
+        render: () => ["Thinking... 12s", "│ plan step"],
+      };
+      const chips = { children: [], render: () => [] as readonly string[] };
+      const editor = { children: [{ getText: () => "" }], render: () => ["╭─ prompt ─╮"] };
+      const transcript = { render: () => ["transcript tail"] };
+      const header = { render: () => ["welcome"] };
+      const statusHost = { mounted: true, setComponent: () => {}, render: () => ["model · git"] };
+      const tui = {
+        children: [header, transcript, statusContainer, chips, hookAbove, editor, statusHost] as unknown[],
+        requestRender: () => {},
+        invalidate: () => {},
+      };
+      class FakeComposer {
+        ui: unknown = tui;
+        runtime: readonly unknown[] = [transcript, statusContainer, chips, hookAbove, editor];
+        // Mirrors Composer.setRuntimeChildren: the TUI child list tracks the runtime order,
+        // with the header first and the status host appended last.
+        setRuntimeChildren(children: readonly unknown[]) {
+          this.runtime = children;
+          tui.children = [header, ...children, statusHost];
+        }
+        frame(): string[] {
+          return this.runtime.flatMap((root) => (root as { render: (w: number) => string[] }).render(80));
+        }
       }
-    }
-    class EditorTopGap {
-      render() {
-        return [""];
-      }
-    }
-    class HookContainer {
-      children = [new EditorTopGap()];
-      render() {
-        return ["Thinking..."];
-      }
-    }
-    class EditorContainer {
-      render() {
-        return ["Prompt box"];
-      }
-    }
-
-    const status = new StatusHudContainer();
-    const hookAbove = new HookContainer();
-    const editor = new EditorContainer();
-
-    let invalidated = false;
-    const mockTui = {
-      children: [status, hookAbove, editor],
-      invalidate() {
-        invalidated = true;
-      },
-    };
-
-    // Initial native OMP order: statusContainer is before hookWidgetContainerAbove
-    expect(mockTui.children[0]).toBe(status);
-    expect(mockTui.children[1]).toBe(hookAbove);
-
-    // Reorder: hookWidgetContainerAbove should now be before statusContainer!
-    ensureThinkingAboveStatus(mockTui);
-    expect(invalidated).toBe(true);
-    expect(mockTui.children[0]).toBe(hookAbove);
-    expect(mockTui.children[1]).toBe(status);
-    expect(mockTui.children[2]).toBe(editor);
-
-    // Calling again when already reordered is a no-op
-    invalidated = false;
-    ensureThinkingAboveStatus(mockTui);
-    expect(mockTui.children[0]).toBe(hookAbove);
-    expect(mockTui.children[1]).toBe(status);
-
-    // Restore: should put hookWidgetContainerAbove back after statusContainer
-    restoreStatusOrder(mockTui);
-    expect(mockTui.children[0]).toBe(status);
-    expect(mockTui.children[1]).toBe(hookAbove);
-    expect(mockTui.children[2]).toBe(editor);
-  });
-
-  test("ensureThinkingAboveStatus reorders with minified class names using visualContainer and mode", async () => {
-    const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
-
-    // Minified class names in real bun binary: constructor.name is "e", "t", etc.
-    class e {
-      mode = { statusRowOccupied: false, statusContainer: this };
-      render() {
-        return ["Working..."];
-      }
-    }
-    class t {
-      children: unknown[] = [];
-      render() {
-        return ["Thinking..."];
-      }
-    }
-    class n {
-      children = [{ getText: () => "" }];
-      render() {
-        return ["Prompt box"];
-      }
+      const composer = new FakeComposer();
+      const mode = {
+        statusContainer,
+        hookWidgetContainerAbove: hookAbove,
+        attachmentChipsContainer: chips,
+        composer,
+      };
+      statusContainer.mode = mode;
+      return {
+        composer,
+        tui,
+        nativeOrder: [transcript, statusContainer, chips, hookAbove, editor] as readonly unknown[],
+      };
     }
 
-    const visual = { isThinkingWidget: true };
-    const status = new e();
-    const hookAbove = new t();
-    hookAbove.children.push(visual);
-    const editor = new n();
+    test("renders the thinking block above the working row and keeps it there across composer remounts", async () => {
+      const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
+      const { composer, tui, nativeOrder } = createHost();
 
-    let invalidated = false;
-    const mockTui = {
-      children: [status, hookAbove, editor],
-      invalidate() {
-        invalidated = true;
-      },
-    };
+      expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
 
-    // Even with minified class names, ensureThinkingAboveStatus finds visualContainer and mode!
-    ensureThinkingAboveStatus(mockTui, visual);
-    expect(invalidated).toBe(true);
-    expect(mockTui.children[0]).toBe(hookAbove);
-    expect(mockTui.children[1]).toBe(status);
-    expect(mockTui.children[2]).toBe(editor);
+      ensureThinkingAboveStatus(tui);
+      expect(composer.frame().join("\n")).toMatch(/Thinking[\s\S]*Working…/);
 
-    // Restore also works with minified class names!
-    restoreStatusOrder(mockTui, visual);
-    expect(mockTui.children[0]).toBe(status);
-    expect(mockTui.children[1]).toBe(hookAbove);
-    expect(mockTui.children[2]).toBe(editor);
+      // OMP remounting the runtime children must not undo the order.
+      composer.setRuntimeChildren(nativeOrder);
+      expect(composer.frame().join("\n")).toMatch(/Thinking[\s\S]*Working…/);
+
+      restoreStatusOrder(tui);
+      expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
+      composer.setRuntimeChildren(nativeOrder);
+      expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
+    });
+
+    test("unmounting the widget hands the composer back its native order", async () => {
+      const { ThinkingWidget } = await import("./surfaces/thinking-widget.ts");
+      const { composer, tui } = createHost();
+      const widgets = new Map<string, unknown>();
+      // The real ui host is the TUI itself; only setWidget is added by OMP.
+      // OMP's #createHookWidget invokes the factory immediately, passing the TUI.
+      (tui as unknown as Record<string, unknown>).setWidget = (
+        key: string,
+        value: unknown,
+        options?: { placement?: string },
+      ) => {
+        if (value === undefined) {
+          widgets.delete(key);
+          return;
+        }
+        if (typeof value !== "function") return;
+        const factory = value as (tui: unknown, theme: unknown) => unknown;
+        widgets.set(key, { component: factory(tui, null), placement: options?.placement });
+      };
+
+      const widget = new ThinkingWidget({ owns: () => true, activityRunId: () => null });
+      widget.bindUi({ ui: tui });
+      expect(widgets.has("minimal-thinking")).toBe(true);
+      expect(composer.frame().join("\n")).toMatch(/Thinking[\s\S]*Working…/);
+
+      // /minimal-off unmounts the widget; the working row must return to its native slot.
+      widget.setWidget(false);
+      expect(widgets.has("minimal-thinking")).toBe(false);
+      expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
+
+      // /minimal-on remounts it; the thinking block moves back above the working row.
+      widget.installWidget();
+      expect(widgets.has("minimal-thinking")).toBe(true);
+      expect(composer.frame().join("\n")).toMatch(/Thinking[\s\S]*Working…/);
+
+      widget.dispose();
+      expect(widgets.has("minimal-thinking")).toBe(false);
+      expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
+    });
+
+    test("leaves hosts it cannot identify untouched", async () => {
+      const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
+      const children = [{ render: () => ["a"] }];
+      expect(() => ensureThinkingAboveStatus(undefined)).not.toThrow();
+      expect(() => ensureThinkingAboveStatus({})).not.toThrow();
+      expect(() => ensureThinkingAboveStatus({ children })).not.toThrow();
+      expect(() => restoreStatusOrder({ children })).not.toThrow();
+      expect(children).toHaveLength(1);
+    });
+
+    test("a reloaded generation can unwrap the composer patch its predecessor installed", async () => {
+      // Dynamic import with a query evaluates the module twice, which is exactly what a hot reload
+      // does; a static import would return the cached instance and prove nothing.
+      const before = await import("./surfaces/thinking-widget.ts");
+      const after = await import("./surfaces/thinking-widget.ts?generation=2");
+      const { composer, tui, nativeOrder } = createHost();
+
+      before.ensureThinkingAboveStatus(tui);
+      expect(composer.frame().join("\n")).toMatch(/Thinking[\s\S]*Working…/);
+
+      // The reloaded copy must find the predecessor's registered state, not a private one.
+      after.restoreStatusOrder(tui);
+      expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
+      expect(Object.prototype.hasOwnProperty.call(composer, "setRuntimeChildren")).toBe(false);
+
+      // With the wrapper gone, a later host remount keeps the native order.
+      composer.setRuntimeChildren(nativeOrder);
+      expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
+    });
   });
 });
 

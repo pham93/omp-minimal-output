@@ -10,7 +10,10 @@ export const THOUGHT_WIDGET_KEY = "minimal-thinking";
 export interface ThinkingWidgetDeps {
   owns: () => boolean;
   activityRunId: () => string | null;
-  onSyncThought?: (fp: string, thought: { body: string; live: boolean; right: string; startedAt: number; detail?: string }) => void;
+  onSyncThought?: (
+    fp: string,
+    thought: { body: string; live: boolean; right: string; startedAt: number; detail?: string },
+  ) => void;
 }
 
 export function extractThinking(message: unknown): { text: string; live: boolean } {
@@ -50,144 +53,135 @@ export function thinkingRailLines(theme: unknown, width: number, text: string, i
   return lines;
 }
 
-export function ensureThinkingAboveStatus(tui: unknown, visualContainer?: unknown): void {
-  if (!tui || typeof tui !== "object" || !("children" in tui)) return;
-  const children = (tui as { children: unknown[]; invalidate?: () => void }).children;
-  if (!Array.isArray(children) || children.length < 3) return;
-
-  // 1. Locate hookWidgetContainerAbove
-  let hookIdx = -1;
-  if (visualContainer) {
-    hookIdx = children.findIndex((c) => {
-      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
-      const ch = (c as { children: unknown[] }).children;
-      return (
-        Array.isArray(ch) &&
-        (ch.includes(visualContainer) ||
-          ch.some((item: unknown) => (item as Record<string, unknown>)?.isThinkingWidget || item === visualContainer))
-      );
-    });
-  }
-
-  if (hookIdx < 0) {
-    hookIdx = children.findIndex((c) => {
-      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
-      const ch = (c as { children: unknown[] }).children;
-      return (
-        Array.isArray(ch) &&
-        ch.some(
-          (item: unknown) =>
-            (item as Record<string, unknown>)?.isThinkingWidget ||
-            (item as Record<string, unknown>)?.constructor?.name === "EditorTopGap" ||
-            (item as Record<string, unknown>)?.constructor?.name === "Spacer",
-        )
-      );
-    });
-  }
-
-  if (hookIdx < 0) {
-    const editorIdx = children.findIndex((c) => {
-      if (!c || typeof c !== "object") return false;
-      if ("getText" in (c as Record<string, unknown>) || "handleInput" in (c as Record<string, unknown>)) return true;
-      const ch = (c as { children?: unknown[] }).children;
-      return (
-        Array.isArray(ch) &&
-        ch.some(
-          (item: unknown) =>
-            item &&
-            typeof item === "object" &&
-            ("getText" in (item as Record<string, unknown>) || "handleInput" in (item as Record<string, unknown>)),
-        )
-      );
-    });
-    if (editorIdx > 0) {
-      hookIdx = editorIdx - 1;
-    }
-  }
-
-  if (hookIdx < 0) return;
-
-  // 2. Locate statusContainer
-  let statusIdx = children.findIndex(
-    (c) =>
-      c &&
-      typeof c === "object" &&
-      ((c as Record<string, unknown>).mode?.statusContainer === c ||
-        (c as Record<string, unknown>).mode?.statusRowOccupied !== undefined ||
-        (c as Record<string, unknown>).constructor?.name === "StatusHudContainer" ||
-        "statusRowOccupied" in (c as Record<string, unknown>)),
-  );
-
-  if (statusIdx < 0 && hookIdx >= 2) {
-    statusIdx = hookIdx - 2;
-  }
-
-  if (statusIdx >= 0 && hookIdx > statusIdx) {
-    const [hookContainer] = children.splice(hookIdx, 1);
-    if (hookContainer) {
-      children.splice(statusIdx, 0, hookContainer);
-      (tui as { invalidate?: () => void }).invalidate?.();
-    }
-  }
+interface ComposerLike {
+  ui?: unknown;
+  setRuntimeChildren?: (children: readonly unknown[]) => void;
 }
 
-export function restoreStatusOrder(tui: unknown, visualContainer?: unknown): void {
-  if (!tui || typeof tui !== "object" || !("children" in tui)) return;
-  const children = (tui as { children: unknown[]; invalidate?: () => void }).children;
-  if (!Array.isArray(children) || children.length < 3) return;
+interface ComposerRuntimeHost {
+  /** Bound native `Composer.setRuntimeChildren` captured before the wrapper is installed. */
+  applyRuntimeChildren: (children: readonly unknown[]) => void;
+  composer: ComposerLike;
+  statusContainer: unknown;
+  hookWidgetContainerAbove: unknown;
+  attachmentChipsContainer: unknown;
+}
 
-  let hookIdx = -1;
-  if (visualContainer) {
-    hookIdx = children.findIndex((c) => {
-      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
-      const ch = (c as { children: unknown[] }).children;
-      return (
-        Array.isArray(ch) &&
-        (ch.includes(visualContainer) ||
-          ch.some((item: unknown) => (item as Record<string, unknown>)?.isThinkingWidget || item === visualContainer))
-      );
-    });
+/**
+ * Restoration state for the runtime-children wrapper, keyed per composer instance. Registered
+ * rather than module-local so a hot-reloaded generation still finds the wrapper its predecessor
+ * installed — module-local symbols would leave the composer patched after the old module unloads.
+ */
+const RUNTIME_REORDER_STATE = Symbol.for("@local/omp-minimal-output/composer-runtime-reorder");
+
+interface RuntimeReorderState {
+  wrapper: (children: readonly unknown[]) => void;
+  native: (children: readonly unknown[]) => void;
+}
+
+/**
+ * The composer lays out its bottom chrome from a private runtime-children array, not from
+ * `TUI.children`. Reach that composer through the status HUD container, which owns the mode it
+ * renders for and whose `mode.composer` is the single InteractiveMode composer.
+ */
+function runtimeHostFor(tui: unknown): ComposerRuntimeHost | undefined {
+  if (!tui || typeof tui !== "object") return undefined;
+  const children = (tui as { children?: unknown }).children;
+  if (!Array.isArray(children)) return undefined;
+  for (const child of children) {
+    if (!child || typeof child !== "object") continue;
+    const mode = (child as { mode?: unknown }).mode;
+    if (!mode || typeof mode !== "object") continue;
+    const candidate = mode as {
+      statusContainer?: unknown;
+      hookWidgetContainerAbove?: unknown;
+      attachmentChipsContainer?: unknown;
+      composer?: ComposerLike;
+    };
+    if (candidate.statusContainer !== child) continue;
+    const composer = candidate.composer;
+    if (!composer || typeof composer !== "object") continue;
+    if (composer.ui !== tui) continue;
+    const state = (composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE] as RuntimeReorderState | undefined;
+    const setRuntimeChildren = state ? state.native : composer.setRuntimeChildren;
+    if (typeof setRuntimeChildren !== "function") continue;
+    if (!candidate.hookWidgetContainerAbove) continue;
+    return {
+      applyRuntimeChildren: setRuntimeChildren.bind(composer),
+      composer,
+      statusContainer: candidate.statusContainer,
+      hookWidgetContainerAbove: candidate.hookWidgetContainerAbove,
+      attachmentChipsContainer: candidate.attachmentChipsContainer,
+    };
   }
+  return undefined;
+}
 
-  if (hookIdx < 0) {
-    hookIdx = children.findIndex((c) => {
-      if (!c || typeof c !== "object" || !("children" in (c as Record<string, unknown>))) return false;
-      const ch = (c as { children: unknown[] }).children;
-      return (
-        Array.isArray(ch) &&
-        ch.some(
-          (item: unknown) =>
-            (item as Record<string, unknown>)?.isThinkingWidget ||
-            (item as Record<string, unknown>)?.constructor?.name === "EditorTopGap" ||
-            (item as Record<string, unknown>)?.constructor?.name === "Spacer",
-        )
-      );
-    });
+/** Composer runtime children recovered from `[header, ...runtimeChildren, statusHost]`. */
+function currentRuntimeChildren(tui: unknown, host: ComposerRuntimeHost): readonly unknown[] | undefined {
+  const children = (tui as { children?: unknown }).children;
+  if (!Array.isArray(children) || children.length < 4) return undefined;
+  const last = children[children.length - 1] as { setComponent?: unknown } | undefined;
+  if (!last || typeof last.setComponent !== "function") return undefined;
+  const runtime = children.slice(1, children.length - 1);
+  if (!runtime.includes(host.statusContainer)) return undefined;
+  if (!runtime.includes(host.hookWidgetContainerAbove)) return undefined;
+  return runtime;
+}
+
+/** Copy with `target` immediately before `anchor`; returns the input array when already there. */
+function moveBefore(children: readonly unknown[], target: unknown, anchor: unknown): readonly unknown[] {
+  const targetIdx = children.indexOf(target);
+  const anchorIdx = children.indexOf(anchor);
+  if (targetIdx < 0 || anchorIdx < 0 || targetIdx === anchorIdx - 1) return children;
+  const next = children.slice();
+  const [moved] = next.splice(targetIdx, 1);
+  next.splice(anchorIdx > targetIdx ? anchorIdx - 1 : anchorIdx, 0, moved);
+  return next;
+}
+
+/** Copy with `target` immediately after `anchor`; returns the input array when already there. */
+function moveAfter(children: readonly unknown[], target: unknown, anchor: unknown): readonly unknown[] {
+  const targetIdx = children.indexOf(target);
+  const anchorIdx = children.indexOf(anchor);
+  if (targetIdx < 0 || anchorIdx < 0 || targetIdx === anchorIdx + 1) return children;
+  const next = children.slice();
+  const [moved] = next.splice(targetIdx, 1);
+  next.splice(anchorIdx > targetIdx ? anchorIdx : anchorIdx + 1, 0, moved);
+  return next;
+}
+
+/** Keep the `aboveEditor` widget container rendering before the status row in the composer layout. */
+export function ensureThinkingAboveStatus(tui: unknown): void {
+  const host = runtimeHostFor(tui);
+  if (!host) return;
+  if (!(host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE]) {
+    const native = host.applyRuntimeChildren;
+    const wrapper = (children: readonly unknown[]): void =>
+      native(moveBefore(children, host.hookWidgetContainerAbove, host.statusContainer));
+    host.composer.setRuntimeChildren = wrapper;
+    (host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE] = { wrapper, native } as RuntimeReorderState;
   }
+  const runtime = currentRuntimeChildren(tui, host);
+  if (!runtime) return;
+  const fixed = moveBefore(runtime, host.hookWidgetContainerAbove, host.statusContainer);
+  if (fixed !== runtime) host.applyRuntimeChildren(fixed);
+}
 
-  if (hookIdx < 0) return;
-
-  let statusIdx = children.findIndex(
-    (c) =>
-      c &&
-      typeof c === "object" &&
-      ((c as Record<string, unknown>).mode?.statusContainer === c ||
-        (c as Record<string, unknown>).mode?.statusRowOccupied !== undefined ||
-        (c as Record<string, unknown>).constructor?.name === "StatusHudContainer" ||
-        "statusRowOccupied" in (c as Record<string, unknown>)),
-  );
-
-  if (statusIdx < 0 && hookIdx >= 0 && hookIdx + 1 < children.length) {
-    statusIdx = hookIdx + 1;
+/** Restore the native order (hook container after the status/chip band) and drop the wrapper. */
+export function restoreStatusOrder(tui: unknown): void {
+  const host = runtimeHostFor(tui);
+  if (!host) return;
+  const state = (host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE] as RuntimeReorderState | undefined;
+  if (state) {
+    if (host.composer.setRuntimeChildren === state.wrapper) delete host.composer.setRuntimeChildren;
+    delete (host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE];
   }
-
-  if (statusIdx >= 0 && hookIdx < statusIdx) {
-    const [hookContainer] = children.splice(hookIdx, 1);
-    if (hookContainer) {
-      children.splice(statusIdx, 0, hookContainer);
-      (tui as { invalidate?: () => void }).invalidate?.();
-    }
-  }
+  const runtime = currentRuntimeChildren(tui, host);
+  if (!runtime) return;
+  const anchor = host.attachmentChipsContainer ?? host.statusContainer;
+  const restored = moveAfter(runtime, host.hookWidgetContainerAbove, anchor);
+  if (restored !== runtime) host.applyRuntimeChildren(restored);
 }
 
 export class ThinkingWidget {
@@ -201,7 +195,6 @@ export class ThinkingWidget {
 
   #ui: unknown = undefined;
   #tui: unknown = undefined;
-  #visualContainer: unknown = undefined;
   #widgetOn = false;
   #live = false;
   #startedAt = 0;
@@ -251,14 +244,9 @@ export class ThinkingWidget {
   }
 
   setTui(tui: unknown): void {
-    if (tui && typeof tui === "object") {
-      this.#tui = tui;
-      if (this.#visualContainer) {
-        ensureThinkingAboveStatus(tui, this.#visualContainer);
-      } else {
-        ensureThinkingAboveStatus(tui);
-      }
-    }
+    if (!tui || typeof tui !== "object") return;
+    this.#tui = tui;
+    ensureThinkingAboveStatus(tui);
   }
 
   isAnimating(): boolean {
@@ -284,7 +272,9 @@ export class ThinkingWidget {
       } else {
         const effectiveOp = item.opacity * cfgOp;
         const barOp = Math.max(0.05, effectiveOp - 0.25);
-        lines.push(`${paintAt(theme, bar, "toolOutput", barOp)}${paintAt(theme, item.text, "toolOutput", effectiveOp)}`);
+        lines.push(
+          `${paintAt(theme, bar, "toolOutput", barOp)}${paintAt(theme, item.text, "toolOutput", effectiveOp)}`,
+        );
       }
     }
 
@@ -293,21 +283,10 @@ export class ThinkingWidget {
 
   paintThinkingVisual(tuiOrTheme: unknown, theme?: unknown): Container {
     const effectiveTheme = theme !== undefined ? theme : tuiOrTheme;
-    const tui = theme !== undefined ? tuiOrTheme : undefined;
-    if (tui) {
-      this.#tui = tui;
-    }
+    if (theme !== undefined) this.setTui(tuiOrTheme);
     const c = new Container();
-    (c as Record<string, unknown>).isThinkingWidget = true;
-    this.#visualContainer = c;
-    if (this.#tui) {
-      ensureThinkingAboveStatus(this.#tui, c);
-    }
     c.addChild({
       render: (width: number): readonly string[] => {
-        if (this.#tui) {
-          ensureThinkingAboveStatus(this.#tui, c);
-        }
         if (!this.#deps.owns()) return [];
         if (!this.#live) {
           return ["", "", "", ""];
@@ -330,13 +309,14 @@ export class ThinkingWidget {
   bindUi(ctx: unknown): void {
     if (!this.#deps.owns() || typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
     const ui = (ctx as { ui?: unknown }).ui;
-    if (ui) {
-      this.#ui = ui;
-      if (typeof ui === "object" && "children" in (ui as Record<string, unknown>)) {
-        this.setTui(ui);
-      }
-      this.installWidget();
+    if (!ui) return;
+    // A new UI host means the previous widget registration is gone with it.
+    if (this.#ui !== ui) this.#widgetOn = false;
+    this.#ui = ui;
+    if (typeof ui === "object" && "children" in (ui as Record<string, unknown>)) {
+      this.setTui(ui);
     }
+    this.installWidget();
   }
 
   installWidget(): void {
@@ -345,6 +325,7 @@ export class ThinkingWidget {
     if (!ui || typeof ui !== "object" || typeof (ui as { setWidget?: unknown }).setWidget !== "function") return;
     try {
       if (this.#widgetOn) {
+        if (this.#tui) ensureThinkingAboveStatus(this.#tui);
         const requestRender = (ui as { requestRender?: unknown }).requestRender;
         if (typeof requestRender === "function") requestRender.call(ui);
         return;
@@ -360,12 +341,24 @@ export class ThinkingWidget {
     }
   }
 
+  /**
+   * Drop the "already registered" belief without talking to the host. OMP's `clearHookWidgets()`
+   * (session change / session switch) disposes and forgets every extension widget, so the next
+   * `installWidget()` must register again instead of trusting a stale flag.
+   */
+  resetRegistration(): void {
+    this.#widgetOn = false;
+  }
+
   setWidget(show: boolean): void {
     const ui = this.#ui;
     if (!ui || typeof ui !== "object" || typeof (ui as { setWidget?: unknown }).setWidget !== "function") return;
     try {
       if (!show) {
         (ui as { setWidget: (key: string, value: unknown) => void }).setWidget(THOUGHT_WIDGET_KEY, undefined);
+        // Unmounting must hand the composer back its native order; a stray blank gap
+        // above the status row would otherwise outlive /minimal-off.
+        if (this.#tui) restoreStatusOrder(this.#tui);
         this.#widgetOn = false;
         return;
       }
@@ -421,11 +414,7 @@ export class ThinkingWidget {
 
   dispose(): void {
     this.setWidget(false);
-    if (this.#tui) {
-      restoreStatusOrder(this.#tui, this.#visualContainer);
-      this.#tui = undefined;
-    }
-    this.#visualContainer = undefined;
+    this.#tui = undefined;
     this.#ui = undefined;
     this.reset();
   }
