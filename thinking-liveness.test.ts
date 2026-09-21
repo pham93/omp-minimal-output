@@ -969,6 +969,7 @@ describe("transcript settled thought block rendering", () => {
       return {
         composer,
         tui,
+        hookAbove,
         nativeOrder: [transcript, statusContainer, chips, hookAbove, editor] as readonly unknown[],
       };
     }
@@ -1077,6 +1078,49 @@ describe("transcript settled thought block rendering", () => {
       expect(hookAbove.children[1]).toBe(thinking);
       expect(hookAbove.children[2]).toBe(todos);
       expect(composer.frame().join("\n")).toMatch(/THINKING[\s\S]*TODOS[\s\S]*Working…/);
+    });
+
+    test("reordering the hook widgets during a frame never duplicates or drops one", async () => {
+      const { ensureThinkingBeforeTodos, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } = await import(
+        "./surfaces/thinking-widget.ts"
+      );
+      const { tui, hookAbove } = createHost();
+
+      // Host `Container.render` captures the child array and its length before its loop and reads
+      // `children[i]` live, so a child that reorders the array mid-frame shifts what later indices
+      // see. Both plugin widgets call `ensureThinkingBeforeTodos` from their render callback.
+      const rendered: string[] = [];
+      const widget = (flag: string, name: string) => {
+        const c: { render: (w: number) => readonly string[] } & Record<string, unknown> = {
+          render: () => {
+            rendered.push(name);
+            ensureThinkingBeforeTodos(tui);
+            return [name];
+          },
+        };
+        c[flag] = true;
+        return c;
+      };
+      const spacer: { render: (w: number) => readonly string[] } = { render: () => ["spacer"] };
+      // The order the host builds after /minimal-off then /minimal-on before this fix.
+      hookAbove.children = [spacer, widget(TODOS_WIDGET_FLAG, "todos"), widget(THINKING_WIDGET_FLAG, "thinking")];
+      hookAbove.render = () => {
+        const children = hookAbove.children;
+        const count = children.length;
+        const rows: string[] = [];
+        for (let i = 0; i < count; i += 1) rows.push(...children[i]!.render(80));
+        return rows;
+      };
+
+      // The frame that corrects the order must still paint each widget exactly once.
+      const frame = hookAbove.render(80);
+      expect(frame.filter((row) => row === "todos")).toHaveLength(1);
+      expect(frame.filter((row) => row === "thinking")).toHaveLength(1);
+      expect([...rendered].sort()).toEqual(["thinking", "todos"]);
+
+      rendered.length = 0;
+      expect(hookAbove.render(80)).toEqual(["spacer", "thinking", "todos"]);
+      expect(rendered).toEqual(["thinking", "todos"]);
     });
 
     test("leaves hosts it cannot identify untouched", async () => {

@@ -165,8 +165,24 @@ function orderHookWidgets(host: ComposerRuntimeHost): void {
   const thinkingIdx = children.findIndex((child) => flagged(child, THINKING_WIDGET_FLAG));
   const todosIdx = children.findIndex((child) => flagged(child, TODOS_WIDGET_FLAG));
   if (thinkingIdx < 0 || todosIdx < 0 || thinkingIdx < todosIdx) return;
-  const [thinking] = children.splice(thinkingIdx, 1);
-  children.splice(todosIdx, 0, thinking);
+  // Reorder through a fresh array: the host's `Container.render` captures `children` and its length
+  // before its loop, so splicing in place shifts the indices it is about to read and renders one
+  // widget twice. Replacing the array leaves an in-flight frame untouched.
+  const next = children.slice();
+  const [thinking] = next.splice(thinkingIdx, 1);
+  next.splice(todosIdx, 0, thinking);
+  container.children = next;
+  // Invalidate on a microtask, never inline: the host's `Container.render` decides whether its cached
+  // frame is still valid *before* it iterates children, then returns that cache — so clearing it from
+  // inside a child's render hands this frame back as `undefined`. A microtask lands after the
+  // synchronous render pass and still keeps the positional cache honest for the next one.
+  queueMicrotask(() => {
+    try {
+      container.invalidate?.();
+    } catch {
+      // Cache invalidation is best-effort; the next render recomputes anyway.
+    }
+  });
 }
 
 /**
