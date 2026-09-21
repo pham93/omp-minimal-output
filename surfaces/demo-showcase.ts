@@ -303,7 +303,7 @@ function renderTodoDemo(theme: unknown, width: number): readonly string[] {
         { label: "Dropped styling experiment", status: "dropped", phase: "Verification" },
       ],
       open: 2,
-      done: 3,
+      done: 4,
       blocked: 1,
       activeLabel: "Add automated interactive demo command",
     },
