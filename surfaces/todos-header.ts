@@ -360,6 +360,12 @@ function paintLabel(
 
 export const TODO_TOGGLE_SHORTCUT = "Ctrl+Alt+T";
 
+/**
+ * One extra column over the plain row indent: todo rows share the card content column (the same
+ * column card detail rows and thought rails use), so the widget lines up with every other surface.
+ */
+export const TODO_ROW_INDENT = " ";
+
 export function todoToggleHint(collapsed: boolean): string {
   return `${collapsed ? "▸ expand" : "▾ collapse"} · ${TODO_TOGGLE_SHORTCUT}`;
 }
@@ -383,14 +389,14 @@ export function renderTodoHeader(
         : head;
     return [
       formatRowLine(theme, width, {
-        body,
+        body: `${TODO_ROW_INDENT}${body}`,
         right: todoToggleHint(true),
       }),
     ];
   }
   const rows = [
     formatRowLine(theme, width, {
-      body: head,
+      body: `${TODO_ROW_INDENT}${head}`,
       right: todoToggleHint(false),
     }),
   ];
@@ -409,11 +415,11 @@ export function renderTodoHeader(
       });
       const name = group.name || "Todos";
       const titleText = hiddenCount > 0 ? `${name} · ${hiddenCount} older` : name;
-      const prefix = "    ";
+      const prefix = `${TODO_ROW_INDENT}    `;
       const title = truncatePlain(titleText, rowBudget(width, prefix.length));
       rows.push(`${prefix}${paintBold(theme, paintAt(theme, title, hot ? "accent" : "dim", hot ? 1 : 0.7))}`);
     }
-    const taskIndent = phased ? "    " : "  ";
+    const taskIndent = `${TODO_ROW_INDENT}${phased ? "    " : "  "}`;
     for (const [index, item] of visibleItems.entries()) {
       const key = todoItemKey(item);
       const completingStarted = anim?.completingAt?.get?.(key);

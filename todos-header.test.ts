@@ -126,4 +126,17 @@ describe("todo row painting", () => {
     const dropped = rows.find((row) => row.includes("Dropped item"));
     expect(dropped).toContain("\x1b[9m");
   });
+
+  test("rows share the card content column", async () => {
+    const { cardDetailLine } = await import("./cards/card-primitives.ts");
+    const contentColumn = Bun.stripANSI(cardDetailLine(BOX_THEME, 100, "detail text")).indexOf("detail text");
+    const header = renderTodoHeader(BOX_THEME, 100, state(), false)[0]!;
+    expect(Bun.stripANSI(header).indexOf("Todos")).toBe(contentColumn);
+
+    // Glyph boxes are one cell wide, so the label lands on the content column too.
+    const row = renderTodoHeader(BOX_THEME, 100, state(), false).find((line) =>
+      Bun.stripANSI(line).includes("Pending item"),
+    )!;
+    expect(Bun.stripANSI(row).indexOf("Pending item")).toBe(contentColumn);
+  });
 });

@@ -10,6 +10,7 @@ import {
   todoHasActiveTransition,
   type TodoHeaderState,
 } from "./todos-header.ts";
+import { TODOS_WIDGET_FLAG, ensureThinkingAboveStatus, ensureThinkingBeforeTodos } from "./thinking-widget.ts";
 export { parseTodoResult, parseTodoPhases };
 
 export const TODOS_WIDGET_KEY = "minimal-todos";
@@ -190,11 +191,15 @@ export class TodoWidget {
     }
   }
 
-  paintTodosWidget(theme: unknown): Container {
+  paintTodosWidget(tui: unknown, theme: unknown): Container {
     const c = new Container();
+    (c as Record<string, unknown>)[TODOS_WIDGET_FLAG] = true;
+    // Another widget mount rebuilds the host's hook container; re-assert the stack order then too.
+    if (tui && typeof tui === "object") ensureThinkingAboveStatus(tui);
     c.addChild({
       render: (width: number): readonly string[] => {
         if (!this.#deps.owns()) return [];
+        ensureThinkingBeforeTodos(tui);
         let show = true;
         try {
           show = getPluginConfig().todosHeader !== false;
@@ -226,7 +231,7 @@ export class TodoWidget {
       }
       (ui as { setWidget: (key: string, fn: unknown, opts: unknown) => void }).setWidget(
         TODOS_WIDGET_KEY,
-        (_tui: unknown, theme: unknown) => this.paintTodosWidget(theme),
+        (tui: unknown, theme: unknown) => this.paintTodosWidget(tui, theme),
         { placement: "aboveEditor" },
       );
       this.#widgetOn = true;

@@ -272,12 +272,12 @@ its `◐` indicator. Settled labels are struck through, revealed by an animated 
 settles.
 
 ```text
-◆ ▾ Todos 2 open, 2 done, 1 blocked                  ▾ collapse · Ctrl+Alt+T
-    Diagnosis
-    ├─ [x] Investigate tool execution background
-    ╰─ [ ] Wire inspect overlay hints
-    Verification
-    ├─ ◐ Add automated demo command
-    ├─ [!] Blocked on host affordance — blocked: tool callback
-    ╰─ [-] Dropped styling experiment (dropped)
+◆  ▾ Todos 2 open, 2 done, 1 blocked                 ▾ collapse · Ctrl+Alt+T
+     Diagnosis
+     ├─ [x] Investigate tool execution background
+     ╰─ [ ] Wire inspect overlay hints
+     Verification
+     ├─ ◐ Add automated demo command
+     ├─ [!] Blocked on host affordance — blocked: tool callback
+     ╰─ [-] Dropped styling experiment (dropped)
 ```

@@ -147,10 +147,46 @@ function moveAfter(children: readonly unknown[], target: unknown, anchor: unknow
   return next;
 }
 
-/** Keep the `aboveEditor` widget container rendering before the status row in the composer layout. */
+/** Flags the composer ordering helper uses to find the plugin's two hook widgets. */
+export const THINKING_WIDGET_FLAG = "isThinkingWidget";
+export const TODOS_WIDGET_FLAG = "isTodosWidget";
+
+/**
+ * Keep the live thinking block above the todos widget inside the host's shared hook container. Both
+ * widgets are `aboveEditor`, and the host re-adds them in registration order after every rebuild, so
+ * the order is re-asserted whenever either side (re)mounts.
+ */
+function orderHookWidgets(host: ComposerRuntimeHost): void {
+  const container = host.hookWidgetContainerAbove as { children?: unknown } | undefined;
+  const children = container?.children;
+  if (!Array.isArray(children)) return;
+  const flagged = (child: unknown, flag: string): boolean =>
+    typeof child === "object" && child !== null && (child as Record<string, unknown>)[flag] === true;
+  const thinkingIdx = children.findIndex((child) => flagged(child, THINKING_WIDGET_FLAG));
+  const todosIdx = children.findIndex((child) => flagged(child, TODOS_WIDGET_FLAG));
+  if (thinkingIdx < 0 || todosIdx < 0 || thinkingIdx < todosIdx) return;
+  const [thinking] = children.splice(thinkingIdx, 1);
+  children.splice(todosIdx, 0, thinking);
+}
+
+/**
+ * Re-assert the thinking-above-todos order. The host rebuilds its hook container after every
+ * `setWidget`, i.e. after our factories ran, so both widget render callbacks call this each frame;
+ * the lookup is a couple of indexOf scans, and it no-ops once the order is right.
+ */
+export function ensureThinkingBeforeTodos(tui: unknown): void {
+  const host = runtimeHostFor(tui);
+  if (host) orderHookWidgets(host);
+}
+
+/**
+ * Keep the `aboveEditor` widget container before the status row, with the thinking block above the
+ * todos widget, so the composer stack reads thinking → todos → working status → editor.
+ */
 export function ensureThinkingAboveStatus(tui: unknown): void {
   const host = runtimeHostFor(tui);
   if (!host) return;
+  orderHookWidgets(host);
   if (!(host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE]) {
     const native = host.applyRuntimeChildren;
     const wrapper = (children: readonly unknown[]): void =>
@@ -276,9 +312,11 @@ export class ThinkingWidget {
     const effectiveTheme = theme !== undefined ? theme : tuiOrTheme;
     if (theme !== undefined) this.setTui(tuiOrTheme);
     const c = new Container();
+    (c as Record<string, unknown>)[THINKING_WIDGET_FLAG] = true;
     c.addChild({
       render: (width: number): readonly string[] => {
         if (!this.#deps.owns()) return [];
+        if (this.#tui) ensureThinkingBeforeTodos(this.#tui);
         if (!this.#live) {
           return ["", "", "", ""];
         }

@@ -1032,6 +1032,53 @@ describe("transcript settled thought block rendering", () => {
       expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
     });
 
+    test("orders the thinking block above the todos widget in the shared hook container", async () => {
+      const { ensureThinkingAboveStatus, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } = await import(
+        "./surfaces/thinking-widget.ts"
+      );
+
+      const thinking: Record<string, unknown> = { render: () => ["THINKING"] };
+      thinking[THINKING_WIDGET_FLAG] = true;
+      const todos: Record<string, unknown> = { render: () => ["TODOS"] };
+      todos[TODOS_WIDGET_FLAG] = true;
+      const spacer = { render: () => [""] };
+      const hookAbove = {
+        children: [spacer, todos, thinking] as Array<{ render: (w: number) => readonly string[] }>,
+        render: () => hookAbove.children.flatMap((child) => child.render(80)),
+      };
+      const statusContainer = {
+        mode: undefined as unknown,
+        render: () => ["◈ 12s Working… (esc to interrupt)"],
+      };
+      const chips = { render: (): readonly string[] => [] };
+      const editor = { render: () => ["╭─ prompt ─╮"] };
+      const header = { render: () => ["welcome"] };
+      const statusHost = { setComponent: () => {}, render: () => ["model · git"] };
+      const tui = { children: [] as unknown[], requestRender: () => {} };
+      const composer = {
+        ui: tui,
+        runtime: [] as readonly unknown[],
+        setRuntimeChildren(children: readonly unknown[]) {
+          this.runtime = children;
+          tui.children = [header, ...children, statusHost];
+        },
+        frame(): string[] {
+          return this.runtime.flatMap((root) => (root as { render: (w: number) => readonly string[] }).render(80));
+        },
+      };
+      const mode = { statusContainer, hookWidgetContainerAbove: hookAbove, attachmentChipsContainer: chips, composer };
+      statusContainer.mode = mode;
+      composer.setRuntimeChildren([hookAbove, statusContainer, chips, editor]);
+
+      ensureThinkingAboveStatus(tui);
+
+      // Non-flagged children keep their slot; the two widgets swap into thinking → todos.
+      expect(hookAbove.children[0]).toBe(spacer);
+      expect(hookAbove.children[1]).toBe(thinking);
+      expect(hookAbove.children[2]).toBe(todos);
+      expect(composer.frame().join("\n")).toMatch(/THINKING[\s\S]*TODOS[\s\S]*Working…/);
+    });
+
     test("leaves hosts it cannot identify untouched", async () => {
       const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
       const children = [{ render: () => ["a"] }];
