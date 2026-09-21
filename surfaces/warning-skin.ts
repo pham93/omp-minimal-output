@@ -252,14 +252,37 @@ export function paintAlertLine(
 }
 
 const liveAlerts = new Set<object>();
-let alertLive = false;
+/** Host container each skinned alert was inserted into; drives the newest-block test below. */
+let alertHosts = new WeakMap<object, { children?: unknown }>();
+
+/**
+ * The transcript commits blocks in order: a block that never reports finalized pins the frontier
+ * and no later block is ever written to scrollback. Alerts stay unfinalized (animatable) only
+ * while they are the newest block of their host container — nothing can sit behind them there —
+ * and finalize as soon as any later block arrives so the commit cursor advances again.
+ */
+function alertIsNewest(child: object): boolean {
+  const host = alertHosts.get(child);
+  const children = host?.children;
+  if (!Array.isArray(children) || children.length === 0) return false;
+  return children[children.length - 1] === child;
+}
 
 export function alertSkinActive(): boolean {
-  return alertLive;
+  for (const child of liveAlerts) {
+    if (alertIsNewest(child)) return true;
+  }
+  return false;
 }
 
 export function invalidateLiveAlerts(): void {
   for (const child of liveAlerts) {
+    if (!alertIsNewest(child)) {
+      // No longer the newest block of its container, so it can never pulse again: stop tracking it
+      // instead of rescanning an ever-growing set on every pump tick.
+      liveAlerts.delete(child);
+      continue;
+    }
     const inv = (child as { invalidate?: unknown }).invalidate;
     if (typeof inv === "function") {
       try {
@@ -286,12 +309,12 @@ export function installWarningSkin(ContainerCtor: unknown, deps: WarningSkinDeps
   const interceptor = getContainerInterceptor(ContainerCtor);
   if (!interceptor.isAvailable) return () => {};
 
-  const unregister = interceptor.registerHook((_container, args) => {
+  const unregister = interceptor.registerHook((container, args) => {
     if (deps.active?.() === false) return;
     for (const arg of args) {
       try {
         if (arg && typeof arg === "object" && !skinned.has(arg as object) && isAlertLike(arg)) {
-          skinAlert(arg as object, deps);
+          skinAlert(arg as object, deps, container);
         }
       } catch {
         // One bad child must not break the container.
@@ -306,20 +329,21 @@ export function installWarningSkin(ContainerCtor: unknown, deps: WarningSkinDeps
     if (!active) return;
     active = false;
     liveAlerts.clear();
-    alertLive = false;
+    alertHosts = new WeakMap<object, { children?: unknown }>();
     unregister();
     installed = false;
     skinned = new WeakSet<object>();
   };
 }
 
-function skinAlert(child: object, deps: WarningSkinDeps): void {
+function skinAlert(child: object, deps: WarningSkinDeps, host: unknown): void {
   const c = child as Record<string, unknown> & {
     render?: (width: number) => readonly string[];
     setToolActivityVisible?: (visible: boolean) => void;
     isExpanded?: () => boolean;
   };
   if (typeof c.render !== "function") return;
+  if (host && typeof host === "object") alertHosts.set(child, host as { children?: unknown });
   const origRender = c.render.bind(child);
   let toolActivityVisible = true;
   const origSetToolActivityVisible =
@@ -331,12 +355,15 @@ function skinAlert(child: object, deps: WarningSkinDeps): void {
         return (origSetToolActivityVisible as (v: boolean) => unknown)(visible);
       };
     }
-    // Host: missing isTranscriptBlockFinalized => frozen after first paint.
+    // Host: an alert that never finalizes pins the transcript frontier, so every later block —
+    // including whole assistant messages — is dropped from the live window and never committed.
+    // Keep the pulse while this alert is the newest block (nothing behind it to pin); finalize
+    // once anything follows so scrollback keeps growing.
     (c as Record<string, unknown>)["isTranscriptBlockFinalized"] = function (): boolean {
-      return false;
+      return !alertIsNewest(child);
     };
     (c as Record<string, unknown>)["getTranscriptBlockVersion"] = function (): number {
-      return spinFrame;
+      return alertIsNewest(child) ? spinFrame : 0;
     };
     (c as Record<string, unknown>)["render"] = function (width: number): readonly string[] {
       if (!toolActivityVisible) return [];
@@ -352,7 +379,6 @@ function skinAlert(child: object, deps: WarningSkinDeps): void {
     return;
   }
   if (deps.active?.() === false) return;
-  alertLive = true;
   liveAlerts.add(child);
   try {
     deps.pump?.();

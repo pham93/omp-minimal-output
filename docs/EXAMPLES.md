@@ -262,9 +262,13 @@ Error:
 Collapsed summary (hover/`ctrl+alt+t` expands):
 
 ```text
-  ▸ Todos 2 open, 1 done — shipping SSD docs
-⚠ 1 open todo — finish before stopping
+ ◆ ▸ Todos 2 open, 1 done — shipping SSD docs                             ▸ expand · Ctrl+Alt+T
+ ⚠ 2 incomplete todos - reminder 1/5 ☐ Wire inspect overlay hints ☐ Ship the SSD docs
 ```
+
+The `⚠` row pulses while it is the newest transcript block; as soon as anything follows it the block
+finalizes, so the host commits the row to scrollback (static) instead of pinning the transcript and
+dropping the head of later long answers.
 
 Expanded widget: one checkbox per row — empty for pending (label color unchanged), checked for
 settled, in-between for blocked (`[!]`/`☒`) and dropped (`[-]`/`⊟`) — while the in-progress row keeps
