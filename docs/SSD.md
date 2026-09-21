@@ -32,7 +32,7 @@ Two tool families, two skins:
 - **8 shadows** (`bash`, `read`, `grep`, `glob`, `write`, `edit`, `eval`, `web_search`): re-registered with native schema, delegate via `ctx.invokeTool`, and dispatch all rendering through `CardRegistry`.
 - **2 observed** (`task`, `hub`): stay native. `cards/native-tool-card-skin.ts` observes `ToolExecutionComponent` and projects state. Never copied schema, never replaced approval.
 
-Plus chrome skins: read-group, warning, assistant-commentary, and todo HUD — all subscribed through one `ContainerInterceptor`.
+Plus chrome skins: read-group, warning, assistant-commentary, and todo HUD — all subscribed through one `ContainerInterceptor`. Todo rows use the host theme's checkbox glyphs per status (`todoStatusBox`; ASCII `[x]`/`[ ]`/`[!]`/`[-]` fallback) and the in-progress row keeps its indicator; a settling row holds one tick, then an SGR-9 line is revealed across its label (`TODO_STRIKE_HOLD_MS` + `TODO_STRIKE_REVEAL_MS`, inside the same `TODO_DONE_ANIM_MS` window the pump already tracks).
 
 ## 4. Architecture
 

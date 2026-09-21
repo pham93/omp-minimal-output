@@ -227,12 +227,70 @@ export function todoNeedsPump(
   return todoHasActiveTransition(completingAt, now);
 }
 
-function statusGlyph(s: TodoStatus, anim?: TodoAnim): string {
-  if (s === "done") return "✓";
-  if (s === "active") return anim?.running ? currentIndicatorFrame() : "◐";
-  if (s === "blocked") return "!";
-  if (s === "dropped") return "–";
-  return "○";
+const STRIKE_START = "\x1b[9m";
+const STRIKE_END = "\x1b[29m";
+/** Settling rows hold briefly, then a line sweeps across the label. */
+export const TODO_STRIKE_HOLD_MS = 120;
+export const TODO_STRIKE_REVEAL_MS = TODO_DONE_ANIM_MS - TODO_STRIKE_HOLD_MS;
+
+/** Theme box glyphs (native `checkbox.checked`/`unchecked`) with an ASCII fallback. */
+function checkboxGlyphs(theme: unknown): { checked: string; unchecked: string } {
+  const box = (theme as { checkbox?: { checked?: unknown; unchecked?: unknown } } | undefined)?.checkbox;
+  const checked = typeof box?.checked === "string" && box.checked ? box.checked : "[x]";
+  const unchecked = typeof box?.unchecked === "string" && box.unchecked ? box.unchecked : "[ ]";
+  return { checked, unchecked };
+}
+
+/**
+ * Intermediate box for blocked/dropped rows: the same box with a marker inside it. ASCII boxes carry
+ * the marker in their interior (`[!]`, `[-]`); glyph boxes use their box-family sibling (`☒`, `⊟`),
+ * so a row never mixes families.
+ */
+function intermediateBox(unchecked: string, marker: string, glyph: string): string {
+  const interior = unchecked.indexOf(" ");
+  if (interior < 0) return glyph;
+  return `${unchecked.slice(0, interior)}${marker}${unchecked.slice(interior + 1)}`;
+}
+
+/** The box a row starts with; `active` keeps its indicator instead of a box. */
+export function todoStatusBox(theme: unknown, status: TodoStatus): string {
+  const { checked, unchecked } = checkboxGlyphs(theme);
+  if (status === "done") return checked;
+  if (status === "blocked") return intermediateBox(unchecked, "!", "\u2612");
+  if (status === "dropped") return intermediateBox(unchecked, "-", "\u229f");
+  return unchecked;
+}
+
+function strikeAll(text: string): string {
+  return `${STRIKE_START}${text}${STRIKE_END}`;
+}
+
+/** Struck prefix over the first `count` characters; input is unpainted text. */
+function partialStrike(text: string, count: number): string {
+  if (count <= 0) return text;
+  const chars = [...text];
+  if (count >= chars.length) return strikeAll(text);
+  return `${strikeAll(chars.slice(0, count).join(""))}${chars.slice(count).join("")}`;
+}
+
+/**
+ * Settled rows are struck through. Rows that settled in this frame hold for one tick and then the
+ * line sweeps across the label; settled rows from history are struck whole.
+ */
+function strikeFor(text: string, startedAt: number | undefined, now: number): string {
+  if (startedAt === undefined) return strikeAll(text);
+  const elapsed = Math.max(0, now - startedAt);
+  const reveal = Math.min(1, Math.max(0, (elapsed - TODO_STRIKE_HOLD_MS) / TODO_STRIKE_REVEAL_MS));
+  return partialStrike(text, Math.ceil([...text].length * reveal));
+}
+
+function isStruck(status: TodoStatus): boolean {
+  return status === "done" || status === "dropped";
+}
+
+function statusMark(theme: unknown, status: TodoStatus, anim?: TodoAnim): string {
+  if (status === "active") return anim?.running ? currentIndicatorFrame() : "◐";
+  return todoStatusBox(theme, status);
 }
 
 function itemDetail(item: TodoItem, inPhaseTree: boolean): string {
@@ -258,22 +316,16 @@ export function scanText(
   theme: unknown,
   text: string,
   now: number,
-  opts?: { periodMs?: number; origin?: number; onceMs?: number; baseOpacity?: number },
+  opts?: { periodMs?: number; baseOpacity?: number },
 ): string {
   if (!text) return "";
   const chars = [...text];
   const n = chars.length;
   const window = Math.max(3, Math.min(8, Math.ceil(n * 0.25) + 2));
-  let pos: number;
-  if (opts?.onceMs && opts.origin !== undefined) {
-    const u = Math.min(1, Math.max(0, (now - opts.origin) / opts.onceMs));
-    pos = u * (n + window) - window;
-  } else {
-    const period = Math.max(1, opts?.periodMs ?? TODO_SCAN_PERIOD_MS);
-    const t = ((now % (period * 2)) + period * 2) % (period * 2);
-    const u = t <= period ? t / period : 2 - t / period;
-    pos = u * (n + window) - window;
-  }
+  const period = Math.max(1, opts?.periodMs ?? TODO_SCAN_PERIOD_MS);
+  const t = ((now % (period * 2)) + period * 2) % (period * 2);
+  const u = t <= period ? t / period : 2 - t / period;
+  const pos = u * (n + window) - window;
   let out = "";
   for (let i = 0; i < n; i++) {
     const d = i - pos;
@@ -296,16 +348,14 @@ function paintLabel(
   completingStarted: number | undefined,
 ): string {
   const now = anim?.now ?? 0;
-  if (completingStarted !== undefined && now - completingStarted < TODO_DONE_ANIM_MS) {
-    return scanText(theme, label, now, { origin: completingStarted, onceMs: TODO_DONE_ANIM_MS });
-  }
   if (item.status === "active") {
     return anim?.running ? scanText(theme, label, now, { baseOpacity: 1 }) : paintAt(theme, label, "toolOutput", 1);
   }
-  if (item.status === "done") return paintAt(theme, label, "dim", 0.7);
-  if (item.status === "blocked") return paintAt(theme, label, "warning", 0.85);
-  if (item.status === "dropped") return paintAt(theme, label, "dim", 0.55);
-  return paintAt(theme, label, "toolOutput", 0.75);
+  const body = isStruck(item.status) ? strikeFor(label, completingStarted, now) : label;
+  if (item.status === "done") return paintAt(theme, body, "dim", 0.7);
+  if (item.status === "blocked") return paintAt(theme, body, "warning", 0.85);
+  if (item.status === "dropped") return paintAt(theme, body, "dim", 0.55);
+  return paintAt(theme, body, "toolOutput", 0.75);
 }
 
 export const TODO_TOGGLE_SHORTCUT = "Ctrl+Alt+T";
@@ -368,7 +418,7 @@ export function renderTodoHeader(
       const key = todoItemKey(item);
       const completingStarted = anim?.completingAt?.get?.(key);
       const completing = completingStarted !== undefined && now - completingStarted < TODO_DONE_ANIM_MS;
-      const glyph = completing ? "○" : statusGlyph(item.status, anim);
+      const glyph = statusMark(theme, item.status, anim);
       const branch = phased ? (index === visibleItems.length - 1 ? "╰─" : "├─") : "";
       const plainPrefix = `${taskIndent}${branch ? `${branch} ` : ""}${glyph} `;
       const raw = `${item.label}${itemDetail(item, phased)}`;
@@ -376,7 +426,7 @@ export function renderTodoHeader(
       const glyphPaint = paintAt(
         theme,
         glyph,
-        completing ? "accent" : item.status === "done" ? "success" : item.status === "blocked" ? "warning" : "dim",
+        item.status === "done" ? "success" : item.status === "blocked" ? "warning" : "dim",
         completing || item.status === "active" ? 1 : 0.8,
       );
       const rowStart = branch ? `${taskIndent}${paintAt(theme, branch, "dim", 0.7)} ` : taskIndent;

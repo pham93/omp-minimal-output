@@ -168,6 +168,18 @@ describe("runPluginDemo", () => {
     const lines = (todoComp as { children?: Array<{ render?: (w: number) => unknown }> })?.children?.[0]?.render?.(100);
     expect(Array.isArray(lines)).toBe(true);
 
+    // The fixture must use the plugin's state shape: labels and boxes, never `undefined` rows.
+    const plain = (lines as string[]).map((line) => Bun.stripANSI(line)).join("\n");
+    expect(plain).not.toContain("undefined");
+    expect(plain).toContain("Investigate OMP tool execution background");
+    expect(plain).toContain("Add automated interactive demo command");
+    // Theme-less render falls back to ascii boxes; done rows are struck through.
+    expect(plain).toContain("[x] Investigate OMP tool execution background");
+    expect(plain).toContain("[ ] Wire inspect overlay hints");
+    expect(plain).toContain("[!] Blocked on host affordance");
+    expect(plain).toContain("[-] Dropped styling experiment");
+    expect((lines as string[]).some((line) => line.includes("\x1b[9m"))).toBe(true);
+
     await runPluginDemo(ctx as never, "stop");
     await todoPromise;
 
