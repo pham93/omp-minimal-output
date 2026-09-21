@@ -272,7 +272,7 @@ its `◐` indicator. Settled labels are struck through, revealed by an animated 
 settles.
 
 ```text
-◆  ▾ Todos 2 open, 2 done, 1 blocked                 ▾ collapse · Ctrl+Alt+T
+ ◆ ▾ Todos 2 open, 2 done, 1 blocked                  ▾ collapse · Ctrl+Alt+T
      Diagnosis
      ├─ [x] Investigate tool execution background
      ╰─ [ ] Wire inspect overlay hints

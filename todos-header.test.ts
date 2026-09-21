@@ -130,10 +130,15 @@ describe("todo row painting", () => {
   test("rows share the card content column", async () => {
     const { cardDetailLine } = await import("./cards/card-primitives.ts");
     const contentColumn = Bun.stripANSI(cardDetailLine(BOX_THEME, 100, "detail text")).indexOf("detail text");
-    const header = renderTodoHeader(BOX_THEME, 100, state(), false)[0]!;
-    expect(Bun.stripANSI(header).indexOf("Todos")).toBe(contentColumn);
 
-    // Glyph boxes are one cell wide, so the label lands on the content column too.
+    // The parent row carries its padding before the mark, so the mark is never flush left.
+    const expanded = Bun.stripANSI(renderTodoHeader(BOX_THEME, 100, state(), false)[0]!);
+    const collapsed = Bun.stripANSI(renderTodoHeader(BOX_THEME, 100, state(), true)[0]!);
+    expect(collapsed.startsWith(" ")).toBe(true);
+    expect(expanded.startsWith(" ")).toBe(true);
+    expect(expanded.indexOf("Todos")).toBe(contentColumn);
+
+    // Task labels land on the content column too (glyph boxes are one cell wide).
     const row = renderTodoHeader(BOX_THEME, 100, state(), false).find((line) =>
       Bun.stripANSI(line).includes("Pending item"),
     )!;

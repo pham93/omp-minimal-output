@@ -361,8 +361,8 @@ function paintLabel(
 export const TODO_TOGGLE_SHORTCUT = "Ctrl+Alt+T";
 
 /**
- * One extra column over the plain row indent: todo rows share the card content column (the same
- * column card detail rows and thought rails use), so the widget lines up with every other surface.
+ * Left padding for the widget's parent row: it indents the row *prefix*, so the mark itself carries
+ * the padding and the header text lands on the card content column like every other surface.
  */
 export const TODO_ROW_INDENT = " ";
 
@@ -389,15 +389,17 @@ export function renderTodoHeader(
         : head;
     return [
       formatRowLine(theme, width, {
-        body: `${TODO_ROW_INDENT}${body}`,
+        body,
         right: todoToggleHint(true),
+        indent: TODO_ROW_INDENT,
       }),
     ];
   }
   const rows = [
     formatRowLine(theme, width, {
-      body: `${TODO_ROW_INDENT}${head}`,
+      body: head,
       right: todoToggleHint(false),
+      indent: TODO_ROW_INDENT,
     }),
   ];
   const groups = groupTodoPhases(state.items);
