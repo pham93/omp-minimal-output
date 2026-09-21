@@ -1221,6 +1221,74 @@ test("headless bindings never acquire or tear down the interactive UI", async ()
   }
 });
 
+test("a session shutdown and restart in the same process re-arms the runtime", async () => {
+  type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
+  const handlers = new Map<string, Handler[]>();
+  const widgets = new Map<string, (tui: unknown, theme: unknown) => RenderableComponent>();
+  const tools = new Map<string, WrappedToolDef>();
+  let editor: unknown;
+  const pi = {
+    on(name: string, handler: Handler) {
+      const list = handlers.get(name) ?? [];
+      list.push(handler);
+      handlers.set(name, list);
+    },
+    registerTool: (tool: WrappedToolDef) => tools.set(tool.name, tool),
+    registerCommand: () => {},
+    registerShortcut: () => {},
+    registerMessageRenderer: () => {},
+    registerComposerShape: () => {},
+    registerAssistantThinkingRenderer: () => {},
+    getAllTools: () => [{ name: "grep", parameters: {} }],
+    sendMessage: () => {},
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    hasUI: true,
+    session: {
+      getTodoPhases: () => [{ name: "Work", tasks: [{ content: "Survive the restart", status: "in_progress" }] }],
+    },
+    getContextUsage: () => undefined,
+    ui: {
+      setWidget(key: string, factory: ((tui: unknown, theme: unknown) => RenderableComponent) | undefined) {
+        if (factory) widgets.set(key, factory);
+        else widgets.delete(key);
+      },
+      setEditorComponent(value: unknown) {
+        editor = value;
+      },
+      requestRender: () => {},
+      notify: () => {},
+    },
+  } as unknown as ExtensionContext;
+  const emit = async (name: string, event: unknown = {}) => {
+    for (const handler of [...(handlers.get(name) ?? [])]) await handler(event, ctx);
+  };
+
+  // OMP disposes the session on /resume, /new, and session switches but keeps this extension
+  // generation running; the plugin must come back on the next session instead of staying inert.
+  registerExtension(pi);
+  await emit("session_start");
+  expect(widgets.has("minimal-todos")).toBe(true);
+  expect(typeof editor).toBe("function");
+  expect(tools.has("grep")).toBe(true);
+
+  await emit("session_shutdown");
+  expect(widgets.has("minimal-todos")).toBe(false);
+  expect(editor).toBeUndefined();
+
+  await emit("session_start");
+  expect(widgets.has("minimal-todos")).toBe(true);
+  expect(typeof editor).toBe("function");
+  expect(tools.has("grep")).toBe(true);
+  await emit("session_shutdown");
+
+  // `/resume`-style switches can arrive without a fresh `session_start`; they must recover too.
+  await emit("session_switch");
+  expect(widgets.has("minimal-todos")).toBe(true);
+  expect(typeof editor).toBe("function");
+  await emit("session_shutdown");
+});
+
 test("extension registers all commands and shortcuts on initial load", async () => {
   const { default: registerExtension } = await import("./index.ts");
   const registeredCommands = new Map<string, unknown>();

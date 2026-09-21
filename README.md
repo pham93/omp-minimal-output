@@ -122,7 +122,7 @@ sequenceDiagram
 
 Grouped tools share one parent row (`toolGroups` by fingerprint; lead paints the group, siblings return empty framed blocks). Settled records freeze `label/total/runId` in message details so rebuilds and resumed sessions never mirror a later run; only the current turn's live row follows shared module state.
 
-The interactive extension uses one process-global runtime lease, acquired only when `session_start` reports `hasUI`. Headless subagent, print, and JSON sessions retain native tool behavior and never acquire the lease, install skins/widgets, or mutate the parent's presentation state. A replacement UI session disposes the previous generation's widgets, timer, editor, and interceptor subscribers before activating its own callbacks; wrapped tools are registered afresh for the replacement.
+The interactive extension uses one process-global runtime lease, acquired only when `session_start` reports `hasUI`. Headless subagent, print, and JSON sessions retain native tool behavior and never acquire the lease, install skins/widgets, or mutate the parent's presentation state. A replacement UI session disposes the previous generation's widgets, timer, editor, and interceptor subscribers before activating its own callbacks; wrapped tools are registered afresh for the replacement. `session_shutdown` — which OMP emits for `/resume`, `/new`, and session switches while this generation keeps running — tears down the session-bound surfaces (skins, widgets, editor, pump, trackers) but keeps the lease, and the next `session_start` re-arms them; releasing the lease there would leave every `owns()`-gated handler inert for the rest of the process.
 
 ## Files
 

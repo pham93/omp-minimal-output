@@ -76,7 +76,12 @@ export default function (pi: ExtensionAPI) {
   const commandHandle = registerPluginCommands(pi, ensureActivated);
 
   pi.on("session_start", async (_event, ctx) => {
+    if (!ctx.hasUI) return;
     await ensureActivated(ctx);
+    // A host that disposed a session and started another one in the same process (`/resume`,
+    // `/new`, session switch) must get the runtime rebound: `startSession` is a no-op while the
+    // current session is already bound.
+    await startSession?.(ctx);
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
@@ -242,7 +247,23 @@ export default function (pi: ExtensionAPI) {
         containerInterceptor.dispose();
       };
     }
-    let disposeContainerSkins = installContainerSkins();
+    let disposeContainerSkins: () => void = (): void => {};
+    let skinsArmed = false;
+    /** Install the process-wide container skins for the current generation (idempotent). */
+    function armContainerSkins(): void {
+      if (skinsArmed) return;
+      skinsArmed = true;
+      disposeContainerSkins = installContainerSkins();
+    }
+    /** Tear the skins down; the module-level `installed` flags reset so arming works again. */
+    function disarmContainerSkins(): void {
+      if (!skinsArmed) return;
+      skinsArmed = false;
+      const dispose = disposeContainerSkins;
+      disposeContainerSkins = (): void => {};
+      dispose();
+    }
+    armContainerSkins();
 
     const PUMP_WIDGET_KEY = "minimal-pump";
     function grabTui(ctx: unknown): void {
@@ -283,7 +304,7 @@ export default function (pi: ExtensionAPI) {
       pump.dispose();
       toolWrapper.clear();
       groupedTools.clear();
-      disposeContainerSkins();
+      disarmContainerSkins();
       disposeMinimalPromptEditor();
       disposeMinimalPromptEditor = (): void => {};
     });
@@ -304,12 +325,42 @@ export default function (pi: ExtensionAPI) {
     }
 
     let loaded = false;
+
+    /**
+     * Session-scoped teardown for `session_shutdown`. The host disposes the session on `/resume`,
+     * `/new`, and session switches while this extension generation keeps running in the same
+     * process, so releasing the process-global runtime lease here left every `owns()`-gated handler
+     * silently inert until the process restarted — the plugin "stopped working". Drop the
+     * session-bound surfaces instead; `startSession` re-arms them for the next session.
+     */
+    function teardownSession(): void {
+      disarmContainerSkins();
+      try {
+        disposeMinimalPromptEditor();
+      } catch {
+        // The UI teardown may already have released the editor host.
+      }
+      disposeMinimalPromptEditor = (): void => {};
+      thinkingWidget.setWidget(false);
+      thinkingWidget.resetRegistration();
+      thinkingWidget.reset();
+      todoWidget.setWidget(false);
+      todoWidget.resetSessionState();
+      todoWidget.agentRunning = false;
+      activityTracker.clearRun();
+      groupedTools.clear();
+      pump.clearTimer();
+      sessionContext = undefined;
+      loaded = false;
+    }
+
     async function startSession(ctx: ExtensionContext): Promise<void> {
       if (!runtimeOwner.owns()) return;
       sessionContext = ctx;
       resetNativeToolCardPump();
       if (loaded) return;
       loaded = true;
+      if (enabled) armContainerSkins();
       todoWidget.resetSessionState();
       reloadPluginConfig();
       thinkingWidget.bindUi(ctx);
@@ -349,6 +400,10 @@ export default function (pi: ExtensionAPI) {
 
     api.on("session_switch", async (_event, ctx) => {
       if (!runtimeOwner.owns()) return;
+      // A switch can arrive after the host disposed the previous session (`/resume`), which tore the
+      // session surfaces down; re-run the session binding so the plugin renders again either way.
+      if (!loaded) await startSession(ctx);
+      if (enabled) armContainerSkins();
       sessionContext = ctx;
       todoWidget.agentRunning = false;
       todoWidget.resetSessionState();
@@ -601,18 +656,20 @@ export default function (pi: ExtensionAPI) {
     commandHandle.setDelegates({
       minimalOn: (_ctx) => {
         if (!runtimeOwner.owns()) return;
-        if (!enabled) disposeContainerSkins = installContainerSkins();
+        if (!enabled) armContainerSkins();
         enabled = true;
         activityTracker.clearRun();
-        todoWidget.installWidget();
+        // Thinking registers first: the host appends hook widgets in registration order, so the first
+        // registered widget is the topmost and the stack never needs a render-time reorder.
         thinkingWidget.installWidget();
+        todoWidget.installWidget();
         _ctx.ui.notify("Minimal output enabled", "info");
       },
       minimalOff: (_ctx) => {
         if (!runtimeOwner.owns()) return;
         activityTracker.maybeSendSettledActivity(true);
         enabled = false;
-        disposeContainerSkins();
+        disarmContainerSkins();
         resetNativeToolCardPump();
         activityTracker.clearRun();
         todoWidget.setWidget(false);
@@ -679,7 +736,7 @@ export default function (pi: ExtensionAPI) {
 
     api.on("session_shutdown", async () => {
       if (!runtimeOwner.owns()) return;
-      runtimeOwner.release();
+      teardownSession();
     });
 
     return startSession;
