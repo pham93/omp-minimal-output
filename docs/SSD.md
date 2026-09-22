@@ -12,7 +12,7 @@ Display-only output skin for `omp`. Same tools, same execution. Smaller rows.
 
 - One settled row per tool call (`◆` one-liner + duration) dispatched by `CardRegistry`.
 - `Ctrl+O` (`app.tools.expand`) reveals details globally. `/inspect` (`ctrl+alt+i`) outlines one replica card. No per-row click path — renderers are display-only.
-- Live reasoning streams in the widget above the editor; `hideThinkingBlock: true` (default in `minimal-output.yml`) hides the native thinking block and suppresses settled thought rows. Spillovers go to `$TMPDIR/omp-minimal-*.log`.
+- Live reasoning streams in the widget above the editor; `hideThinkingBlock: true` (default in `minimal-output.yml`) hides every thought surface: the native thinking block, the settled `Thought` row and its detail block, and the live widget's text. Spillovers go to `$TMPDIR/omp-minimal-*.log`.
 
 Out of scope: changing what any tool does, its schema, approvals, or result data.
 
@@ -87,7 +87,7 @@ sequenceDiagram
     Note over Core,Reg: Ctrl+O expands
 ```
 
-Live rows pulse `◈ → ◉ → ◎ → ○` at 120 ms. Settled rows use the configured indicator (`◆` default); web search, Task, Hub settle to `●`. Errors use the error token. Thought and thinking rows (`formatSettledThought`, `thinkingRailLines`, `animatedThinkingRailLines`) are built from `cardDetailLine` via `thoughtRailLine`: one rail prefix (`THOUGHT_RAIL_PREFIX`) puts the rail and text on the card content column, and the `dim` token at the configured `opacity` paints them — the animated widget passes its per-line fade as the row opacity, the commentary skin passes the live theme.
+Live rows pulse `◈ → ◉ → ◎ → ○` at 120 ms. Every settled row takes its mark from the `indicator` setting (`◆` for `diamond`, `●` for `dot`, none for `none`) — grouped tools, Task, Hub and web-search included. No card hardcodes a mark. Detail rows and child blocks share one content column (`CARD_CONTENT_PREFIX`), with `CARD_CONTINUATION_PREFIX` for a non-last grouped row. Errors use the error token. Thought and thinking rows (`formatSettledThought`, `thinkingRailLines`, `animatedThinkingRailLines`) are built from `cardDetailLine` via `thoughtRailLine`: one rail prefix (`THOUGHT_RAIL_PREFIX`) puts the rail on the card content column with the text one cell past it, and the `dim` token paints them at the configured `opacity`, with header rows (including the `Thought` and todo parent rows) at the `headerOpacity` setting — the animated widget passes its per-line fade as the row opacity, the commentary skin passes the live theme.
 
 `CardRegistry.render` throws a native-fallback error when the plugin is disabled, a `native*` setting wins, or an adapter throws; OMP's host renderer catches construction/deferred errors and restores native output. Returning a falsy component would instead suppress the transcript, so the registry never does that. Renderers are resolved when a row is built: live rows re-style on the next frame after `/minimal-on`, but rows constructed while the plugin was off keep native rendering until the transcript is rebuilt (`/reload`, `/resume`, restart) — the accompanying `Tool renderer failed … native rendering required` warning is that expected signal.
 

@@ -4,7 +4,7 @@ Grok-build-style minimal console output for omp. Collapsed rows use theme-derive
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 
-Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools retain a settled `●` indicator. Trailing blank output rows are removed; interior blanks and source indentation are preserved. Each execution owns its output allowance; parent/tool headers and omission hints do not consume content lines or hide later tool headers. Piped bash and eval output without TTY colors (`git diff`, `bun test`) is semantically colored: additions and passes in success, deletions and failures in error, hunk headers in accent. Existing ANSI from a PTY or `--color=always` passes through.
+Generic grouped tools keep output indented beneath each tool, with continuation rails only between sibling tools. Unlabeled tools settle to the configured `indicator`. Trailing blank output rows are removed; interior blanks and source indentation are preserved. Each execution owns its output allowance; parent/tool headers and omission hints do not consume content lines or hide later tool headers. Piped bash and eval output without TTY colors (`git diff`, `bun test`) is semantically colored: additions and passes in success, deletions and failures in error, hunk headers in accent. Existing ANSI from a PTY or `--color=always` passes through.
 
 Install: `omp install ./omp-minimal-output` (or `--extension ./omp-minimal-output/index.ts --config ./omp-minimal-output/minimal-output.yml`).
 
@@ -57,7 +57,7 @@ flowchart LR
     rc --> exec["shadow execute\nctx.invokeTool → native"]
     exec --> tend["tool_execution_end"]
     tend --> tr["tool_result → collapseToolText"]
-    tr --> rr["shadow renderResult\nconfigured mark; web search ●"]
+    tr --> rr["shadow renderResult\nconfigured indicator mark"]
     commentary["provider commentary phase"] -.-> status["single AI status parent\ntool card/group is child"]
     intent["literal tool arg i"] -.-> status
     status -.-> settle["tool result\nsettled outcome"]
@@ -73,9 +73,9 @@ The literal tool argument `i` is never discarded. Generic wrapped tools (`bash`,
 
 The sticky Todo widget is the single Todo surface after a successful widget mount. Its native transcript card is suppressed only while that widget is active; headless, disabled, or failed widget mounts retain the transcript card as the safe fallback.
 
-Live reasoning streams in the animated widget above the composer (placed above the AI working status message); `registerAssistantThinkingRenderer` is supplemental-only. In the transcript, the thought block is hidden while live; once settled, with `hideThinkingBlock: true` (the shipped `minimal-output.yml`), it displays a single line (`Thought` with duration), and with `hideThinkingBlock: false`, it displays the thought block with the bounded latest lines. Thought and thinking rows are composed through `cards/card-primitives.ts` (`thoughtRailLine`), so the rail sits on the card content column and the text uses the card `dim` token at the configured `opacity`. Spill files land in `$TMPDIR/omp-minimal-*.log`.
+Live reasoning streams in the animated widget above the composer (placed above the AI working status message); `registerAssistantThinkingRenderer` is supplemental-only. `hideThinkingBlock: true` (the shipped `minimal-output.yml`) hides every thought surface: the transcript row, the settled block, and the live widget's text (the widget keeps its 4-row slot so the composer does not jump). With `hideThinkingBlock: false`, the transcript shows a `Thought` row with its duration followed by the bounded latest lines, and the widget streams the live reasoning. Thought and thinking rows are composed through `cards/card-primitives.ts` (`thoughtRailLine`), so the rail sits on the card content column and the text uses the card `dim` token at the configured `opacity`. Spill files land in `$TMPDIR/omp-minimal-*.log`.
 
-Pulse: working rows cycle `◈ → ◉ → ◎ → ○` at 120 ms via managed `ctx.setInterval` while a tool runs. General rows settle to the configured indicator; web search settles to `●` and uses the error token on failure. `/minimal-off` mid-run stops the pump immediately. `minimal-output.yml` (`shimmer: disabled`, `showProgress: false`) is untouched.
+Headers (card titles, group headers, the todo and thought rows) paint at `headerOpacity` (default 0.9) while detail and body rows use `opacity`, so a header reads above its own rows. Pulse: working rows cycle `◈ → ◉ → ◎ → ○` at 120 ms via managed `ctx.setInterval` while a tool runs. Every settled row — grouped tools, Task, Hub and web search included — uses the configured `indicator`; web search uses the error token on failure. `/minimal-off` mid-run stops the pump immediately. `minimal-output.yml` (`shimmer: disabled`, `showProgress: false`) is untouched.
 
 Background & padding: `Container` is a passthrough and `Text` paints no fill unless given a custom bg fn (never called here). Tool execution wrappers and read groups enforce `setBgFn(undefined)` and a consistent 1-character horizontal padding (`setPaddingX(1)`), keeping output readable, aligned, and free of rectangular background fills (`toolSuccessBg`/`toolErrorBg`) even when OMP re-applies `stateBgFn`.
 

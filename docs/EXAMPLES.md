@@ -3,7 +3,7 @@
 Schematic row shapes per card. Color/paint omitted — structure only; spacing and omission counts vary with content and terminal width.
 
 > Design rationale lives in [`SSD.md`](SSD.md). The implemented detail-level contract lives in [`DETAIL_LEVELS.md`](DETAIL_LEVELS.md). Usage lives in [`../README.md`](../README.md).
-> `◈◉◎○` = running spin. `◆` = settled shadow row. `●` = settled Task / Hub / web-search / read-group row. Red = error.
+> `◈◉◎○` = running spin. `◆` = settled row, painted with the configured `indicator` (diamond shown here; `dot` renders `●`, `none` renders no mark) — every card follows the setting, grouped tools included. Red = error.
 > `Ctrl+O` toggles collapsed ↔ expanded globally; `/inspect` outlines one replica card. `detailedMaxRows` (default 20) counts content per section/file or complete structured items, excluding headers and hints. No per-row click.
 
 ## Bash
@@ -53,14 +53,14 @@ Write shows the latest content lines (`standardWriteMaxRows` in Standard) with a
 Grouped reads (native group skinned):
 
 ```text
-● Read 3 files
+◆ Read 3 files
   ├─ src/index.ts
   ├─ src/theme.ts
   ╰─ src/text.ts
 ```
 
 ```text
-● Read src/index.ts
+◆ Read src/index.ts
 ```
 
 A single grouped read collapses to one row. Standard selects `standardMaxRows` file entries; Detailed/Ctrl+O select `detailedMaxRows` entries. The group header and `… N more files` summary are additional rows.
@@ -68,7 +68,7 @@ A single grouped read collapses to one row. Standard selects `standardMaxRows` f
 Grouped reads (native group skinned):
 
 ```text
-● Read 3 files
+◆ Read 3 files
   ├─ src/index.ts
   ├─ src/theme.ts
   ╰─ src/text.ts
@@ -89,7 +89,7 @@ Grouped reads (native group skinned):
 ◆ Glob `src/**/*.ts` — 12 files
 ```
 
-LSP, AST-grep, and Debug keep their native Standard/Detailed rendering. Their opaque rendered rows do not expose reliable input/output boundaries, so the plugin does not guess which rows are headers:
+LSP, AST-grep, and Debug keep their native Standard/Detailed rendering. Their opaque rendered rows do not expose reliable input/output boundaries, so the plugin does not guess which rows are headers. These tools have no card: their rows come from the rewritten result text, so the leading `◆` is literal and does not follow the `indicator` setting.
 
 ```text
 ◆ Lsp references foo.ts — 8 results
@@ -173,13 +173,13 @@ Running:
 Collapsed:
 
 ```text
-● Search `Oh My Pi coding agent` — 3 sources      via gallery
+◆ Search `Oh My Pi coding agent` — 3 sources      via gallery
 ```
 
 Expanded (bounded by `webSearchMaxResults`, default 5):
 
 ```text
-● Search `Oh My Pi coding agent` — 3 sources      via gallery
+◆ Search `Oh My Pi coding agent` — 3 sources      via gallery
   ╰─ Oh My Pi documentation
      https://ohmy-pi.dev/docs
   ╰─ Provider API reference
@@ -190,7 +190,7 @@ Overflow / error:
 
 ```text
   ╰─ … 1 more source
-● Search `Oh My Pi coding agent` — failed
+◆ Search `Oh My Pi coding agent` — failed
   ╰─ Search request failed
 ```
 
@@ -205,15 +205,15 @@ Running:
 Collapsed:
 
 ```text
-● Task 5 agents — completed                        4.8s
-● Task 5 agents — mixed: 4 completed · 1 failed    5.1s
-● Task agent implementer — failed                  0.8s
+◆ Task 5 agents — completed                        4.8s
+◆ Task 5 agents — mixed: 4 completed · 1 failed    5.1s
+◆ Task agent implementer — failed                  0.8s
 ```
 
 Expanded (bounded by `taskMaxAgents`, default 4):
 
 ```text
-● Task 5 agents — completed                        4.8s
+◆ Task 5 agents — completed                        4.8s
   ╰─ researcher — completed
      task: Task card fixture 1
      output: Completed researcher fixture
@@ -234,16 +234,16 @@ Error row inside:
 Collapsed:
 
 ```text
-● Hub list — 2 peers
-● Hub send Reviewer — 1 delivered
-● Hub jobs — 6 jobs
-● Hub send Reviewer — failed
+◆ Hub list — 2 peers
+◆ Hub send Reviewer — 1 delivered
+◆ Hub jobs — 6 jobs
+◆ Hub send Reviewer — failed
 ```
 
 Expanded (bounded by `hubMaxItems`, default 5):
 
 ```text
-● Hub jobs — 6 jobs
+◆ Hub jobs — 6 jobs
   ╰─ job job-1 — completed
      Hub fixture 1
   ╰─ … 1 more item
@@ -252,7 +252,7 @@ Expanded (bounded by `hubMaxItems`, default 5):
 Error:
 
 ```text
-● Hub send Reviewer — failed
+◆ Hub send Reviewer — failed
   ╰─ receipt Reviewer — failed
      Peer is unavailable
 ```
