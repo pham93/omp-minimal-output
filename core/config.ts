@@ -270,6 +270,14 @@ let testOverride = false;
 
 export function loadPluginConfig(): PluginConfig {
   if (testOverride && cache) return cache;
+  // Tests must never read the developer's own lockfile or project overrides: a local setting would
+  // silently change what they assert. Tests pin what they need via `setPluginConfigForTest`, and
+  // `setPluginConfigForTest(null)` therefore means "plugin defaults", not "this machine's config".
+  if (process.env.NODE_ENV === "test") {
+    const defaults: PluginConfig = { ...DEFAULT_CONFIG };
+    cache = defaults;
+    return defaults;
+  }
   try {
     let cfg: PluginConfig = { ...DEFAULT_CONFIG };
     const lockRaw = readSettingsLayer(lockfilePath());

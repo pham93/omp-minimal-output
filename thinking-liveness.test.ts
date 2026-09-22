@@ -583,6 +583,8 @@ describe("thinking widget 4-line placeholder above editor", () => {
 
 describe("transcript settled thought block rendering", () => {
   test("renders settled thought block in group when thinking block is enabled", async () => {
+    // The repo's own minimal-output.yml hides thinking; this test covers the enabled path.
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, hideThinkingBlock: false });
     type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
     const eventHandlers = new Map<string, EventHandler[]>();
     interface WrappedToolDef {
@@ -689,6 +691,7 @@ describe("transcript settled thought block rendering", () => {
     }
   });
 
+    setPluginConfigForTest(null);
   test("when hideThinkingBlock is true, settled thought renders exactly 1 line (Thought with duration)", async () => {
     type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
     const eventHandlers = new Map<string, EventHandler[]>();
