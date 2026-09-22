@@ -11,6 +11,7 @@
 //   4. ErrorBanner: dismiss caption or shipped class name
 // Ctrl+O: TTSR isExpanded() → original render. Todo has no expand.
 
+import { getPluginConfig } from "../core/config.ts";
 import { truncatePlain } from "../core/text.ts";
 import { spinFrame, stripSgr, themeBgRgb, themeTokenRgb } from "../core/theme.ts";
 import { getContainerInterceptor } from "../core/container-interceptor.ts";
@@ -230,7 +231,8 @@ export function warningPulseStep(): number {
   return Math.floor(spinFrame / WARNING_PULSE_STEPS) % 2;
 }
 export function warningIconFrame(theme: unknown): string {
-  const dim = warningPulseStep() === 1;
+  // The pulse is this row's indicator, so `indicatorAnimation: false` holds it on the bright frame.
+  const dim = getPluginConfig().indicatorAnimation !== false && warningPulseStep() === 1;
   return alertPaint(theme, "⚠", ALERT_KIND.warning, dim ? 0.6 : 1);
 }
 
@@ -361,9 +363,6 @@ function skinAlert(child: object, deps: WarningSkinDeps, host: unknown): void {
     // once anything follows so scrollback keeps growing.
     (c as Record<string, unknown>)["isTranscriptBlockFinalized"] = function (): boolean {
       return !alertIsNewest(child);
-    };
-    (c as Record<string, unknown>)["getTranscriptBlockVersion"] = function (): number {
-      return alertIsNewest(child) ? spinFrame : 0;
     };
     (c as Record<string, unknown>)["render"] = function (width: number): readonly string[] {
       if (!toolActivityVisible) return [];
