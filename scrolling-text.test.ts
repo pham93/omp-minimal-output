@@ -278,8 +278,10 @@ describe("formatSettledThought", () => {
       const [thought] = formatSettledThought("thought text", { maxLines: 5, width: 80 });
       const card = cardDetailLine(null, 80, "detail text");
 
-      // The rail sits on the card content column: text starts where card detail text starts.
-      expect(Bun.stripANSI(thought!).indexOf("thought text")).toBe(Bun.stripANSI(card).indexOf("detail text"));
+      // The rail — the block's left edge — sits on the card content column, text one cell past it.
+      const railColumn = Bun.stripANSI(thought!).indexOf("│");
+      expect(railColumn).toBe(Bun.stripANSI(card).indexOf("detail text"));
+      expect(Bun.stripANSI(thought!).indexOf("thought text")).toBe(railColumn + 2);
       // The row is painted by the card primitive: same token, same configured opacity.
       expect(sgrTail(thought!)).toBe(sgrTail(card));
       expect(sgrTail(thought!)).not.toBe("");

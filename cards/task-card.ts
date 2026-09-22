@@ -1,16 +1,6 @@
 // Display-only projection of native Task tool state. Execution and native schemas stay in Oh My Pi.
 import { Container } from "@oh-my-pi/pi-tui";
-import {
-  cardDetailLine,
-  cardLifecycle,
-  cardTitleLine,
-  compactCardText,
-  conciseErrorText,
-  minimalCardHeaderLine,
-  parentCardHeaderLines,
-  resultDetails,
-  type ParentCardLabel,
-} from "./card-primitives.ts";
+import { cardDetailLine, cardLifecycle, cardTitleLine, compactCardText, conciseErrorText, minimalCardHeaderLine, parentCardHeaderLines, resultDetails, type ParentCardLabel, } from "./card-primitives.ts";
 import { detailedRowLimit } from "../core/density.ts";
 import { getPluginConfig } from "../core/config.ts";
 import { markFlush } from "../core/loaders.ts";
@@ -264,7 +254,6 @@ export function renderTaskCardLines(
         lifecycle,
         right: data.duration,
         fingerprint,
-        settledMark: "●",
         parentLabel,
       }),
     ];
@@ -274,7 +263,6 @@ export function renderTaskCardLines(
     lifecycle,
     right: data.duration,
     fingerprint,
-    settledMark: "●",
     parentLabel,
   });
   if (data.rows.length === 0 && lifecycle.error) {

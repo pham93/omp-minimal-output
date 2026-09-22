@@ -40,7 +40,7 @@ export function paintReadGroupLines(
       `${prefix}${formatRowLine(theme, innerWidth, {
         body: entries.length === 1 ? `Read ${only.path}` : `Read ${entries.length} files`,
         live: anyPending,
-        mark: anyPending ? undefined : "●",
+        mark: undefined,
         error: entries.some((entry) => entry.error),
       })}`,
     ];
@@ -50,7 +50,7 @@ export function paintReadGroupLines(
     `${prefix}${formatRowLine(theme, innerWidth, {
       body: `Read ${entries.length} files`,
       live: anyPending,
-      mark: anyPending ? undefined : "●",
+      mark: undefined,
       error: anyError,
     })}`,
   ];

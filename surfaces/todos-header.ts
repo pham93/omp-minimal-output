@@ -3,6 +3,7 @@
 // formatRowLine (theme.ts) and truncatePlain (text.ts).
 import { currentIndicatorFrame, formatRowLine, paintAt, paintBold, LINE_WIDTH_RATIO } from "../core/theme.ts";
 import { capRenderedRows, detailedRowLimit } from "../core/density.ts";
+import { getPluginConfig } from "../core/config.ts";
 import { truncatePlain } from "../core/text.ts";
 
 export type TodoStatus = "done" | "active" | "open" | "blocked" | "dropped";
@@ -348,14 +349,17 @@ function paintLabel(
   completingStarted: number | undefined,
 ): string {
   const now = anim?.now ?? 0;
+  // Row text opacity comes from the `opacity` setting; the status is carried by the box glyph and
+  // the token, not by a per-status opacity constant.
+  const op = getPluginConfig().opacity;
   if (item.status === "active") {
-    return anim?.running ? scanText(theme, label, now, { baseOpacity: 1 }) : paintAt(theme, label, "toolOutput", 1);
+    return anim?.running ? scanText(theme, label, now, { baseOpacity: op }) : paintAt(theme, label, "toolOutput", op);
   }
   const body = isStruck(item.status) ? strikeFor(label, completingStarted, now) : label;
-  if (item.status === "done") return paintAt(theme, body, "dim", 0.7);
-  if (item.status === "blocked") return paintAt(theme, body, "warning", 0.85);
-  if (item.status === "dropped") return paintAt(theme, body, "dim", 0.55);
-  return paintAt(theme, body, "toolOutput", 0.75);
+  if (item.status === "done") return paintAt(theme, body, "dim", op);
+  if (item.status === "blocked") return paintAt(theme, body, "warning", op);
+  if (item.status === "dropped") return paintAt(theme, body, "dim", op);
+  return paintAt(theme, body, "toolOutput", op);
 }
 
 export const TODO_TOGGLE_SHORTCUT = "Ctrl+Alt+T";
@@ -392,6 +396,7 @@ export function renderTodoHeader(
         body,
         right: todoToggleHint(true),
         indent: TODO_ROW_INDENT,
+        header: true,
       }),
     ];
   }
@@ -400,6 +405,7 @@ export function renderTodoHeader(
       body: head,
       right: todoToggleHint(false),
       indent: TODO_ROW_INDENT,
+      header: true,
     }),
   ];
   const groups = groupTodoPhases(state.items);

@@ -7,17 +7,10 @@ import {
   minimalToolSummary,
   type DetailProfile,
 } from "../core/density.ts";
-import { formatRowLine, elapsedSuffix, paintAt, TOOL_INDENT } from "../core/theme.ts";
+import { formatRowLine, elapsedSuffix, paintAt } from "../core/theme.ts";
 import { markFlush } from "../core/loaders.ts";
 import { highlightCell, languageForPath } from "./edit-card.ts";
-import {
-  cardDetailLine,
-  cardIsPartial,
-  colorizeConsoleLine,
-  renderImagePlaceholderBox,
-  stashedOrResultText,
-  type ImagePlaceholderMeta,
-} from "./card-primitives.ts";
+import { cardDetailLine, cardIsPartial, colorizeConsoleLine, renderImagePlaceholderBox, stashedOrResultText, type ImagePlaceholderMeta, CARD_CONTENT_PREFIX, CARD_CONTINUATION_PREFIX, } from "./card-primitives.ts";
 import { formatSettledThought } from "../surfaces/scrolling-text.ts";
 import { thinkingRailLines } from "../surfaces/thinking-widget.ts";
 import { durationSuffix, isToolError } from "../core/results.ts";
@@ -144,7 +137,7 @@ export class GroupedToolManager {
               error: anyError,
               fadeKey: `act:${gid}`,
               right: headerLive ? elapsedSuffix(this.#deps.activityStartedAt()) : "",
-              mark: headerLive ? undefined : "●",
+              header: true,
             }),
           ];
         }
@@ -156,7 +149,7 @@ export class GroupedToolManager {
               live: headerLive,
               fadeKey: `act:${gid}`,
               right: headerLive ? elapsedSuffix(this.#deps.activityStartedAt()) : "",
-              mark: headerLive ? undefined : "●",
+              header: true,
             }),
           );
         }
@@ -167,6 +160,8 @@ export class GroupedToolManager {
           const live = this.#deps.rowIsLive(row.fp);
           const isThought = row.fp.startsWith("thought:");
           if (isThought && live) continue;
+          // `hideThinkingBlock` hides the whole thought surface, not only its detail lines.
+          if (isThought && isHideThinkingBlock(sessionCtx)) continue;
           const isLastTool = idx === rows.length - 1;
           const rowLine = formatRowLine(theme, width, {
             body: row.body,
@@ -176,22 +171,21 @@ export class GroupedToolManager {
             error: row.error,
             fadeKey: row.fp,
             right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
-            mark: isStandalone && !live ? "●" : undefined,
+            header: isStandalone,
           });
           lines.push(rowLine);
           if (isThought) {
-            if (!isHideThinkingBlock(sessionCtx)) {
-              const rawThought = typeof row.detail === "string" && row.detail ? row.detail : row.details.join("\n");
-              const thoughtLines = formatSettledThought(rawThought, {
+            const rawThought = typeof row.detail === "string" && row.detail ? row.detail : row.details.join("\n");
+            lines.push(
+              ...formatSettledThought(rawThought, {
                 maxLines: thoughtRowLimit(profile),
                 width,
                 theme,
-              });
-              lines.push(...thoughtLines);
-            }
+              }),
+            );
             continue;
           }
-          const detailPrefix = isStandalone || isLastTool ? `${TOOL_INDENT}   ` : "│    ";
+          const detailPrefix = isStandalone || isLastTool ? CARD_CONTENT_PREFIX : CARD_CONTINUATION_PREFIX;
           const rowProfile = typeof row.detail === "object" ? row.detail : profile;
           const visibleDetails = Math.min(row.details.length, outputRowLimit(rowProfile));
           for (let detailIndex = 0; detailIndex < visibleDetails; detailIndex += 1) {

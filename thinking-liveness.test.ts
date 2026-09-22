@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { DEFAULT_CONFIG, indicatorSettled, setPluginConfigForTest } from "./core/config.ts";
 
 /*
  * Thinking row liveness tests.
@@ -53,8 +54,10 @@ describe("thought row formatting", () => {
     try {
       const card = cardDetailLine(null, 80, "thought text");
       const [rail] = thinkingRailLines(null, 80, "thought text");
-      // Same content column as a card detail row...
-      expect(Bun.stripANSI(rail!).indexOf("thought text")).toBe(Bun.stripANSI(card).indexOf("thought text"));
+      // The rail sits on the same content column as a card detail row, text one cell past it...
+      const contentColumn = Bun.stripANSI(rail!).indexOf("│");
+      expect(contentColumn).toBe(Bun.stripANSI(card).indexOf("thought text"));
+      expect(Bun.stripANSI(rail!).indexOf("thought text")).toBe(contentColumn + 2);
       // ...and the same paint for the same text (same token and configured opacity).
       expect(sgrTail(rail!)).toBe(sgrTail(card));
 
@@ -100,6 +103,8 @@ describe("thought row formatting", () => {
   });
 
   test("live tool row with mid tree has animated indicator that cycles", () => {
+    // Pin the indicator: the resolved config otherwise follows this machine's lockfile.
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, indicator: "diamond" });
     setSpinFrame(0);
     const line0 = Bun.stripANSI(
       formatRowLine(null, 80, {
@@ -126,6 +131,8 @@ describe("thought row formatting", () => {
 
 describe("thought lines during subsequent thinking", () => {
   test("past thought rows and group headers do not animate when assistant is thinking", async () => {
+    // Pin the indicator: the resolved config otherwise follows this machine's lockfile.
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, indicator: "diamond" });
     type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
     const eventHandlers = new Map<string, EventHandler[]>();
     const tools = new Map<string, WrappedToolDef>();
@@ -241,7 +248,8 @@ describe("thought lines during subsequent thinking", () => {
 
     // Re-render group after tool finishes and settles
     const settledLines = groupRender!(80).map((l: string) => Bun.stripANSI(l));
-    expect(settledLines[0]).toContain("●");
+    // Settled rows take the configured indicator, not a hardcoded glyph.
+    expect(settledLines[0]).toContain(indicatorSettled());
     expect(settledLines[0]).toContain("Search topBorder in pi-coding-agent src");
     const settledThought = settledLines.find((l: string) => l.includes("Thought"));
     expect(settledThought).toBeDefined();
@@ -259,7 +267,7 @@ describe("thought lines during subsequent thinking", () => {
     // In the PREVIOUS group in the transcript:
     setSpinFrame(1);
     const linesDuringNewThinking = groupRender!(80).map((l: string) => Bun.stripANSI(l));
-    expect(linesDuringNewThinking[0]).toContain("●");
+    expect(linesDuringNewThinking[0]).toContain(indicatorSettled());
     expect(linesDuringNewThinking[0]).not.toMatch(/[◈◉◎○]/);
 
     // 2. The thought line in the previous group MUST NOT animate or become live!
@@ -287,7 +295,7 @@ describe("thought lines during subsequent thinking", () => {
     };
     const standalone = renderResult("standalone", "  first\n\n    second\n  \n", "history-standalone");
     const standaloneRows = standalone(80).map(Bun.stripANSI);
-    expect(standaloneRows[0]).toMatch(/^● /);
+    expect(standaloneRows[0]!.startsWith(`${indicatorSettled()} `)).toBe(true);
     expect(standaloneRows.slice(1)).toEqual(["       first", "     ", "         second"]);
     expect(standaloneRows).toHaveLength(4);
 
@@ -311,7 +319,7 @@ describe("thought lines during subsequent thinking", () => {
     const grouped = renderResult("first", "first output", "history-group", "Inspecting sources");
     renderResult("second", "second output", "history-group", "Inspecting sources");
     const groupedRows = grouped(80).map(Bun.stripANSI);
-    expect(groupedRows[0]).toMatch(/^● /);
+    expect(groupedRows[0]!.startsWith(`${indicatorSettled()} `)).toBe(true);
     expect(groupedRows[1]).toMatch(/^├─ /);
     expect(groupedRows[2]).toBe("│    first output");
     expect(groupedRows[3]).toMatch(/^╰─ /);
@@ -330,6 +338,9 @@ describe("thought lines during subsequent thinking", () => {
 
 describe("thinking widget 4-line placeholder above editor", () => {
   test("always reserves 4 lines whether idle or thinking to prevent composer jumping", async () => {
+    const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
+    // The repo's own minimal-output.yml hides thinking, so the visible path must be requested.
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, hideThinkingBlock: false });
     type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
     const eventHandlers = new Map<string, EventHandler[]>();
     const widgets = new Map<
@@ -371,6 +382,8 @@ describe("thinking widget 4-line placeholder above editor", () => {
         notify: () => {},
         setEditorComponent: () => {},
       },
+      // The repo's own minimal-output.yml hides thinking; this test covers the visible path.
+      hideThinkingBlock: false,
     } as unknown as ExtensionContext;
 
     registerExtension(fakePi);
@@ -421,9 +434,10 @@ describe("thinking widget 4-line placeholder above editor", () => {
     const stoppedLines = stoppedContainer.children[0]?.render?.(80);
     expect(stoppedLines).toEqual(["", "", "", ""]);
     expect(stoppedLines).toHaveLength(4);
+    setPluginConfigForTest(null);
   });
 
-  test("thinking widget above composer is still present even when hideThinkingBlock is true", async () => {
+  test("thinking widget reserves its 4-line slot but renders no thought text when hideThinkingBlock is true", async () => {
     type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
     const eventHandlers = new Map<string, EventHandler[]>();
     const widgets = new Map<
@@ -497,11 +511,8 @@ describe("thinking widget 4-line placeholder above editor", () => {
 
     const liveContainer = thinkingWidget!.factory(null, null) as unknown as MockContainer;
     const liveLines = liveContainer.children[0]?.render?.(80) ?? [];
-    expect(liveLines).toHaveLength(4);
-    expect(Bun.stripANSI(liveLines[0])).toContain("Thinking...");
-    expect(Bun.stripANSI(liveLines[1])).toContain("│");
-    expect(Bun.stripANSI(liveLines[2])).toContain("│");
-    expect(Bun.stripANSI(liveLines[3])).toContain("│");
+    // Height is still reserved, but hidden thinking renders no text at all.
+    expect(liveLines).toEqual(["", "", "", ""]);
   });
 
   test("a host widget wipe does not orphan the thinking widget across a session switch", async () => {
@@ -765,9 +776,8 @@ describe("transcript settled thought block rendering", () => {
     expect(groupRender).toBeDefined();
     const renderedLines = groupRender!(80).map((l: string) => Bun.stripANSI(l));
 
-    // Contains Thought header with duration
-    const thoughtRow = renderedLines.find((l: string) => l.includes("Thought"));
-    expect(thoughtRow).toBeDefined();
+    // With hideThinkingBlock: true the whole thought surface is hidden: no header, no details.
+    expect(renderedLines.some((l: string) => l.includes("Thought"))).toBe(false);
 
     // With hideThinkingBlock: true, must NOT contain any thought detail lines or previous lines hint
     expect(renderedLines.some((l: string) => l.includes("previous lines"))).toBe(false);
@@ -861,7 +871,7 @@ describe("transcript settled thought block rendering", () => {
       ],
     });
 
-    setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.4 });
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.4, hideThinkingBlock: false });
     try {
       const raw = component.render(80).join("\n");
       // Token [200,100,50] at rest opacity 0.4 over the dark background.
@@ -915,9 +925,8 @@ describe("transcript settled thought block rendering", () => {
     });
 
     const rendered = component.render(80).map((l: string) => Bun.stripANSI(l));
-    // Contains Thought header with duration
-    expect(rendered.some((l: string) => l.includes("Thought"))).toBe(true);
-    expect(rendered.some((l: string) => l.includes("(15s)"))).toBe(true);
+    expect(rendered.some((l: string) => l.includes("Thought"))).toBe(false);
+    expect(rendered.some((l: string) => l.includes("(15s)"))).toBe(false);
     // Does NOT contain any thought detail lines or previous lines hint
     expect(rendered.some((l: string) => l.includes("previous lines"))).toBe(false);
     expect(rendered.some((l: string) => l.includes("Standalone thought"))).toBe(false);
@@ -1180,6 +1189,8 @@ test("headless bindings never acquire or tear down the interactive UI", async ()
     } as unknown as ExtensionAPI;
     const ctx = {
       hasUI,
+      // The repo's own minimal-output.yml hides thinking; this host renders the visible path.
+      hideThinkingBlock: false,
       session: {
         getTodoPhases: () => [{ name: "Work", tasks: [{ content: "Keep parent alive", status: "in_progress" }] }],
       },
@@ -1242,7 +1253,7 @@ test("headless bindings never acquire or tear down the interactive UI", async ()
       { pattern: "parent replay" },
     ) as unknown as MockContainer;
     expect(transcript.children[0]!.render!(80).map(Bun.stripANSI)).toEqual([
-      "● Search `parent replay`",
+      indicatorSettled() + " Search `parent replay`",
       "     parent output",
     ]);
     await parent.emit("message_update", {

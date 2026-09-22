@@ -2,19 +2,7 @@
 // owns only structured result reading and transcript presentation.
 import { Container } from "@oh-my-pi/pi-tui";
 import { getPluginConfig } from "../core/config.ts";
-import {
-  cardDetailLine,
-  cardHeaderLine,
-  cardLifecycle,
-  cardTitleLine,
-  compactCardText,
-  conciseErrorText,
-  minimalCardHeaderLine,
-  parentCardHeaderLines,
-  resultDetails,
-  stashedOrResultText,
-  type ParentCardLabel,
-} from "./card-primitives.ts";
+import { cardDetailLine, cardHeaderLine, cardLifecycle, cardTitleLine, compactCardText, conciseErrorText, minimalCardHeaderLine, parentCardHeaderLines, resultDetails, stashedOrResultText, type ParentCardLabel, } from "./card-primitives.ts";
 import { detailedRowLimit } from "../core/density.ts";
 import { markFlush } from "../core/loaders.ts";
 import { searchPatternText } from "../core/text.ts";
@@ -99,7 +87,6 @@ export function renderWebSearchCard(
                 lifecycle,
                 right,
                 fingerprint: fp,
-                settledMark: "●",
                 parentLabel,
               }),
             ];
@@ -109,7 +96,6 @@ export function renderWebSearchCard(
             lifecycle,
             right,
             fingerprint: fp,
-            settledMark: "●",
             parentLabel,
           });
           if (lifecycle.running) return lines;
@@ -138,7 +124,7 @@ export function renderWebSearchCard(
           }
           return lines;
         } catch {
-          return [cardHeaderLine(theme, width, { body, lifecycle, settledMark: "●" })];
+          return [cardHeaderLine(theme, width, { body, lifecycle })];
         }
       },
     });
@@ -149,7 +135,7 @@ export function renderWebSearchCard(
     const c = new Container();
     c.addChild({
       render: (width: number): readonly string[] => [
-        cardHeaderLine(theme, width, { body: "Search", lifecycle: errorLifecycle, settledMark: "●" }),
+        cardHeaderLine(theme, width, { body: "Search", lifecycle: errorLifecycle,  }),
       ],
     });
     markFlush?.(c);

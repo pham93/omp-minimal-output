@@ -11,6 +11,8 @@ export const THOUGHT_WIDGET_KEY = "minimal-thinking";
 export interface ThinkingWidgetDeps {
   owns: () => boolean;
   activityRunId: () => string | null;
+  /** Whether the host hides thinking blocks. The widget then renders no thought text. */
+  hideThinking?: () => boolean;
   onSyncThought?: (
     fp: string,
     thought: { body: string; live: boolean; right: string; startedAt: number; detail?: string },
@@ -336,12 +338,17 @@ export class ThinkingWidget {
         if (!this.#live) {
           return ["", "", "", ""];
         }
+        if (this.#deps.hideThinking?.() === true) {
+          // Thinking is hidden: keep the reserved height, render no thought text.
+          return ["", "", "", ""];
+        }
         const lines: string[] = [
           formatRowLine(effectiveTheme, width, {
             body: "Thinking...",
             live: true,
             fadeKey: this.thoughtFadeKey(),
             right: this.#startedAt > 0 ? elapsedSuffix(this.#startedAt) : "",
+            header: true,
           }),
         ];
         lines.push(...this.animatedThinkingRailLines(effectiveTheme, width, this.#text));

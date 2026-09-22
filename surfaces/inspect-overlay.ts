@@ -4,12 +4,7 @@ import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { visibleWidth, type TUI } from "@oh-my-pi/pi-tui";
 import * as PiTui from "@oh-my-pi/pi-tui";
 import { CARD_RENDER_PHASE, CardRegistry } from "../cards/card-registry.ts";
-import {
-  cardDetailLine,
-  colorizeConsoleLine,
-  renderImagePlaceholderBox,
-  stashedOrResultText,
-} from "../cards/card-primitives.ts";
+import { cardDetailLine, colorizeConsoleLine, renderImagePlaceholderBox, stashedOrResultText, } from "../cards/card-primitives.ts";
 import { extractImageMeta, formatSearchDetails, GroupedToolManager } from "../cards/grouped-tool-card.ts";
 import { renderHubCardLines } from "../cards/hub-card.ts";
 import { renderTaskCardLines } from "../cards/task-card.ts";
@@ -155,7 +150,7 @@ function trimBlankEdges(lines: readonly string[]): string[] {
 }
 
 function fallbackLines(theme: unknown, item: InspectToolItem): string[] {
-  return [paintAt(theme, `● ${toolActionLabel(item.toolName, item.args)}`, "dim", 1)];
+  return [paintAt(theme, `${toolActionLabel(item.toolName, item.args)}`, "dim", 1)];
 }
 
 function searchPattern(args: unknown): string {
@@ -184,7 +179,6 @@ function paintGroupedInspect(
     error,
     fadeKey: item.id,
     right: durationSuffix(item.result),
-    mark: "●",
   });
   if (minimized && !expanded) return [header];
   if (profile.minimal && !expanded) return [header];
@@ -260,7 +254,6 @@ function paintToolCard(
       error: isToolError(item.result),
       fadeKey: item.id,
       right: durationSuffix(item.result),
-      mark: "●",
     });
     return [header];
   }

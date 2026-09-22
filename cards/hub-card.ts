@@ -1,16 +1,6 @@
 // Display-only projection of native Hub tool state. Execution and approval stay in Oh My Pi.
 import { Container } from "@oh-my-pi/pi-tui";
-import {
-  cardDetailLine,
-  cardLifecycle,
-  cardTitleLine,
-  compactCardText,
-  conciseErrorText,
-  minimalCardHeaderLine,
-  parentCardHeaderLines,
-  resultDetails,
-  type ParentCardLabel,
-} from "./card-primitives.ts";
+import { cardDetailLine, cardLifecycle, cardTitleLine, compactCardText, conciseErrorText, minimalCardHeaderLine, parentCardHeaderLines, resultDetails, type ParentCardLabel, } from "./card-primitives.ts";
 import { detailedRowLimit } from "../core/density.ts";
 import { getPluginConfig } from "../core/config.ts";
 import { markFlush } from "../core/loaders.ts";
@@ -354,7 +344,6 @@ export function renderHubCardLines(
         body,
         lifecycle,
         fingerprint,
-        settledMark: "●",
         parentLabel,
       }),
     ];
@@ -363,7 +352,6 @@ export function renderHubCardLines(
     body,
     lifecycle,
     fingerprint,
-    settledMark: "●",
     parentLabel,
   });
   if (data.rows.length === 0 && lifecycle.error) {

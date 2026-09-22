@@ -145,6 +145,7 @@ export function cardHeaderLine(theme: unknown, width: number, options: CardHeade
     right: options.right,
     fadeKey: options.fingerprint,
     mark: options.lifecycle.running || settling ? undefined : options.settledMark,
+    header: true,
   });
 }
 
@@ -185,11 +186,16 @@ export function cardTitleLine(theme: unknown, width: number, title: string, erro
   return formatRowLine(theme, width, { body: title, indent: true, tree: "last", error });
 }
 
+/** The one content column for card detail rows and child blocks. */
+export const CARD_CONTENT_PREFIX = `${TOOL_INDENT}   `;
+/** Continuation rail for a non-last grouped row's details; same width as the content column. */
+export const CARD_CONTINUATION_PREFIX = "│    ";
+
 export function cardDetailLine(
   theme: unknown,
   width: number,
   text: string,
-  prefix = `${TOOL_INDENT}   `,
+  prefix = CARD_CONTENT_PREFIX,
   error = false,
   opacity = getPluginConfig().opacity,
 ): string {
@@ -205,8 +211,8 @@ export function cardDetailLine(
   return `${prefixPainted}${paintAt(theme, truncated, error ? "error" : "dim", opacity)}`;
 }
 
-/** Rail prefix for thought/thinking rows: the rail sits on the card content column. */
-export const THOUGHT_RAIL_PREFIX = `${TOOL_INDENT} │ `;
+/** Rail prefix for thought/thinking child blocks: the rail sits on the card content column. */
+export const THOUGHT_RAIL_PREFIX = `${CARD_CONTENT_PREFIX}│ `;
 
 /**
  * One thought/thinking rail row. Composed through {@link cardDetailLine} so the block inherits the

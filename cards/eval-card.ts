@@ -8,20 +8,12 @@
 // running. Core re-invokes renderResult with partial results (`isPartial`);
 // Ctrl+O uses the configured Detailed content-row ceiling.
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
-import {
-  cardLifecycle,
-  colorizeConsoleLine,
-  minimalCardHeaderLine,
-  parentCardHeaderLines,
-  resolveParentCardLabel,
-  type ParentCardLabel,
-} from "./card-primitives.ts";
+import { cardLifecycle, colorizeConsoleLine, minimalCardHeaderLine, parentCardHeaderLines, resolveParentCardLabel, type ParentCardLabel, CARD_CONTENT_PREFIX, } from "./card-primitives.ts";
 import { inputRowLimit, outputRowLimit } from "../core/density.ts";
 import { markFlush } from "../core/loaders.ts";
 import { durationSuffix, isToolError, toolResultText } from "../core/results.ts";
 import {
   LINE_WIDTH_RATIO,
-  TOOL_INDENT,
   dimAnsi,
   elapsedSuffix,
   formatRowLine,
@@ -37,7 +29,7 @@ import { highlightCell } from "./edit-card.ts";
 // density.ts; headers, rules, and hints sit outside those allowances.
 
 function contentWidth(width: number): number {
-  return Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - TOOL_INDENT.length);
+  return Math.max(1, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - CARD_CONTENT_PREFIX.length);
 }
 
 // Scanning divider pulse: width in dashes, step cadence in ms.
@@ -163,7 +155,6 @@ export function renderEvalCard(
                 lifecycle,
                 right,
                 fingerprint: fp,
-                settledMark: "●",
                 parentLabel,
               }),
             ];
@@ -174,7 +165,6 @@ export function renderEvalCard(
             lifecycle,
             right,
             fingerprint: fp,
-            settledMark: "●",
             parentLabel,
           });
           const w = contentWidth(width);
@@ -183,37 +173,37 @@ export function renderEvalCard(
             const cellText = dimAnsi(theme, highlightCell(line, cell.language), op);
             lines.push(
               stripSgr(line).trim()
-                ? `${TOOL_INDENT}${paintAt(theme, truncatePlain(cellText, w), "toolOutput", op)}`
+                ? `${CARD_CONTENT_PREFIX}${paintAt(theme, truncatePlain(cellText, w), "toolOutput", op)}`
                 : "",
             );
           }
           if (inputMore > 0) {
-            lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${inputMore} more input lines)`, "dim", op)}`);
+            lines.push(`${CARD_CONTENT_PREFIX}${paintAt(theme, `… (${inputMore} more input lines)`, "dim", op)}`);
           }
           if (result !== undefined && (output.length > 0 || more > 0 || error)) {
             if (input.length > 0) {
               const sepLabel = `── ${error ? "error" : "output"} `;
-              const sepFill = Math.max(2, w - TOOL_INDENT.length - visibleWidth(sepLabel));
-              lines.push(`${TOOL_INDENT}${paintRule(theme, sepLabel, sepFill, running, op)}`);
+              const sepFill = Math.max(2, w - CARD_CONTENT_PREFIX.length - visibleWidth(sepLabel));
+              lines.push(`${CARD_CONTENT_PREFIX}${paintRule(theme, sepLabel, sepFill, running, op)}`);
             }
             if (error) {
               for (const line of errorLines) {
-                lines.push(`${TOOL_INDENT}${paintAt(theme, truncatePlain(line, w), "error", 1)}`);
+                lines.push(`${CARD_CONTENT_PREFIX}${paintAt(theme, truncatePlain(line, w), "error", 1)}`);
               }
             } else {
               if (earlierHint && more > 0) {
-                lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${more} earlier lines)`, "dim", op)}`);
+                lines.push(`${CARD_CONTENT_PREFIX}${paintAt(theme, `… (${more} earlier lines)`, "dim", op)}`);
               }
               for (const line of output) {
                 const cellText = dimAnsi(theme, colorizeConsoleLine(theme, line), op);
                 lines.push(
                   stripSgr(line).trim()
-                    ? `${TOOL_INDENT}${paintAt(theme, truncatePlain(cellText, w), "toolOutput", op)}`
+                    ? `${CARD_CONTENT_PREFIX}${paintAt(theme, truncatePlain(cellText, w), "toolOutput", op)}`
                     : "",
                 );
               }
               if (!earlierHint && more > 0) {
-                lines.push(`${TOOL_INDENT}${paintAt(theme, `… (${more} more lines)`, "dim", op)}`);
+                lines.push(`${CARD_CONTENT_PREFIX}${paintAt(theme, `… (${more} more lines)`, "dim", op)}`);
               }
             }
           }

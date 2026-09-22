@@ -219,6 +219,8 @@ function createThoughtSlot(target: object, deps: AssistantCommentarySkinDeps): {
     },
     render(width: number): readonly string[] {
       if (!state.thinkingText || state.live) return [];
+      // `hideThinkingBlock` hides the thought block everywhere, not just its detail lines.
+      if (isHideThinkingBlock(target)) return [];
       const cfg = getPluginConfig();
       const profile = detailProfile(state.options, cfg);
       const maxLines = thoughtRowLimit(profile, cfg);
@@ -229,17 +231,14 @@ function createThoughtSlot(target: object, deps: AssistantCommentarySkinDeps): {
           body: "Thought",
           right: duration,
           live: false,
+          header: true,
+        }),
+        ...formatSettledThought(state.thinkingText, {
+          maxLines,
+          width,
+          theme,
         }),
       ];
-      if (!isHideThinkingBlock(target)) {
-        lines.push(
-          ...formatSettledThought(state.thinkingText, {
-            maxLines,
-            width,
-            theme,
-          }),
-        );
-      }
       return lines;
     },
   };

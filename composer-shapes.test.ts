@@ -452,6 +452,8 @@ describe("colorful docks preserve theme colors", () => {
   });
 
   test("live run prefixes spinner and elapsed ahead of project", () => {
+    // Pin the indicator: the resolved config otherwise follows this machine's lockfile.
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, indicator: "diamond" });
     composer.updateMinimalPromptEditorProviders(
       () => undefined,
       () => undefined,

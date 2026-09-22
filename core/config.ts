@@ -51,6 +51,8 @@ export type DetailLevel = (typeof DETAIL_LEVEL)[keyof typeof DETAIL_LEVEL];
 
 export interface PluginConfig extends WrappedToolSettings {
   opacity: number;
+  /** Opacity for header rows (card titles, group headers, todo/thought rows). */
+  headerOpacity: number;
   indicator: IndicatorId;
   indicatorAnimation: boolean;
   detailLevel: DetailLevel;
@@ -78,6 +80,7 @@ export interface PluginConfig extends WrappedToolSettings {
 
 export const DEFAULT_CONFIG: PluginConfig = {
   opacity: 0.5,
+  headerOpacity: 0.9,
   indicator: "diamond",
   indicatorAnimation: true,
   detailLevel: DETAIL_LEVEL.standard,
@@ -157,6 +160,13 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         const v = src[key];
         if (typeof v === "number" && Number.isFinite(v)) {
           next.opacity = Math.min(1, Math.max(0, v));
+        }
+        continue;
+      }
+      if (key === "headerOpacity") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.headerOpacity = Math.min(1, Math.max(0, v));
         }
         continue;
       }
@@ -255,8 +265,11 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
 }
 
 let cache: PluginConfig | null = null;
+/** While a test override is installed, reloads keep it instead of re-reading the machine's files. */
+let testOverride = false;
 
 export function loadPluginConfig(): PluginConfig {
+  if (testOverride && cache) return cache;
   try {
     let cfg: PluginConfig = { ...DEFAULT_CONFIG };
     const lockRaw = readSettingsLayer(lockfilePath());
@@ -321,6 +334,7 @@ export function maybeReloadConfig(now = Date.now(), force = false): void {
 
 export function setPluginConfigForTest(cfg: PluginConfig | null): void {
   cache = cfg;
+  testOverride = cfg !== null;
 }
 export function isWrappedTool(name: string): name is WrappedTool {
   return Object.prototype.hasOwnProperty.call(WRAPPED_TOOL_REGISTRY, name);

@@ -85,11 +85,16 @@ describe("todo status boxes", () => {
 });
 
 describe("todo row painting", () => {
-  test("pending rows keep the unchanged label color", () => {
-    const rows = render(BOX_THEME);
-    const pending = rows.find((row) => row.includes("Pending item"));
-    expect(pending).toBeDefined();
-    expect(pending!.endsWith(paintAt(BOX_THEME, "Pending item", "toolOutput", 0.75))).toBe(true);
+  test("pending rows keep the unchanged label color at the configured opacity", () => {
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.75 });
+    try {
+      const rows = render(BOX_THEME);
+      const pending = rows.find((row) => row.includes("Pending item"));
+      expect(pending).toBeDefined();
+      expect(pending!.endsWith(paintAt(BOX_THEME, "Pending item", "toolOutput", 0.75))).toBe(true);
+    } finally {
+      setPluginConfigForTest(null);
+    }
   });
 
   test("historical settled rows are struck through without an animation", () => {

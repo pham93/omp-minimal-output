@@ -31,7 +31,12 @@ export const SETTLE_MS = 500;
 
 export const TOOL_INDENT = "  ";
 
-export const LINE_WIDTH_RATIO = 0.95;
+/**
+ * Row width as a fraction of the terminal. The host draws its own rows at the full width (banners,
+ * composer borders) without wrapping, so plugin rows can use the whole width too; 0.98 keeps one
+ * cell of slack if a terminal's last-column handling turns out to be strict.
+ */
+export const LINE_WIDTH_RATIO = 0.98;
 
 export const settleAt = new Map<string, number>();
 
@@ -300,8 +305,13 @@ export function pruneFades(now: number): void {
 
 // Start a fade only for a row that is appearing now. A missing key on a
 // settled/historical row means rest opacity — never treat it as a new fade.
-export function rowOpacity(live: boolean, fadeKey: string | undefined): number {
-  const rest = getPluginConfig().opacity;
+/** Rest opacity for a row: header rows use `headerOpacity`, detail rows use `opacity`. */
+export function rowRestOpacity(header: boolean): number {
+  const cfg = getPluginConfig();
+  return header ? cfg.headerOpacity : cfg.opacity;
+}
+
+export function rowOpacity(live: boolean, fadeKey: string | undefined, rest = getPluginConfig().opacity): number {
   if (!fadeKey) return rest;
   const existing = textFades.get(fadeKey);
   if (existing !== undefined) return fadeOpacity(rest, existing);
@@ -339,12 +349,14 @@ export function formatRowLine(
     fadeKey?: string;
     tree?: "mid" | "last";
     mark?: string;
+    /** Marks the row as a header: painted at the `headerOpacity` setting. */
+    header?: boolean;
   },
 ): string {
   const live = opts.live === true;
   const settling = !live && opts.fadeKey !== undefined && isSettling(opts.fadeKey);
   const spin = live || settling;
-  const op = rowOpacity(live, opts.fadeKey);
+  const op = rowOpacity(live, opts.fadeKey, rowRestOpacity(opts.header === true));
   const markToken = spin ? "accent" : opts.error ? "error" : "success";
   const cfg = getPluginConfig();
   const settled = indicatorSettled(cfg);

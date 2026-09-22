@@ -3,18 +3,13 @@
 
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import { isAbsolute, relative } from "node:path";
-import {
-  cardLifecycle,
-  minimalCardHeaderLine,
-  resolveParentCardLabel,
-  type ParentCardLabel,
-} from "./card-primitives.ts";
+import { cardLifecycle, minimalCardHeaderLine, resolveParentCardLabel, type ParentCardLabel, CARD_CONTENT_PREFIX, } from "./card-primitives.ts";
 import { diffStat, parsePipeDiff, parseUnifiedDiff, selectPrettyRows } from "../core/filters.ts";
 import type { PrettyRow } from "../core/filters.ts";
 import { markFlush } from "../core/loaders.ts";
 import { detailedRowLimit, detailProfile, standardEditRowsPerFile } from "../core/density.ts";
 import { durationSuffix, isToolError, toolResultText } from "../core/results.ts";
-import { LINE_WIDTH_RATIO, TOOL_INDENT, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "../core/theme.ts";
+import { LINE_WIDTH_RATIO, formatRowLine, paintAt, themeBgRgb, themeTokenRgb } from "../core/theme.ts";
 import { shortPathText, showWhitespace, truncatePlain } from "../core/text.ts";
 import { getPluginConfig } from "../core/config.ts";
 
@@ -146,7 +141,7 @@ function editParentStatus(parentLabel: ParentCardLabel | undefined): string {
   return label ? label.charAt(0).toUpperCase() + label.slice(1) : "";
 }
 
-const EDIT_FILE_INDENT = `${TOOL_INDENT}   `;
+const EDIT_FILE_INDENT = CARD_CONTENT_PREFIX;
 
 export interface PrettyEditSection {
   path: string;
@@ -341,7 +336,7 @@ export function renderPrettyEditCard(
                   right: live ? "" : data.right,
                 }),
               ];
-          const childIndent = parent ? EDIT_FILE_INDENT : TOOL_INDENT;
+          const childIndent = CARD_CONTENT_PREFIX;
           if (live || error) {
             if (error) {
               const errorWidth = Math.max(
