@@ -1,8 +1,12 @@
-// Pure string filters for omp-minimal-output. Zero dependencies.
+// Pure string filters for omp-minimal-output. No external dependencies; the only import is the
+// config lookup that supplies the settled one-liner's mark.
 //
-// Contract: line 1 of every rewritten text is the `◆` settled one-liner
+// Contract: line 1 of every rewritten text is the settled one-liner (prefixed with the mark the
+// `indicator` setting resolves to)
 // (the transcript's collapsed row); filtered details follow from line 2,
 // so ENTER expands a row to details and collapses back to the one-liner.
+
+import { indicatorSettled } from "./config.ts";
 
 export interface CollapseResult {
   text: string;
@@ -17,6 +21,11 @@ export const MAX_LINES = 200;
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const ERROR_RE = /error|fail|✗|×|panic|assert|exception|traceback|denied|blocked/i;
+
+/** Settled one-liner prefix: the configured `indicator` mark, so these rows follow the setting. */
+function settledPrefix(): string {
+  return `${indicatorSettled()} `;
+}
 
 function shortCommandText(cmd: string): string {
   const oneLine = cmd.replace(/\s+/g, " ").trim();
@@ -78,7 +87,7 @@ function aggregateTestOutput(text: string, shortCmd: string): { oneLiner: string
     passed !== undefined || failed !== undefined ? `Tests: ${passed ?? 0} passed, ${failed ?? 0} failed` : "done";
   const details = [...failures, ...summary].filter((l, i, a) => l.trim() && a.indexOf(l) === i);
   return {
-    oneLiner: `◆ ${shortCmd} — ${counts}`,
+    oneLiner: `${settledPrefix()}${shortCmd} — ${counts}`,
     details: details.join("\n"),
   };
 }
@@ -92,7 +101,7 @@ function filterBuildOutput(text: string, shortCmd: string): { oneLiner: string; 
   const tail = lines.slice(-5);
   const details = [...head, ...problems, ...tail].filter((l, i, a) => a.indexOf(l) === i);
   const summary = problems.length > 0 ? `${errors} errors, ${warnings} warnings` : `clean (${lines.length} lines)`;
-  return { oneLiner: `◆ ${shortCmd} — ${summary}`, details: details.join("\n") };
+  return { oneLiner: `${settledPrefix()}${shortCmd} — ${summary}`, details: details.join("\n") };
 }
 
 function compactGitOutput(text: string, cmd: string, shortCmd: string): { oneLiner: string; details: string } {
@@ -100,13 +109,13 @@ function compactGitOutput(text: string, cmd: string, shortCmd: string): { oneLin
   const kept = lines.filter((l) => !/^(@@|[+-][^+-])/.test(l));
   const stat = lines.find((l) => /files? changed/i.test(l))?.trim() ?? `${kept.length} lines`;
   const sub = (cmd.trim().split(/\s+/)[1] ?? "").replace(/[^a-z-]/gi, "") || "output";
-  return { oneLiner: `◆ git ${sub} — ${stat}`, details: kept.join("\n") };
+  return { oneLiner: `${settledPrefix()}git ${sub} — ${stat}`, details: kept.join("\n") };
 }
 
 function aggregateLinterOutput(text: string, shortCmd: string): { oneLiner: string; details: string } {
   const problems = text.split("\n").filter((l) => ERROR_RE.test(l));
   return {
-    oneLiner: `◆ ${shortCmd} — ${problems.length} problems`,
+    oneLiner: `${settledPrefix()}${shortCmd} — ${problems.length} problems`,
     details: problems.join("\n"),
   };
 }
@@ -133,7 +142,7 @@ function groupSearchResults(text: string, pattern: string): { oneLiner: string; 
     details.push(...first);
   }
   return {
-    oneLiner: `◆ Search ${label} — ${groups.size} files, ${hits} hits`,
+    oneLiner: `${settledPrefix()}Search ${label} — ${groups.size} files, ${hits} hits`,
     details: details.join("\n"),
   };
 }
@@ -217,7 +226,7 @@ function collapseMcpText(toolName: string, stripped: string): { oneLiner: string
       });
       return {
         oneLiner:
-          parts.length > 0 ? `◇ ${title} — ${parsed.length} items: ${parts.join("; ")}` : `◇ ${title} — 0 items`,
+          parts.length > 0 ? `${settledPrefix()}${title} — ${parsed.length} items: ${parts.join("; ")}` : `${settledPrefix()}${title} — 0 items`,
         details: "",
       };
     }
@@ -228,12 +237,12 @@ function collapseMcpText(toolName: string, stripped: string): { oneLiner: string
         const flat = sv.replace(/\s+/g, " ").trim();
         return `${k}: ${flat.length > 160 ? `${flat.slice(0, 160)}…` : flat}`;
       });
-      return { oneLiner: lines.length > 0 ? `◇ ${title} — ${lines.join("; ")}` : `◇ ${title}`, details: "" };
+      return { oneLiner: lines.length > 0 ? `${settledPrefix()}${title} — ${lines.join("; ")}` : `${settledPrefix()}${title}`, details: "" };
     }
   } catch {
     // fall through to plain text below
   }
-  return { oneLiner: `◇ ${title}`, details: stripped };
+  return { oneLiner: `${settledPrefix()}${title}`, details: stripped };
 }
 export interface DiffStat {
   added: number;
@@ -464,7 +473,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     const moveSuffix = moveOne ? ` → ${moveOne.length > 80 ? `${moveOne.slice(0, 80)}…` : moveOne}` : "";
     const stat = diffStat(strippedEdit);
     const statSuffix = stat.added === 0 && stat.removed === 0 ? "" : ` — +${stat.added}/−${stat.removed}`;
-    const oneLiner = `◆ ${verb} ${short}${moveSuffix}${statSuffix}`;
+    const oneLiner = `${settledPrefix()}${verb} ${short}${moveSuffix}${statSuffix}`;
     rulesEdit.push("edit");
     const capped = truncateDetails(strippedEdit);
     if (capped.truncated) rulesEdit.push("truncate");
@@ -504,7 +513,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
       details = r.details;
       rules.push("linter");
     } else {
-      oneLiner = `◆ ${short}`;
+      oneLiner = `${settledPrefix()}${short}`;
       details = text;
     }
   } else if (toolName === "read") {
@@ -514,11 +523,11 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
       const slash = rest.indexOf("/");
       const name = slash === -1 ? rest : rest.slice(0, slash);
       const tail = slash === -1 ? "SKILL.md" : rest.slice(slash + 1) || "SKILL.md";
-      oneLiner = `◆ Skill ${name} — ${tail}`;
+      oneLiner = `${settledPrefix()}Skill ${name} — ${tail}`;
     } else {
       const one = p.replace(/\s+/g, " ").trim();
       const short = one.length > 80 ? `${one.slice(0, 80)}…` : one || "file";
-      oneLiner = `◆ Read ${short}`;
+      oneLiner = `${settledPrefix()}Read ${short}`;
     }
     rules.push("read");
   } else if (toolName === "write") {
@@ -530,7 +539,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
           : "file";
     const one = p.replace(/\s+/g, " ").trim();
     const short = one.length > 80 ? `${one.slice(0, 80)}…` : one || "file";
-    oneLiner = `◆ Write ${short}`;
+    oneLiner = `${settledPrefix()}Write ${short}`;
     rules.push("write");
   } else if (toolName === "grep") {
     const raw = fields["pattern"] ?? fields["query"] ?? "";
@@ -541,7 +550,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
       details = grouped.details;
       rules.push("grep");
     } else {
-      oneLiner = `◆ Search${pattern ? ` \`${pattern}\`` : ""}`;
+      oneLiner = `${settledPrefix()}Search${pattern ? ` \`${pattern}\`` : ""}`;
       rules.push("grep");
     }
   } else if (toolName === "ast_grep") {
@@ -552,7 +561,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
       oneLiner = grouped.oneLiner;
       details = grouped.details;
     } else {
-      oneLiner = `◆ Search${pattern ? ` \`${pattern}\`` : ""}`;
+      oneLiner = `${settledPrefix()}Search${pattern ? ` \`${pattern}\`` : ""}`;
     }
     rules.push("ast_grep");
   } else if (toolName === "lsp") {
@@ -560,11 +569,11 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     const pat = strField(fields, "pattern", "query", "path", "file");
     const grouped = groupSearchResults(stripped, pat || action);
     if (grouped) {
-      oneLiner = grouped.oneLiner.replace(/^◆ Search/, action ? `◆ Lsp ${action}` : "◆ Lsp");
+      oneLiner = grouped.oneLiner.replace(/^◆ Search/, action ? `${settledPrefix()}Lsp ${action}` : "◆ Lsp");
     } else {
       const base = baseName(strField(fields, "file", "path"));
       const label = `${action ? ` ${action}` : ""}${base ? ` ${base}` : ""}`.trim();
-      oneLiner = label ? `◆ Lsp ${label}` : "◆ Lsp";
+      oneLiner = label ? `${settledPrefix()}Lsp ${label}` : "◆ Lsp";
     }
     rules.push("lsp");
   } else if (toolName === "glob") {
@@ -575,7 +584,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     const raw = fields["pattern"] ?? fields["query"] ?? fields["path"] ?? "";
     const pattern = typeof raw === "string" ? raw : "";
     const files = stripped.split("\n").filter((l) => l.trim());
-    oneLiner = pattern ? `◆ Glob \`${pattern}\` — ${files.length} files` : `◆ Glob — ${files.length} files`;
+    oneLiner = pattern ? `${settledPrefix()}Glob \`${pattern}\` — ${files.length} files` : `${settledPrefix()}Glob — ${files.length} files`;
     rules.push("glob");
   } else if (toolName === "eval") {
     // Mirrors text.ts evalCell/labels; filters.ts stays dependency-free.
@@ -619,27 +628,27 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
         label = "Eval";
       }
     }
-    oneLiner = `◆ ${label}`;
+    oneLiner = `${settledPrefix()}${label}`;
     rules.push("eval");
   } else if (toolName === "task") {
     const who = strField(fields, "agent", "name");
     const what = singleLine(strField(fields, "task", "prompt", "description"), 80);
-    oneLiner = `◆ Task${who ? ` ${who}` : ""}${what ? ` — ${what}` : ""}`.trim() || "◆ Task";
+    oneLiner = `${settledPrefix()}Task${who ? ` ${who}` : ""}${what ? ` — ${what}` : ""}`.trim() || "◆ Task";
     rules.push("task");
   } else if (toolName === "hub") {
     const op = strField(fields, "op", "action");
     const tail = tailField(fields, "to", "name", "ids");
-    oneLiner = `◆ Hub${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || "◆ Hub";
+    oneLiner = `${settledPrefix()}Hub${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || "◆ Hub";
     rules.push("hub");
   } else if (toolName === "debug") {
     const action = strField(fields, "action", "op");
     const target = singleLine(strField(fields, "target", "file", "path", "command", "program", "expression"), 60);
-    oneLiner = `◆ Debug${action ? ` ${action}` : ""}${target ? ` ${target}` : ""}`.trim() || "◆ Debug";
+    oneLiner = `${settledPrefix()}Debug${action ? ` ${action}` : ""}${target ? ` ${target}` : ""}`.trim() || "◆ Debug";
     rules.push("debug");
   } else if (toolName === "github") {
     const op = strField(fields, "op", "action");
     const tail = singleLine(strField(fields, "repo", "query", "path", "url"), 60);
-    oneLiner = `◆ Github${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || "◆ Github";
+    oneLiner = `${settledPrefix()}Github${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || "◆ Github";
     rules.push("github");
   } else if (toolName === "web_search") {
     const q = singleLine(strField(fields, "query", "pattern", "q"), 80);
@@ -647,51 +656,51 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     const lines = stripped.split("\n").filter((l) => l.trim());
     const sources = lines.filter((l) => /^[-*] /.test(l.trim()) || /^https?:\/\//.test(l.trim())).length;
     if (sources > 0) counts = ` — ${sources} sources`;
-    oneLiner = `◆ Search${q ? ` \`${q}\`` : ""}${counts}`;
+    oneLiner = `${settledPrefix()}Search${q ? ` \`${q}\`` : ""}${counts}`;
     rules.push("web_search");
   } else if (toolName === "checkpoint") {
     const instr = strField(fields, "message", "summary", "label", "text", "checkpoint", "id");
     const first = singleLine((instr || String(input ?? "")).split("\n")[0] ?? "", 60);
-    oneLiner = first ? `◆ Checkpoint ${first}` : "◆ Checkpoint";
+    oneLiner = first ? `${settledPrefix()}Checkpoint ${first}` : "◆ Checkpoint";
     rules.push("checkpoint");
   } else if (toolName === "rewind") {
     const tail = tailField(fields, "anchor", "target", "checkpoint", "id", "path");
-    oneLiner = tail ? `◆ Rewind ${singleLine(tail, 60)}` : "◆ Rewind";
+    oneLiner = tail ? `${settledPrefix()}Rewind ${singleLine(tail, 60)}` : "◆ Rewind";
     rules.push("rewind");
   } else if (toolName === "context_notes") {
     const c = singleLine(strField(fields, "path", "file", "bytes", "note", "notes", "content"), 60);
-    oneLiner = c ? `◆ Context Notes ${c}` : "◆ Context Notes";
+    oneLiner = c ? `${settledPrefix()}Context Notes ${c}` : "◆ Context Notes";
     rules.push("context_notes");
   } else if (toolName === "new_context") {
     return { text, changed: false, rule: "", fullText: text };
   } else if (toolName === "security_scan") {
     const a = strField(fields, "action", "op");
     const p = singleLine(strField(fields, "path", "file", "target"), 60);
-    oneLiner = `◆ Security Scan${a ? ` ${a}` : ""}${p ? ` ${p}` : ""}`.trim() || "◆ Security Scan";
+    oneLiner = `${settledPrefix()}Security Scan${a ? ` ${a}` : ""}${p ? ` ${p}` : ""}`.trim() || "◆ Security Scan";
     rules.push("security_scan");
   } else if (toolName === "memory_edit") {
     const m = singleLine(strField(fields, "status", "op", "action", "memory", "name", "result"), 60);
-    oneLiner = m ? `◆ Memory Edit ${m}` : "◆ Memory Edit";
+    oneLiner = m ? `${settledPrefix()}Memory Edit ${m}` : "◆ Memory Edit";
     rules.push("memory_edit");
   } else if (toolName === "retain") {
-    oneLiner = "◆ Retain";
+    oneLiner = `${settledPrefix()}Retain`;
     rules.push("retain");
   } else if (toolName === "recall") {
     const q = singleLine(strField(fields, "query", "q", "pattern", "text"), 80);
-    oneLiner = q ? `◆ Recall ${q}` : "◆ Recall";
+    oneLiner = q ? `${settledPrefix()}Recall ${q}` : "◆ Recall";
     rules.push("recall");
   } else if (toolName === "reflect") {
     const q = singleLine(strField(fields, "query", "q", "pattern", "text"), 80);
-    oneLiner = q ? `◆ Reflect ${q}` : "◆ Reflect";
+    oneLiner = q ? `${settledPrefix()}Reflect ${q}` : "◆ Reflect";
     rules.push("reflect");
   } else if (toolName === "learn") {
     const n = singleLine(strField(fields, "name", "skill", "topic", "title"), 60);
-    oneLiner = n ? `◆ Learn ${n}` : "◆ Learn";
+    oneLiner = n ? `${settledPrefix()}Learn ${n}` : "◆ Learn";
     rules.push("learn");
   } else if (toolName === "manage_skill") {
     const op = strField(fields, "op", "action");
     const n = singleLine(strField(fields, "name", "skill"), 60);
-    oneLiner = `◆ Manage Skill${op ? ` ${op}` : ""}${n ? ` ${n}` : ""}`.trim() || "◆ Manage Skill";
+    oneLiner = `${settledPrefix()}Manage Skill${op ? ` ${op}` : ""}${n ? ` ${n}` : ""}`.trim() || "◆ Manage Skill";
     rules.push("manage_skill");
   } else if (toolName.startsWith("mcp__") || toolName.includes("/")) {
     const r = collapseMcpText(toolName, stripped);
@@ -700,7 +709,7 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     rules.push("mcp");
   } else {
     if (rules.length === 0) return { text, changed: false, rule: "", fullText: text };
-    oneLiner = `◆ ${toolName}`;
+    oneLiner = `${settledPrefix()}${toolName}`;
   }
 
   const capped = truncateDetails(details);

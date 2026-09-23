@@ -71,6 +71,7 @@ export function renderSkillPrompt(
         : [...rows.slice(0, Math.max(0, maxRows - 1)), `… ${rows.length - maxRows + 1} more rows`];
     return paintRow(theme, { body: visible.join("\n") });
   }
-  const oneLiner = userInvoked && args ? `◆ Skill ${name} ${args}` : `◆ Skill ${name}`;
+  // No mark in the body: `paintRow` paints the configured indicator itself.
+  const oneLiner = userInvoked && args ? `Skill ${name} ${args}` : `Skill ${name}`;
   return paintRow(theme, { body: oneLiner });
 }
