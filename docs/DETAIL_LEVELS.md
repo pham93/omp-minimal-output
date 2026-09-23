@@ -99,9 +99,9 @@ Detailed matches the Ctrl+O-expanded representation. `detailedMaxRows` bounds ea
 | Hub                                   | Complete selected peer/job/message entries                  | `hubMaxItems` items                                     |
 | Native read group                     | Header and file entries                                     | `standardMaxRows` entries                               |
 | Todo                                  | Existing collapsed/expanded widget behavior                 | Unchanged; expanded total-row cap                       |
-| LSP / AST Grep / Debug / Other native | Native Standard/Detailed rendering                          | Native renderer; no guessed content boundary            |
+| LSP / AST Grep / Debug / Other        | Collapsed summary as the card header, then bounded detail lines | `standardOutputMaxRows` output                          |
 
-Specialized renderers keep their existing visual grammar. Opaque native cards fail open to native rendering in Standard/Detailed. Minimal retains its existing single-row projection.
+Specialized renderers keep their existing visual grammar. Tools with no dedicated layout (LSP, AST Grep, Debug, GitHub, Checkpoint, Rewind, Context notes, New context, Security scan, Memory edit, Retain, Recall, Reflect, Learn, Manage skill) share `cards/collapsed-tool-card.ts`: the collapsed one-liner becomes the header and its bounded detail lines follow on the card content column, so they no longer fall back to native rendering. Minimal keeps their existing single-row projection, and the matching `native<Name>` setting restores the host renderer.
 
 ## Representative layouts
 
