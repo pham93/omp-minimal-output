@@ -38,7 +38,7 @@ interface ShadowTool {
   execute: (...args: unknown[]) => Promise<unknown>;
 }
 
-function harness(tools: Array<{ name: string; parameters: unknown }>) {
+function harness(tools: Array<{ name: string; parameters: unknown; approval?: unknown }>) {
   const handlers = new Map<string, Handler[]>();
   const registered = new Map<string, ShadowTool>();
   const widgets = new Map<string, unknown>();
@@ -139,6 +139,33 @@ describe("every wrapped tool shadows the native tool without changing it", () =>
     await expect(shadow!.execute("call:1", {}, undefined, undefined, { invokeTool })).rejects.toThrow(
       "native grep unavailable",
     );
+    await h.emit("session_shutdown");
+  });
+});
+
+describe("approval follows the native definition", () => {
+  test("the native class is forwarded instead of the registry's guess", async () => {
+    const h = harness([{ name: "retain", parameters: {}, approval: "write" }]);
+    registerExtension(h.pi as never);
+    await h.emit("session_start");
+    expect((h.registered.get("retain") as unknown as { approval?: unknown }).approval).toBe("write");
+    await h.emit("session_shutdown");
+  });
+
+  test("a definition without one falls back to the declared class", async () => {
+    const h = harness([{ name: "lsp", parameters: {} }]);
+    registerExtension(h.pi as never);
+    await h.emit("session_start");
+    // `lsp` is read-only, so the registry declares `read` and the host keeps auto-approving it.
+    expect((h.registered.get("lsp") as unknown as { approval?: unknown }).approval).toBe("read");
+    await h.emit("session_shutdown");
+  });
+
+  test("neither present leaves the host's own policy in charge", async () => {
+    const h = harness([{ name: "debug", parameters: {} }]);
+    registerExtension(h.pi as never);
+    await h.emit("session_start");
+    expect("approval" in (h.registered.get("debug") as object)).toBe(false);
     await h.emit("session_shutdown");
   });
 });

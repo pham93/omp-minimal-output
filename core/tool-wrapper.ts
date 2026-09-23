@@ -215,7 +215,12 @@ export class ToolWrapper {
     const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
     if (src["parameters"] == null) return;
     const definition = WRAPPED_TOOL_REGISTRY[name];
-    const approval = "approval" in definition ? definition.approval : undefined;
+    // The host reads `approval` off the tool definition, so the native value is forwarded verbatim
+    // when the definition carries one; the registry's class is only a fallback for the tools whose
+    // definition does not. Hand-declared classes are the last resort, never the first choice.
+    const nativeApproval = typeof src["approval"] === "string" ? (src["approval"] as string) : undefined;
+    const declared = "approval" in definition ? (definition.approval as string | undefined) : undefined;
+    const approval = nativeApproval ?? declared;
     const description = typeof src["description"] === "string" ? src["description"] : name;
     const parameters = src["parameters"];
 
