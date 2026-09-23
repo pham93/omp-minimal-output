@@ -70,6 +70,7 @@ const { ThinkingWidget } = await import("./surfaces/thinking-widget.ts");
 const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
 const { installNativeToolCardSkin } = await import("./cards/native-tool-card-skin.ts");
 const { eventFingerprint } = await import("./core/results.ts");
+const { paintActivityStatus } = await import("./core/activity-tracker.ts");
 const { Container: PatchedContainer } = await import("@oh-my-pi/pi-tui");
 
 const theme = { fg: (_token: string, text: string) => text, bold: (text: string) => text, dim: (text: string) => text };
@@ -333,6 +334,22 @@ surfaces.push(nativeSkinSurface("native-skin/task", "task", false));
 surfaces.push(nativeSkinSurface("native-skin/task/expanded", "task", true));
 surfaces.push(nativeSkinSurface("native-skin/hub", "hub", false));
 surfaces.push(nativeSkinSurface("native-skin/hub/expanded", "hub", true));
+
+surfaces.push({
+  name: "activity-status",
+  render: (width, hostile) =>
+    rowsOf(
+      paintActivityStatus(theme, {
+        label: () => `bash ${hostile}`,
+        context: () => hostile,
+        outcome: () => hostile,
+        live: () => true,
+        error: () => false,
+        fadeKey: "activity:width",
+      }),
+      width,
+    ),
+});
 
 const hookAbove = { children: [] as unknown[], render: () => [] as string[] };
 const statusContainer: Record<string, unknown> = { setComponent: () => {} };
