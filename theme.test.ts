@@ -20,7 +20,7 @@ mock.module("@oh-my-pi/pi-tui", () => ({
   matchesKey: (data: string, key: string) => data === key,
 }));
 
-const { formatRowLine, rowRestOpacity } = await import("./core/theme.ts");
+const { formatRowLine, LINE_WIDTH_RATIO, rowRestOpacity } = await import("./core/theme.ts");
 const { applyOverlay, DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
 
 const theme = { fg: (_token: string, text: string) => text } as unknown;
@@ -71,5 +71,32 @@ describe("headerOpacity setting", () => {
 
   test("non-header rows still track opacity", () => {
     expect(detailRow(0.25)).not.toBe(detailRow(0.9));
+  });
+});
+
+describe("row width contract", () => {
+  test("a right affordance is dropped rather than allowed to overflow a narrow row", () => {
+    const rowWidth = (width: number) => Math.max(1, Math.floor(width * LINE_WIDTH_RATIO));
+    const row = (width: number) =>
+      formatRowLine(theme, width, {
+        body: "Todos 5 open, 2 done",
+        right: "▸ expand · Ctrl+O",
+        indent: true,
+        header: true,
+      });
+    // Too narrow to hold the affordance (prefix + tail + one body cell > row width): it yields and
+    // the title keeps its cells.
+    for (const width of [20, 22]) {
+      const narrow = Bun.stripANSI(row(width));
+      expect(narrow.length).toBeLessThanOrEqual(rowWidth(width));
+      expect(narrow).not.toContain("Ctrl+O");
+      expect(narrow).toContain("Todos");
+    }
+    // Wide enough: the affordance is kept and the row still fits.
+    for (const width of [24, 30, 80]) {
+      const wide = Bun.stripANSI(row(width));
+      expect(wide.length).toBeLessThanOrEqual(rowWidth(width));
+      expect(wide).toContain("Ctrl+O");
+    }
   });
 });

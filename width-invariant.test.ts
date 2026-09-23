@@ -87,7 +87,7 @@ const HOSTILE = [
   "→ arrow ◈◉◎○ ◆◇●",
 ];
 
-const WIDTHS = [40, 60, 80, 120, 200];
+const WIDTHS = [20, 24, 40, 60, 80, 120, 200];
 
 interface Surface {
   name: string;

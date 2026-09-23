@@ -370,10 +370,18 @@ export function formatRowLine(
   const prefix = branch && !spin ? pad : `${pad}${paintMark(theme, mark, markToken)} `;
   const right = opts.right ?? "";
   const tail = right ? paintAt(theme, right, "dim", op) : "";
-  const bodyBudget = Math.max(1, w - visibleWidth(prefix) - (tail ? visibleWidth(tail) + 1 : 0));
+  // A row that overflows `w` wraps in the terminal while the host still counts it as one row, which
+  // shifts every row below it. So the right-hand affordance is dropped when the row cannot hold it,
+  // and the body may give up all of its cells rather than force a minimum that overflows.
+  const tailWidth = tail ? visibleWidth(tail) + 1 : 0;
+  const fits = tail !== "" && visibleWidth(prefix) + tailWidth + 1 <= w;
+  const bodyBudget = Math.max(0, w - visibleWidth(prefix) - (fits ? tailWidth : 0));
   const body = truncatePlain(stripKindSuffix(opts.body), bodyBudget);
-  const left = `${prefix}${paintBold(theme, paintAt(theme, body, opts.error ? "error" : "toolOutput", op))}`;
-  if (!tail) return left;
+  const painted = body
+    ? paintBold(theme, paintAt(theme, body, opts.error ? "error" : "toolOutput", op))
+    : "";
+  const left = `${prefix}${painted}`;
+  if (!fits) return left;
   const gap = Math.max(0, w - visibleWidth(left) - visibleWidth(tail));
   return `${left}${" ".repeat(gap)}${tail}`;
 }
