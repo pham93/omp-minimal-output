@@ -173,6 +173,9 @@ export function collectPrettyEdit(
   const error = isToolError(result, options);
   const argsEdits = argsFields["edits"];
   const editPaths: string[] = [];
+  // A codemod can carry hundreds of edits; membership goes through a Set so deduping stays linear
+  // instead of scanning the growing array once per entry.
+  const seenPaths = new Set<string>();
   let argsOp = "";
   let argsMove = "";
   if (Array.isArray(argsEdits)) {
@@ -180,7 +183,10 @@ export function collectPrettyEdit(
       if (typeof entry !== "object" || entry === null) continue;
       const fields = entry as Record<string, unknown>;
       const p = editTextField(fields["path"]);
-      if (p && !editPaths.includes(p)) editPaths.push(p);
+      if (p && !seenPaths.has(p)) {
+        seenPaths.add(p);
+        editPaths.push(p);
+      }
       if (!argsOp) argsOp = editTextField(fields["op"]);
       if (!argsMove) {
         argsMove = editTextField(fields["rename"]) || editTextField(fields["move"]) || editTextField(fields["moveTo"]);
