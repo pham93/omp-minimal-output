@@ -178,7 +178,9 @@ export function renderEvalCard(
             );
           }
           if (inputMore > 0) {
-            lines.push(`${CARD_CONTENT_PREFIX}${paintAt(theme, `… (${inputMore} more input lines)`, "dim", op)}`);
+            lines.push(
+              `${CARD_CONTENT_PREFIX}${paintAt(theme, truncatePlain(`… (${inputMore} more input lines)`, w), "dim", op)}`,
+            );
           }
           if (result !== undefined && (output.length > 0 || more > 0 || error)) {
             if (input.length > 0) {
@@ -192,7 +194,9 @@ export function renderEvalCard(
               }
             } else {
               if (earlierHint && more > 0) {
-                lines.push(`${CARD_CONTENT_PREFIX}${paintAt(theme, `… (${more} earlier lines)`, "dim", op)}`);
+                lines.push(
+                  `${CARD_CONTENT_PREFIX}${paintAt(theme, truncatePlain(`… (${more} earlier lines)`, w), "dim", op)}`,
+                );
               }
               for (const line of output) {
                 const cellText = dimAnsi(theme, colorizeConsoleLine(theme, line), op);
@@ -203,7 +207,9 @@ export function renderEvalCard(
                 );
               }
               if (!earlierHint && more > 0) {
-                lines.push(`${CARD_CONTENT_PREFIX}${paintAt(theme, `… (${more} more lines)`, "dim", op)}`);
+                lines.push(
+                `${CARD_CONTENT_PREFIX}${paintAt(theme, truncatePlain(`… (${more} more lines)`, w), "dim", op)}`,
+              );
               }
             }
           }

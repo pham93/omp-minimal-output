@@ -215,8 +215,10 @@ export function renderWriteCard(
 
         const hidden = data.lineCount - visible.length;
         if (hidden > 0) {
-          const hintPrefix = `${TOOL_INDENT}   ${" ".repeat(gutterWidth)} ${paintAt(theme, "│", "dim", 0.7)} `;
-          lines.push(`${hintPrefix}${paintAt(theme, `(...${hidden} previous lines)`, "dim", restOpacity)}`);
+          // Same primitive as the detail rows: the hint is a fixed-length string, so it only
+          // overflows on a narrow terminal, where a wrapped row shifts everything below it.
+          const hintPrefix = `${TOOL_INDENT}   ${" ".repeat(gutterWidth)} │ `;
+          lines.push(cardDetailLine(theme, width, `(...${hidden} previous lines)`, hintPrefix, false, restOpacity));
         }
 
         let startedAt: number | undefined;

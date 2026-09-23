@@ -89,6 +89,9 @@ const HOSTILE = [
 
 const WIDTHS = [20, 24, 40, 60, 80, 120, 200];
 
+/** More lines than any density's row cap, so the "… N more lines" hint rows render too. */
+const manyLines = (line: string): string => Array.from({ length: 12 }, () => line).join("\n");
+
 interface Surface {
   name: string;
   render: (width: number, hostile: string) => string[];
@@ -142,11 +145,11 @@ for (const toolName of ["bash", "read", "grep", "glob", "write", "edit", "eval",
                 : toolName === "glob"
                   ? { pattern: hostile, i: "Globbing hostile input" }
                   : toolName === "write"
-                    ? { path: hostile, content: `${hostile}\n${hostile}`, i: "Writing hostile content" }
+                    ? { path: hostile, content: manyLines(hostile), i: "Writing hostile content" }
                     : toolName === "edit"
-                      ? { path: hostile, oldText: hostile, newText: `${hostile}\n${hostile}`, i: "Editing hostile content" }
+                      ? { path: hostile, oldText: hostile, newText: manyLines(hostile), i: "Editing hostile content" }
                       : toolName === "eval"
-                        ? { title: hostile, code: hostile, i: "Evaluating hostile input" }
+                        ? { title: hostile, code: manyLines(hostile), i: "Evaluating hostile input" }
                         : { query: hostile, i: "Searching the web with hostile input" };
         const result =
           state === "running"
@@ -155,8 +158,8 @@ for (const toolName of ["bash", "read", "grep", "glob", "write", "edit", "eval",
               ? { isError: true, details: { error: hostile }, content: [{ type: "text", text: hostile }] }
               : {
                   details: {
-                    stdout: hostile,
-                    output: hostile,
+                    stdout: manyLines(hostile),
+                    output: manyLines(hostile),
                     response: { sources: [{ title: hostile, url: `https://example.test/${hostile}` }] },
                   },
                   content: [{ type: "text", text: hostile }],
