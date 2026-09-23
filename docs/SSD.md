@@ -146,7 +146,7 @@ Contract: line 1 is always the collapsed row. Dedicated cards (`write`, `edit`, 
 | Hub        | `Hub op target — summary`                    | bounded peer / job / message rows                   | `hubMaxItems` / `detailedMaxRows`             |
 | Read group | `◆ Read N files`                             | bounded file list                                   | `detailedMaxRows`                             |
 
-LSP, AST-grep, and Debug retain native Standard/Detailed rendering because their rendered rows do not expose reliable content boundaries. Minimal retains its existing single-row projection, whose prefix is the configured `indicator` mark: `collapseToolText` in `core/filters.ts` takes it from `indicatorSettled()`, so a tool without a card still follows the setting. Dedicated running rows show the live indicator and elapsed time; error rows retain identity and bounded failure detail. See [`EXAMPLES.md`](EXAMPLES.md) for row shapes.
+Tools without a dedicated layout — LSP, AST-grep, Debug, GitHub, Checkpoint, Rewind, Context notes, New context, Security scan, Memory edit, Retain, Recall, Reflect, Learn, Manage skill — are wrapped like every other tool and render through `cards/collapsed-tool-card.ts`: the collapsed one-liner from `core/filters.ts` becomes the card header (the plugin paints the configured `indicator` mark) and its bounded detail lines follow on the card content column. Their rows are the plugin's, not the host's; the matching `native<Name>` setting restores the host renderer. Dedicated running rows show the live indicator and elapsed time; error rows retain identity and bounded failure detail. See [`EXAMPLES.md`](EXAMPLES.md) for row shapes.
 
 ## 7. Config (`core/config.ts` + `package.json`)
 
@@ -174,7 +174,7 @@ Source of truth: `~/.omp/plugins/omp-plugins.lock.json` + project overrides (`.o
 ## 8. Safety
 
 - Shadows forward the exact native `parameters` object. No hand-written schema.
-- Only static-approval tools are wrapped (`glob`→read, `eval`→exec, `web_search`→read). Dynamic-policy tools are never added.
+- Wrapped tools declare a static approval class only where the host cannot infer it from the name (`glob`/`web_search`→read, `eval`→exec, and read-only tools without a layout: `lsp`, `ast_grep`, `security_scan`, `context_notes`, `recall`, `reflect`). Mutating tools without a layout (`debug`, `github`, `checkpoint`, `rewind`, `new_context`, `memory_edit`, `retain`, `learn`, `manage_skill`) keep the host's own policy for their unchanged name. `mcp__*` tools are never wrapped: their policy is per server, not per tool name.
 - Task/Hub: no registration, no schema copy, no approval path. Hub's argument-dependent policy untouched.
 - Registry and card renderers throw on failure; the host catch restores native rendering. Deferred render errors stay protected by the host's safe renderer.
 - Control bytes (ESC, OSC, C0/C1) sanitized before paint. Width truncation is ANSI-aware.

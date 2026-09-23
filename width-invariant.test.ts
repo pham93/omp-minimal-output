@@ -128,7 +128,32 @@ function registryFor(toolName: string): CardRegistry {
 }
 
 const surfaces: Surface[] = [];
-for (const toolName of ["bash", "read", "grep", "glob", "write", "edit", "eval", "web_search"]) {
+for (const toolName of [
+  "bash",
+  "read",
+  "grep",
+  "glob",
+  "write",
+  "edit",
+  "eval",
+  "web_search",
+  // Tools with no dedicated layout: same row primitives, so the same width contract.
+  "lsp",
+  "ast_grep",
+  "debug",
+  "github",
+  "checkpoint",
+  "rewind",
+  "context_notes",
+  "new_context",
+  "security_scan",
+  "memory_edit",
+  "retain",
+  "recall",
+  "reflect",
+  "learn",
+  "manage_skill",
+]) {
   for (const state of ["running", "settled", "error"] as const) {
     // Expanded runs the detail paths — content lines, diffs, output bodies — which is where an
     // unclamped row would come from.

@@ -45,6 +45,8 @@ The original Bottom Dock and Top Dock styles preserve OMP's live `statusLine.*` 
 
 Each fallback is independent. `nativeTask` and `nativeHub` restore the host renderer and leave result text untouched; the plugin never shadow-registers either tool.
 
+Every wrapped tool has a `native<Name>` opt-out: `nativeBash`, `nativeRead`, `nativeGrep`, `nativeGlob`, `nativeWrite`, `nativeEdit`, `nativeEval`, `nativeWebSearch`, plus the tools that render through the shared collapsed card — `nativeLsp`, `nativeAstGrep`, `nativeDebug`, `nativeGithub`, `nativeCheckpoint`, `nativeRewind`, `nativeContextNotes`, `nativeNewContext`, `nativeSecurityScan`, `nativeMemoryEdit`, `nativeRetain`, `nativeRecall`, `nativeReflect`, `nativeLearn`, `nativeManageSkill`. Setting one to `true` restores the host renderer for that tool and leaves its result text untouched. `mcp__*` tools are the one family left on the host renderer, because their approval policy is per server rather than per tool name.
+
 ## Runtime overview
 
 Grouped and dedicated wrapped cards dispatch through `cards/card-registry.ts`. Renderer failures use OMP's native fallback rather than hiding the transcript. The five native surface skins share one `core/container-interceptor.ts` hook; `/minimal-off` removes its subscribers and `/minimal-on` reinstalls them. Task and Hub remain native tools.

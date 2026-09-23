@@ -3,6 +3,7 @@ import { isWrappedTool, wrapTool, type WrappedTool } from "../core/config.ts";
 import { toolFingerprint } from "../core/results.ts";
 import { cardIsPartial } from "./card-primitives.ts";
 import { renderGroupedToolCard, type GroupedToolManager } from "./grouped-tool-card.ts";
+import { renderCollapsedToolCard } from "./collapsed-tool-card.ts";
 import { renderWriteCard } from "./write-card.ts";
 import { renderPrettyEditCard } from "./edit-card.ts";
 import { renderEvalCard } from "./eval-card.ts";
@@ -36,6 +37,15 @@ interface ToolCardRenderer {
 }
 
 const GROUPED_RENDERER: ToolCardRenderer = { grouped: true, render: renderGroupedToolCard };
+
+// Tools with no dedicated layout: their collapsed one-liner becomes the header, rendered by the
+// plugin instead of the host.
+const COLLAPSED_RENDERER: ToolCardRenderer = {
+  grouped: false,
+  render({ theme, toolName, args, result, options, fingerprint, parentLabel }) {
+    return renderCollapsedToolCard(theme, toolName, args, result, options, fingerprint, parentLabel);
+  },
+};
 
 const CARD_RENDERERS = {
   bash: GROUPED_RENDERER,
@@ -81,6 +91,21 @@ const CARD_RENDERERS = {
       return renderWebSearchCard(theme, args, result, options, fingerprint, parentLabel);
     },
   },
+  lsp: COLLAPSED_RENDERER,
+  ast_grep: COLLAPSED_RENDERER,
+  security_scan: COLLAPSED_RENDERER,
+  context_notes: COLLAPSED_RENDERER,
+  recall: COLLAPSED_RENDERER,
+  reflect: COLLAPSED_RENDERER,
+  debug: COLLAPSED_RENDERER,
+  github: COLLAPSED_RENDERER,
+  checkpoint: COLLAPSED_RENDERER,
+  rewind: COLLAPSED_RENDERER,
+  new_context: COLLAPSED_RENDERER,
+  memory_edit: COLLAPSED_RENDERER,
+  retain: COLLAPSED_RENDERER,
+  learn: COLLAPSED_RENDERER,
+  manage_skill: COLLAPSED_RENDERER,
 } satisfies Record<WrappedTool, ToolCardRenderer>;
 
 export interface CardRegistryDeps {

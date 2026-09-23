@@ -196,6 +196,81 @@
         "max": 3600,
         "step": 1,
         "description": "Composer status refresh polling interval in seconds while idle."
+      },
+      "nativeLsp": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave lsp on the native Ohmypi renderer."
+      },
+      "nativeAstGrep": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave ast_grep on the native Ohmypi renderer."
+      },
+      "nativeSecurityScan": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave security_scan on the native Ohmypi renderer."
+      },
+      "nativeContextNotes": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave context_notes on the native Ohmypi renderer."
+      },
+      "nativeRecall": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave recall on the native Ohmypi renderer."
+      },
+      "nativeReflect": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave reflect on the native Ohmypi renderer."
+      },
+      "nativeDebug": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave debug on the native Ohmypi renderer."
+      },
+      "nativeGithub": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave github on the native Ohmypi renderer."
+      },
+      "nativeCheckpoint": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave checkpoint on the native Ohmypi renderer."
+      },
+      "nativeRewind": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave rewind on the native Ohmypi renderer."
+      },
+      "nativeNewContext": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave new_context on the native Ohmypi renderer."
+      },
+      "nativeMemoryEdit": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave memory_edit on the native Ohmypi renderer."
+      },
+      "nativeRetain": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave retain on the native Ohmypi renderer."
+      },
+      "nativeLearn": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave learn on the native Ohmypi renderer."
+      },
+      "nativeManageSkill": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave manage_skill on the native Ohmypi renderer."
       }
     }
   },
