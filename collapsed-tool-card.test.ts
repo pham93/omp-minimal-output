@@ -215,3 +215,17 @@ describe("a renderer must never hide output", () => {
     }
   });
 });
+
+describe("MCP tools render through the shared collapsed card", () => {
+  test("the collapsed one-liner names the server and tool", () => {
+    try {
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, detailLevel: "standard" });
+      const rows = renderTool("mcp__slack__list_channels" as never, {}, textResult("hello"));
+      expect(rows[0]?.startsWith("◆ ")).toBe(true);
+      expect(rows[0]).toContain("Slack List Channels");
+      expect(rows.join("\n")).toContain("hello");
+    } finally {
+      setPluginConfigForTest(null);
+    }
+  });
+});

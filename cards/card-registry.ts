@@ -1,5 +1,5 @@
 import type { Container } from "@oh-my-pi/pi-tui";
-import { isWrappedTool, wrapTool, type WrappedTool } from "../core/config.ts";
+import { isMcpTool, isWrappedTool, wrapTool, type McpTool, type WrappedTool } from "../core/config.ts";
 import { toolFingerprint } from "../core/results.ts";
 import { cardIsPartial } from "./card-primitives.ts";
 import { renderGroupedToolCard, type GroupedToolManager } from "./grouped-tool-card.ts";
@@ -17,7 +17,7 @@ export const CARD_RENDER_PHASE = {
 type CardRenderPhase = (typeof CARD_RENDER_PHASE)[keyof typeof CARD_RENDER_PHASE];
 
 export interface CardRenderRequest {
-  toolName: WrappedTool;
+  toolName: WrappedTool | McpTool;
   phase: CardRenderPhase;
   theme: unknown;
   args: unknown;
@@ -37,6 +37,13 @@ interface ToolCardRenderer {
 }
 
 const GROUPED_RENDERER: ToolCardRenderer = { grouped: true, render: renderGroupedToolCard };
+
+/** MCP tools arrive as `mcp__server__tool`, so they cannot be table keys: the family shares one card. */
+function rendererFor(toolName: string): ToolCardRenderer | undefined {
+  const known = (CARD_RENDERERS as Record<string, ToolCardRenderer | undefined>)[toolName];
+  if (known) return known;
+  return isMcpTool(toolName) ? COLLAPSED_RENDERER : undefined;
+}
 
 // Tools with no dedicated layout: their collapsed one-liner becomes the header, rendered by the
 // plugin instead of the host.
@@ -122,7 +129,7 @@ export class CardRegistry {
   }
 
   usesGroupedStatus(toolName: string): boolean {
-    return isWrappedTool(toolName) && CARD_RENDERERS[toolName].grouped;
+    return isWrappedTool(toolName) && rendererFor(toolName)?.grouped === true;
   }
 
   render(request: CardRenderRequest): Container {
@@ -132,7 +139,10 @@ export class CardRegistry {
     const fingerprint = toolFingerprint(request.toolName, request.args);
     // The host catches both adapter and deferred component errors and restores
     // native output. Returning undefined instead would suppress the transcript.
-    return CARD_RENDERERS[request.toolName].render({
+    const renderer = rendererFor(request.toolName);
+    // Fail open: the host restores its own renderer when a card cannot be produced.
+    if (!renderer) throw new Error(`minimal-output: native rendering required for ${request.toolName}`);
+    return renderer.render({
       ...request,
       fingerprint,
       parentLabel: () => this.#deps.parentLabelForCard(fingerprint, request.result),

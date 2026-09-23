@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { writeFile } from "node:fs/promises";
 import type { ExtensionAPI, ToolResultEvent } from "@oh-my-pi/pi-coding-agent";
-import { getPluginConfig, isWrappedTool, wrapTool, WRAPPED_TOOL_REGISTRY } from "./config.ts";
+import { getPluginConfig, isWrappedTool, wrapTool, WRAPPED_TOOL_REGISTRY , isMcpTool} from "./config.ts";
 import { CARD_RENDER_PHASE, CardRegistry } from "../cards/card-registry.ts";
 import type { GroupedToolManager } from "../cards/grouped-tool-card.ts";
 import type { ActivityTracker } from "./activity-tracker.ts";
@@ -214,12 +214,13 @@ export class ToolWrapper {
     if (!isWrappedTool(name) || !wrapTool(name)) return;
     const src = typeof source === "object" && source !== null ? (source as Record<string, unknown>) : {};
     if (src["parameters"] == null) return;
-    const definition = WRAPPED_TOOL_REGISTRY[name];
+    const definition = isMcpTool(name) ? undefined : WRAPPED_TOOL_REGISTRY[name];
     // The host reads `approval` off the tool definition, so the native value is forwarded verbatim
     // when the definition carries one; the registry's class is only a fallback for the tools whose
     // definition does not. Hand-declared classes are the last resort, never the first choice.
     const nativeApproval = typeof src["approval"] === "string" ? (src["approval"] as string) : undefined;
-    const declared = "approval" in definition ? (definition.approval as string | undefined) : undefined;
+    const declared =
+      definition && "approval" in definition ? (definition.approval as string | undefined) : undefined;
     const approval = nativeApproval ?? declared;
     const description = typeof src["description"] === "string" ? src["description"] : name;
     const parameters = src["parameters"];

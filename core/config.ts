@@ -112,6 +112,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
   nativeEdit: false,
   nativeEval: false,
   nativeWebSearch: false,
+  /** Opt-out for the whole `mcp__*` family. */
+  nativeMcp: false,
   nativeLsp: false,
   nativeAstGrep: false,
   nativeSecurityScan: false,
@@ -150,6 +152,7 @@ const BOOLEAN_KEYS: Record<string, true> = {
   editShowTabs: true,
   editShowSpaces: true,
   hideThinkingBlock: true,
+  nativeMcp: true,
 };
 for (const definition of Object.values(WRAPPED_TOOL_REGISTRY)) {
   BOOLEAN_KEYS[definition.nativeKey] = true;
@@ -374,12 +377,23 @@ export function setPluginConfigForTest(cfg: PluginConfig | null): void {
   cache = cfg;
   testOverride = cfg !== null;
 }
-export function isWrappedTool(name: string): name is WrappedTool {
-  return Object.prototype.hasOwnProperty.call(WRAPPED_TOOL_REGISTRY, name);
+/** Every MCP tool arrives as `mcp__<server>__<tool>`, so the family is matched by prefix. */
+export const MCP_TOOL_PREFIX = "mcp__";
+export type McpTool = `mcp__${string}`;
+
+export function isMcpTool(name: string): name is McpTool {
+  return name.startsWith(MCP_TOOL_PREFIX) && name.length > MCP_TOOL_PREFIX.length;
+}
+
+export function isWrappedTool(name: string): name is WrappedTool | McpTool {
+  return isMcpTool(name) || Object.prototype.hasOwnProperty.call(WRAPPED_TOOL_REGISTRY, name);
 }
 
 export function wrapTool(name: string, cfg: PluginConfig = getPluginConfig()): boolean {
   if (!isWrappedTool(name)) return false;
+  // MCP tools share one opt-out: their policy is per server, not per tool name, so a per-tool table
+  // cannot describe them.
+  if (isMcpTool(name)) return cfg.nativeMcp !== true;
   return cfg[WRAPPED_TOOL_REGISTRY[name].nativeKey] !== true;
 }
 

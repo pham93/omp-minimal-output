@@ -153,6 +153,8 @@ for (const toolName of [
   "reflect",
   "learn",
   "manage_skill",
+  // The MCP family shares the same card but arrives as `mcp__server__tool`.
+  "mcp__slack__list_channels",
 ]) {
   for (const state of ["running", "settled", "error"] as const) {
     // Expanded runs the detail paths — content lines, diffs, output bodies — which is where an

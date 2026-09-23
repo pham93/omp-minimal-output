@@ -271,6 +271,11 @@
         "type": "boolean",
         "default": false,
         "description": "Leave manage_skill on the native Ohmypi renderer."
+      },
+      "nativeMcp": {
+        "type": "boolean",
+        "default": false,
+        "description": "Leave every mcp__* tool on the native Ohmypi renderer."
       }
     }
   },

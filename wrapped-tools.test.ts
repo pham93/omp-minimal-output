@@ -29,7 +29,8 @@ mock.module("@oh-my-pi/pi-coding-agent", () => ({
 
 // Dynamic imports: mock.module() above must execute before index.ts loads.
 const { default: registerExtension } = await import("./index.ts");
-const { DEFAULT_CONFIG, setPluginConfigForTest, WRAPPED_TOOL_REGISTRY } = await import("./core/config.ts");
+const { DEFAULT_CONFIG, isWrappedTool, setPluginConfigForTest, WRAPPED_TOOL_REGISTRY } =
+  await import("./core/config.ts");
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 interface ShadowTool {
@@ -167,5 +168,59 @@ describe("approval follows the native definition", () => {
     await h.emit("session_start");
     expect("approval" in (h.registered.get("debug") as object)).toBe(false);
     await h.emit("session_shutdown");
+  });
+});
+
+describe("MCP tools are wrapped as a family", () => {
+  const MCP = "mcp__slack__list_channels";
+
+  test("a wrapped MCP tool forwards the native parameters and delegates once", async () => {
+    const parameters = { type: "object", properties: { channel: { type: "string" } } };
+    const h = harness([{ name: MCP, parameters, approval: "read" }]);
+    registerExtension(h.pi as never);
+    await h.emit("session_start");
+
+    const shadow = h.registered.get(MCP);
+    expect(shadow).toBeDefined();
+    expect(shadow!.parameters).toBe(parameters);
+    // The native class is forwarded, not guessed.
+    expect((shadow as unknown as { approval?: unknown }).approval).toBe("read");
+
+    const seen: unknown[] = [];
+    const result = { details: {}, content: [{ type: "text", text: "native" }] };
+    const out = await shadow!.execute("call:1", { channel: "x" }, undefined, undefined, {
+      invokeTool: async (params: unknown) => {
+        seen.push(params);
+        return result;
+      },
+    });
+    expect(seen).toEqual([{ channel: "x" }]);
+    expect(out).toBe(result);
+    await h.emit("session_shutdown");
+  });
+
+  test("a native approval of undefined stays undefined, so the host decides per server", async () => {
+    // The host's rule is `name.startsWith("mcp__") && approval === undefined`, so declaring a class
+    // here would change a per-server policy into a per-tool one.
+    const h = harness([{ name: "mcp__srv__tool", parameters: {} }]);
+    registerExtension(h.pi as never);
+    await h.emit("session_start");
+    expect("approval" in (h.registered.get("mcp__srv__tool") as object)).toBe(false);
+    await h.emit("session_shutdown");
+  });
+
+  test("nativeMcp opts the whole family out", async () => {
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, nativeMcp: true });
+    const h = harness([{ name: MCP, parameters: {} }]);
+    registerExtension(h.pi as never);
+    await h.emit("session_start");
+    expect(h.registered.has(MCP)).toBe(false);
+    await h.emit("session_shutdown");
+    setPluginConfigForTest(null);
+  });
+
+  test("the prefix needs a server and a tool, so a bare prefix is not wrapped", () => {
+    expect(isWrappedTool("mcp__")).toBe(false);
+    expect(isWrappedTool("mcp__server__tool")).toBe(true);
   });
 });

@@ -89,7 +89,7 @@ Grouped reads (native group skinned):
 ◆ Glob `src/**/*.ts` — 12 files
 ```
 
-LSP, AST-grep, Debug, GitHub, Checkpoint, Rewind, Context notes, New context, Security scan, Memory edit, Retain, Recall, Reflect, Learn and Manage skill share one card (`cards/collapsed-tool-card.ts`): the collapsed one-liner becomes the header — carrying the configured `indicator` mark (`◆` for `diamond`, `●` for `dot`, none for `none`) — and its bounded detail lines follow on the card content column, so these rows are the plugin's like every other card. `native<Name>` restores the host renderer for any of them. `mcp__*` tools stay on the host renderer, with their one-liner text rewritten and prefixed by the same configured mark; they no longer carry a separate `◇` badge.
+LSP, AST-grep, Debug, GitHub, Checkpoint, Rewind, Context notes, New context, Security scan, Memory edit, Retain, Recall, Reflect, Learn and Manage skill share one card (`cards/collapsed-tool-card.ts`): the collapsed one-liner becomes the header — carrying the configured `indicator` mark (`◆` for `diamond`, `●` for `dot`, none for `none`) — and its bounded detail lines follow on the card content column, so these rows are the plugin's like every other card. `native<Name>` restores the host renderer for any of them. `mcp__*` tools render through the same card (one `nativeMcp` opt-out covers the family); their collapsed one-liner names the server and tool, e.g. `◆ Slack List Channels — …`, and they no longer carry a separate `◇` badge.
 
 ```text
 ◆ Lsp references foo.ts — 8 results
