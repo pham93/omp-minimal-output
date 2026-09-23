@@ -272,7 +272,7 @@ export function renderTaskCardLines(
         width,
         conciseErrorText(result, {
           fallback: "Task failed",
-          skipPattern: /^●?\s*Task\b/iu,
+          skipPattern: /^[^\p{L}\p{N}]*Task\b/iu,
         }),
         true,
       ),

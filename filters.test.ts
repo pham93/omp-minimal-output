@@ -98,3 +98,20 @@ describe("collapsed one-liners stay bounded and preserve the original", () => {
     expect(result.fullText).toBe("12 pass\n0 fail");
   });
 });
+
+describe("one-liner text does not depend on the configured mark", () => {
+  test("an lsp search keeps its own label instead of falling back to the grep shape", () => {
+    try {
+      for (const indicator of ["diamond", "dot", "none"] as const) {
+        setPluginConfigForTest({ ...DEFAULT_CONFIG, indicator });
+        const line = firstLine("lsp", { action: "references", file: "foo.ts" }, "src/a.ts:12:7\nsrc/b.ts:3:1");
+        expect(line, indicator).toContain("Lsp references");
+        expect(line, indicator).not.toContain("Search");
+        // The grouped counts survive the relabel.
+        expect(line, indicator).toContain("2 files");
+      }
+    } finally {
+      setPluginConfigForTest(null);
+    }
+  });
+});

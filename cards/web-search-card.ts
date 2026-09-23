@@ -105,7 +105,7 @@ export function renderWebSearchCard(
               width,
               conciseErrorText(result, {
                 fallback: "Search request failed",
-                skipPattern: /^●?\s*Search\b/iu,
+                skipPattern: /^[^\p{L}\p{N}]*Search\b/iu,
               }),
               true,
             );

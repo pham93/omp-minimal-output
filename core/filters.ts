@@ -569,11 +569,16 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
     const pat = strField(fields, "pattern", "query", "path", "file");
     const grouped = groupSearchResults(stripped, pat || action);
     if (grouped) {
-      oneLiner = grouped.oneLiner.replace(/^◆ Search/, action ? `${settledPrefix()}Lsp ${action}` : "◆ Lsp");
+      // `groupSearchResults` prefixes its line with the configured mark, so the rewrite matches that
+      // prefix rather than a literal glyph: `dot`/`none` used to fall through to the grep shape.
+      const search = `${settledPrefix()}Search`;
+      oneLiner = grouped.oneLiner.startsWith(search)
+        ? `${settledPrefix()}Lsp${action ? ` ${action}` : ""}${grouped.oneLiner.slice(search.length)}`
+        : grouped.oneLiner;
     } else {
       const base = baseName(strField(fields, "file", "path"));
       const label = `${action ? ` ${action}` : ""}${base ? ` ${base}` : ""}`.trim();
-      oneLiner = label ? `${settledPrefix()}Lsp ${label}` : "◆ Lsp";
+      oneLiner = label ? `${settledPrefix()}Lsp ${label}` : `${settledPrefix()}Lsp`;
     }
     rules.push("lsp");
   } else if (toolName === "glob") {
@@ -633,22 +638,22 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
   } else if (toolName === "task") {
     const who = strField(fields, "agent", "name");
     const what = singleLine(strField(fields, "task", "prompt", "description"), 80);
-    oneLiner = `${settledPrefix()}Task${who ? ` ${who}` : ""}${what ? ` — ${what}` : ""}`.trim() || "◆ Task";
+    oneLiner = `${settledPrefix()}Task${who ? ` ${who}` : ""}${what ? ` — ${what}` : ""}`.trim() || `${settledPrefix()}Task`;
     rules.push("task");
   } else if (toolName === "hub") {
     const op = strField(fields, "op", "action");
     const tail = tailField(fields, "to", "name", "ids");
-    oneLiner = `${settledPrefix()}Hub${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || "◆ Hub";
+    oneLiner = `${settledPrefix()}Hub${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || `${settledPrefix()}Hub`;
     rules.push("hub");
   } else if (toolName === "debug") {
     const action = strField(fields, "action", "op");
     const target = singleLine(strField(fields, "target", "file", "path", "command", "program", "expression"), 60);
-    oneLiner = `${settledPrefix()}Debug${action ? ` ${action}` : ""}${target ? ` ${target}` : ""}`.trim() || "◆ Debug";
+    oneLiner = `${settledPrefix()}Debug${action ? ` ${action}` : ""}${target ? ` ${target}` : ""}`.trim() || `${settledPrefix()}Debug`;
     rules.push("debug");
   } else if (toolName === "github") {
     const op = strField(fields, "op", "action");
     const tail = singleLine(strField(fields, "repo", "query", "path", "url"), 60);
-    oneLiner = `${settledPrefix()}Github${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || "◆ Github";
+    oneLiner = `${settledPrefix()}Github${op ? ` ${op}` : ""}${tail ? ` ${tail}` : ""}`.trim() || `${settledPrefix()}Github`;
     rules.push("github");
   } else if (toolName === "web_search") {
     const q = singleLine(strField(fields, "query", "pattern", "q"), 80);
@@ -661,46 +666,46 @@ export function collapseToolText(toolName: string, input: unknown, text: string)
   } else if (toolName === "checkpoint") {
     const instr = strField(fields, "message", "summary", "label", "text", "checkpoint", "id");
     const first = singleLine((instr || String(input ?? "")).split("\n")[0] ?? "", 60);
-    oneLiner = first ? `${settledPrefix()}Checkpoint ${first}` : "◆ Checkpoint";
+    oneLiner = first ? `${settledPrefix()}Checkpoint ${first}` : `${settledPrefix()}Checkpoint`;
     rules.push("checkpoint");
   } else if (toolName === "rewind") {
     const tail = tailField(fields, "anchor", "target", "checkpoint", "id", "path");
-    oneLiner = tail ? `${settledPrefix()}Rewind ${singleLine(tail, 60)}` : "◆ Rewind";
+    oneLiner = tail ? `${settledPrefix()}Rewind ${singleLine(tail, 60)}` : `${settledPrefix()}Rewind`;
     rules.push("rewind");
   } else if (toolName === "context_notes") {
     const c = singleLine(strField(fields, "path", "file", "bytes", "note", "notes", "content"), 60);
-    oneLiner = c ? `${settledPrefix()}Context Notes ${c}` : "◆ Context Notes";
+    oneLiner = c ? `${settledPrefix()}Context Notes ${c}` : `${settledPrefix()}Context Notes`;
     rules.push("context_notes");
   } else if (toolName === "new_context") {
     return { text, changed: false, rule: "", fullText: text };
   } else if (toolName === "security_scan") {
     const a = strField(fields, "action", "op");
     const p = singleLine(strField(fields, "path", "file", "target"), 60);
-    oneLiner = `${settledPrefix()}Security Scan${a ? ` ${a}` : ""}${p ? ` ${p}` : ""}`.trim() || "◆ Security Scan";
+    oneLiner = `${settledPrefix()}Security Scan${a ? ` ${a}` : ""}${p ? ` ${p}` : ""}`.trim() || `${settledPrefix()}Security Scan`;
     rules.push("security_scan");
   } else if (toolName === "memory_edit") {
     const m = singleLine(strField(fields, "status", "op", "action", "memory", "name", "result"), 60);
-    oneLiner = m ? `${settledPrefix()}Memory Edit ${m}` : "◆ Memory Edit";
+    oneLiner = m ? `${settledPrefix()}Memory Edit ${m}` : `${settledPrefix()}Memory Edit`;
     rules.push("memory_edit");
   } else if (toolName === "retain") {
     oneLiner = `${settledPrefix()}Retain`;
     rules.push("retain");
   } else if (toolName === "recall") {
     const q = singleLine(strField(fields, "query", "q", "pattern", "text"), 80);
-    oneLiner = q ? `${settledPrefix()}Recall ${q}` : "◆ Recall";
+    oneLiner = q ? `${settledPrefix()}Recall ${q}` : `${settledPrefix()}Recall`;
     rules.push("recall");
   } else if (toolName === "reflect") {
     const q = singleLine(strField(fields, "query", "q", "pattern", "text"), 80);
-    oneLiner = q ? `${settledPrefix()}Reflect ${q}` : "◆ Reflect";
+    oneLiner = q ? `${settledPrefix()}Reflect ${q}` : `${settledPrefix()}Reflect`;
     rules.push("reflect");
   } else if (toolName === "learn") {
     const n = singleLine(strField(fields, "name", "skill", "topic", "title"), 60);
-    oneLiner = n ? `${settledPrefix()}Learn ${n}` : "◆ Learn";
+    oneLiner = n ? `${settledPrefix()}Learn ${n}` : `${settledPrefix()}Learn`;
     rules.push("learn");
   } else if (toolName === "manage_skill") {
     const op = strField(fields, "op", "action");
     const n = singleLine(strField(fields, "name", "skill"), 60);
-    oneLiner = `${settledPrefix()}Manage Skill${op ? ` ${op}` : ""}${n ? ` ${n}` : ""}`.trim() || "◆ Manage Skill";
+    oneLiner = `${settledPrefix()}Manage Skill${op ? ` ${op}` : ""}${n ? ` ${n}` : ""}`.trim() || `${settledPrefix()}Manage Skill`;
     rules.push("manage_skill");
   } else if (toolName.startsWith("mcp__") || toolName.includes("/")) {
     const r = collapseMcpText(toolName, stripped);

@@ -361,7 +361,7 @@ export function renderHubCardLines(
         width,
         conciseErrorText(result, {
           fallback: `Hub ${data.op} failed`,
-          skipPattern: /^●?\s*Hub\b/iu,
+          skipPattern: /^[^\p{L}\p{N}]*Hub\b/iu,
         }),
         true,
       ),

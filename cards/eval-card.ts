@@ -88,8 +88,10 @@ function evalResultText(result: unknown, header: string): string {
   if (typeof stashed === "string" && stashed) return stashed;
   const raw = toolResultText(result);
   const nl = raw.indexOf("\n");
-  const first = (nl === -1 ? raw : raw.slice(0, nl)).trim();
-  if (nl !== -1 && first === `◆ ${stripSgr(header).trim()}`) return raw.slice(nl + 1);
+  // Compare without the leading mark: the one-liner is prefixed with whatever `indicator` resolves to.
+  const withoutMark = (line: string): string => line.replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  const first = withoutMark(nl === -1 ? raw : raw.slice(0, nl));
+  if (nl !== -1 && first === stripSgr(header).trim()) return raw.slice(nl + 1);
   return raw;
 }
 

@@ -199,7 +199,7 @@ export function renderWriteCard(
               width,
               conciseErrorText(result, {
                 fallback: "Write failed",
-                skipPattern: /^◆?\s*Write\b/iu,
+                skipPattern: /^[^\p{L}\p{N}]*Write\b/iu,
               }),
               undefined,
               true,
