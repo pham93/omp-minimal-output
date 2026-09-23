@@ -29,6 +29,19 @@ const { DEFAULT_CONFIG, isWrappedTool, setPluginConfigForTest, wrapTool, WRAPPED
 
 const theme = { fg: (_token: string, text: string) => text, bold: (text: string) => text, dim: (text: string) => text };
 
+function registryFor(active: () => boolean) {
+  return new CardRegistry({
+    active,
+    groupedTools: new GroupedToolManager({
+      rowIsLive: () => false,
+      activityLabel: () => "",
+      activityRunId: () => "run",
+      activityStartedAt: () => 0,
+    }),
+    parentLabelForCard: () => "",
+  });
+}
+
 function renderTool(toolName: string, args: unknown, result: unknown, width = 100, options: unknown = {}): string[] {
   const registry = new CardRegistry({
     active: () => true,
@@ -155,6 +168,47 @@ describe("every newly wrapped tool keeps its native escape hatch", () => {
         const key = WRAPPED_TOOL_REGISTRY[tool as keyof typeof WRAPPED_TOOL_REGISTRY].nativeKey;
         setPluginConfigForTest({ ...DEFAULT_CONFIG, [key]: true } as never);
         expect(wrapTool(tool)).toBe(false);
+      }
+    } finally {
+      setPluginConfigForTest(null);
+    }
+  });
+});
+
+describe("a renderer must never hide output", () => {
+  // The non-negotiable: when the plugin is off, or a `native<Name>` setting wins, the registry throws
+  // so the host restores its own renderer. Returning an empty component instead would blank the row.
+  const request = {
+    phase: "result",
+    theme,
+    args: {},
+    options: {},
+    result: { details: {}, content: [{ type: "text", text: "native" }] },
+    resultText: { content: [{ type: "text", text: "" }] },
+  } as const;
+
+  test("a disabled plugin throws for dedicated cards and collapsed cards alike", () => {
+    try {
+      setPluginConfigForTest({ ...DEFAULT_CONFIG });
+      for (const toolName of ["write", "edit", "eval", "web_search", "lsp", "retain", "recall"]) {
+        const registry = registryFor(() => false);
+        expect(() => registry.render({ ...request, toolName: toolName as never }), toolName).toThrow(
+          /native rendering required/u,
+        );
+      }
+    } finally {
+      setPluginConfigForTest(null);
+    }
+  });
+
+  test("native<Name> mid-session throws too, so the host takes the row back", () => {
+    try {
+      setPluginConfigForTest({ ...DEFAULT_CONFIG, nativeLsp: true, nativeWrite: true });
+      for (const toolName of ["lsp", "write"]) {
+        const registry = registryFor(() => true);
+        expect(() => registry.render({ ...request, toolName: toolName as never }), toolName).toThrow(
+          /native rendering required/u,
+        );
       }
     } finally {
       setPluginConfigForTest(null);
