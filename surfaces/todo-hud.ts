@@ -32,9 +32,9 @@ function getTextOf(child: unknown): string {
   }
 }
 
-// Native HUD is one Text: blank line, bold "TODO", then tree-spine rows.
-// Transcript cards title "Todo" via renderStatusLine and are Containers,
-// so getText-only matching does not skin those.
+// Native HUD is a Text whose head is a bold "TODO": 18.2.9 appends the tree-spine rows to that same
+// Text, older hosts used a separate banner line ("", "TODO"). Transcript cards title "Todo" in mixed
+// case and are Containers, so a Text headed by exactly `TODO` (or `TODO …`) is the HUD, not a card.
 export function isTodoHudBanner(child: unknown): boolean {
   if (typeof child !== "object" || child === null) return false;
   const text = getTextOf(child);
@@ -44,11 +44,26 @@ export function isTodoHudBanner(child: unknown): boolean {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  return lines[0] === "TODO" && lines.length >= 2;
+  const head = lines[0] ?? "";
+  return head === "TODO" || head.startsWith("TODO ");
 }
 
+/** 18.2.9 renamed the HUD container, so identity also comes from its structure. */
 export function isTodoHudContainer(value: unknown): boolean {
   return ctorNameOf(value) === "TodoHudContainer";
+}
+
+/** The HUD container holds only text: the banner plus its tree rows. A status container holds widgets. */
+function holdsOnlyText(children: readonly unknown[]): boolean {
+  return (
+    children.length > 0 &&
+    children.every(
+      (child) =>
+        typeof child === "object" &&
+        child !== null &&
+        typeof (child as { getText?: unknown }).getText === "function",
+    )
+  );
 }
 
 // ToolExecutionComponent: updateResult + seal + canBeDisplacedBy.
@@ -155,7 +170,11 @@ export function installTodoChrome(ContainerCtor: unknown, deps: TodoChromeDeps):
     } catch {
       hideHud = false;
     }
-    const dropHudChildren = hideHud && isTodoHudContainer(container);
+    // Identity by class name for hosts that still expose it, and by structure for 18.2.9+ where the
+    // class was renamed: a container of nothing but text that carries the HUD banner is the HUD.
+    const holdsHudBanner = args.some((arg) => isTodoHudBanner(arg));
+    const dropHudChildren =
+      hideHud && (isTodoHudContainer(container) || (holdsHudBanner && holdsOnlyText(args)));
     for (const arg of args) {
       try {
         if (arg && typeof arg === "object") {
