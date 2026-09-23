@@ -6,6 +6,7 @@ import {
   conciseErrorText,
   minimalCardHeaderLine,
   parentCardHeaderLines,
+  cardDetailLine,
   resolveParentCardLabel,
   type ParentCardLabel,
 } from "./card-primitives.ts";
@@ -190,16 +191,20 @@ export function renderWriteCard(
           parentLabel,
         });
         if (lifecycle.error) {
-          const error = `${TOOL_INDENT} ${paintAt(
-            theme,
-            conciseErrorText(result, {
-              fallback: "Write failed",
-              skipPattern: /^◆?\s*Write\b/iu,
-            }),
-            "error",
-            1,
-          )}`;
-          lines.push(error);
+          // Through `cardDetailLine` like every other detail row: it clamps to the row width, so a
+          // long native error cannot emit a row wider than the terminal.
+          lines.push(
+            cardDetailLine(
+              theme,
+              width,
+              conciseErrorText(result, {
+                fallback: "Write failed",
+                skipPattern: /^◆?\s*Write\b/iu,
+              }),
+              undefined,
+              true,
+            ),
+          );
           return lines;
         }
 

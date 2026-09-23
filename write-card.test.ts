@@ -249,3 +249,18 @@ describe("cascading line opacity animation (Option 1)", () => {
     }
   });
 });
+
+describe("write-card error rows respect the terminal width", () => {
+  test("a long native error cannot produce an over-wide row", () => {
+    const long = "E".repeat(300);
+    const result = { isError: true, details: { error: long }, content: [{ type: "text", text: long }] };
+    for (const width of [40, 60, 120]) {
+      const lines = renderCard(renderWriteCard(null, { path: "a.ts", content: "x" }, result, {}), width);
+      const widest = Math.max(...lines.map((line) => stripAnsi(line).length));
+      expect(widest).toBeLessThanOrEqual(width);
+      // The failure is still reported, just bounded.
+      expect(lines.map(stripAnsi).join("\n")).toContain("EEE");
+    }
+  });
+});
+
