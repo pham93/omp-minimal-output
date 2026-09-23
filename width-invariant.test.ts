@@ -123,8 +123,11 @@ function registryFor(toolName: string): CardRegistry {
 const surfaces: Surface[] = [];
 for (const toolName of ["bash", "read", "grep", "glob", "write", "edit", "eval", "web_search"]) {
   for (const state of ["running", "settled", "error"] as const) {
+    // Expanded runs the detail paths — content lines, diffs, output bodies — which is where an
+    // unclamped row would come from.
+    for (const expanded of [false, true]) {
     surfaces.push({
-      name: `${toolName}/${state}`,
+      name: `${toolName}/${state}${expanded ? "/expanded" : ""}`,
       render: (width, hostile) => {
         const input: Record<string, unknown> =
           toolName === "bash"
@@ -163,7 +166,8 @@ for (const toolName of ["bash", "read", "grep", "glob", "write", "edit", "eval",
             result,
             resultText: { content: [{ type: "text", text: hostile }] },
             toolCallId: `call:${toolName}`,
-            expanded: false,
+            expanded,
+            options: { expanded },
             width,
             theme,
             parentLabel: "",
@@ -172,6 +176,7 @@ for (const toolName of ["bash", "read", "grep", "glob", "write", "edit", "eval",
         );
       },
     });
+    }
   }
 }
 
@@ -268,22 +273,25 @@ describe("every row-producing surface respects the width it was given", () => {
     const silent: string[] = [];
     let totalRows = 0;
     try {
-      for (const width of WIDTHS) {
-        for (const surface of surfaces) {
-          let surfaceRows = 0;
-          for (const hostile of HOSTILE) {
-            for (const row of surface.render(width, hostile)) {
-              surfaceRows += 1;
-              const cells = cellsOf(String(row));
-              if (cells > width) {
-                violations.push(
-                  `${surface.name} @${width} -> ${cells} cells: ${JSON.stringify(String(row).slice(0, 60))}`,
-                );
+      for (const detailLevel of ["minimal", "standard", "detailed"] as const) {
+        setPluginConfigForTest({ ...DEFAULT_CONFIG, detailLevel });
+        for (const width of WIDTHS) {
+          for (const surface of surfaces) {
+            let surfaceRows = 0;
+            for (const hostile of HOSTILE) {
+              for (const row of surface.render(width, hostile)) {
+                surfaceRows += 1;
+                const cells = cellsOf(String(row));
+                if (cells > width) {
+                  violations.push(
+                    `${surface.name} ${detailLevel} @${width} -> ${cells} cells: ${JSON.stringify(String(row).slice(0, 60))}`,
+                  );
+                }
               }
             }
+            if (width === WIDTHS[0] && detailLevel === "minimal" && surfaceRows === 0) silent.push(surface.name);
+            totalRows += surfaceRows;
           }
-          if (width === WIDTHS[0] && surfaceRows === 0) silent.push(surface.name);
-          totalRows += surfaceRows;
         }
       }
     } finally {
@@ -291,7 +299,7 @@ describe("every row-producing surface respects the width it was given", () => {
     }
     // A surface that renders nothing would pass the width check vacuously.
     expect(silent).toEqual([]);
-    expect(totalRows).toBeGreaterThan(500);
+    expect(totalRows).toBeGreaterThan(5000);
     expect([...new Set(violations)]).toEqual([]);
   });
 });
