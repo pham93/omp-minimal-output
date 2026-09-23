@@ -178,6 +178,7 @@ Source of truth: `~/.omp/plugins/omp-plugins.lock.json` + project overrides (`.o
 - Task/Hub: no registration, no schema copy, no approval path. Hub's argument-dependent policy untouched.
 - Registry and card renderers throw on failure; the host catch restores native rendering. Deferred render errors stay protected by the host's safe renderer.
 - Control bytes (ESC, OSC, C0/C1) sanitized before paint. Width truncation is ANSI-aware.
+- No row exceeds the width it was rendered at: a row that overflows wraps in the terminal while the host still counts it as one row, which shifts every row below it. When a row cannot hold its right-hand suffix (duration, `Ctrl+O` hint) plus at least one body cell, the suffix is dropped and the body keeps its cells — `formatRowLine` owns this, and `cardDetailLine`/`thoughtRailLine` build on it. `width-invariant.test.ts` sweeps every row producer across densities and widths 20–200 with hostile content.
 - Grouped reads share one parent row; settled records freeze `label/total/runId` so rebuilds never mirror a later run.
 - One `core/container-interceptor.ts` owns `Container.prototype.addChild`; skins register subscribers with idempotent cleanup and never overwrite another extension's hook.
 
