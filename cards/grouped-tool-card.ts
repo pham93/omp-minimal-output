@@ -160,7 +160,8 @@ export class GroupedToolManager {
           const live = this.#deps.rowIsLive(row.fp);
           const isThought = row.fp.startsWith("thought:");
           if (isThought && live) continue;
-          // `hideThinkingBlock` hides the whole thought surface, not only its detail lines.
+          // `hideThinkingBlock` hides the transcript thought row. The live widget is the surface that
+          // replaces it, so that one keeps streaming.
           if (isThought && isHideThinkingBlock(sessionCtx)) continue;
           const isLastTool = idx === rows.length - 1;
           const rowLine = formatRowLine(theme, width, {

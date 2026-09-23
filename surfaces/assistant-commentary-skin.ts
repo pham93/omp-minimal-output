@@ -219,7 +219,7 @@ function createThoughtSlot(target: object, deps: AssistantCommentarySkinDeps): {
     },
     render(width: number): readonly string[] {
       if (!state.thinkingText || state.live) return [];
-      // `hideThinkingBlock` hides the thought block everywhere, not just its detail lines.
+      // `hideThinkingBlock` hides the settled transcript thought block; the live widget keeps streaming.
       if (isHideThinkingBlock(target)) return [];
       const cfg = getPluginConfig();
       const profile = detailProfile(state.options, cfg);
