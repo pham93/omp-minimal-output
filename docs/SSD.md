@@ -152,7 +152,7 @@ Tools without a dedicated layout — LSP, AST-grep, Debug, GitHub, Checkpoint, R
 
 | Setting                                               | Default           | Effect                                                                |
 | ----------------------------------------------------- | ----------------- | --------------------------------------------------------------------- |
-| `nativeBash/Read/Grep/Glob/Write/Edit/Eval/WebSearch` | `false`           | `true` restores native renderer per tool                              |
+| `native<Name>`, `nativeMcp`                | `false`           | One per wrapped tool (`nativeLsp`, `nativeAstGrep`, …), plus `nativeMcp` for the whole `mcp__*` family: `true` restores the native renderer |
 | `nativeTask`                                          | `false`           | `true` restores native Task, result text untouched                    |
 | `taskMaxAgents`                                       | `4` (`1..8`)      | Standard Task item selection                                          |
 | `nativeHub`                                           | `false`           | `true` restores native Hub                                            |
