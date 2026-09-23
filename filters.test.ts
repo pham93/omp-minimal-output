@@ -115,3 +115,22 @@ describe("one-liner text does not depend on the configured mark", () => {
     }
   });
 });
+
+describe("search grouping counts each file once", () => {
+  test("per-file totals and the first-three window survive the single pass", () => {
+    const lines = [
+      "src/a.ts:1:1: hit",
+      "src/a.ts:2:1: hit",
+      "src/a.ts:9:1: hit",
+      "src/a.ts:12:1: hit",
+      "src/b.ts:3:1: hit",
+    ].join("\n");
+    const result = collapseToolText("grep", { pattern: "hit" }, lines);
+    expect(result.text).toContain("2 files");
+    expect(result.text).toContain("5 hits");
+    // Four hits in a.ts, three of them shown; the fourth is counted but not listed.
+    expect(result.text).toContain("src/a.ts: 4 hits (first 3 shown)");
+    expect(result.text).toContain("src/b.ts: 1 hits (first 1 shown)");
+    expect(result.text.split("\n").filter((line) => line.startsWith("src/a.ts:")).length).toBe(4);
+  });
+});

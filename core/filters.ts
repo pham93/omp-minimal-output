@@ -122,24 +122,30 @@ function aggregateLinterOutput(text: string, shortCmd: string): { oneLiner: stri
 
 function groupSearchResults(text: string, pattern: string): { oneLiner: string; details: string } | null {
   const lines = text.split("\n").filter((l) => l.trim());
-  const groups = new Map<string, string[]>();
+  // Per-file counts come out of the same pass that groups the lines. Counting them afterwards meant
+  // re-scanning every line per file — quadratic, and a 2000-hit result took ~290ms of synchronous
+  // work, which blocks the event loop.
+  const groups = new Map<string, { shown: string[]; total: number }>();
   let hits = 0;
   for (const line of lines) {
     const m = line.match(/^([^:]+):(\d+)(?::(\d+))?:(.*)$/);
     if (!m) return null;
     hits++;
     const file = m[1];
-    if (!groups.has(file)) groups.set(file, []);
-    const list = groups.get(file);
-    if (list && list.length < 3) list.push(line);
+    const group = groups.get(file);
+    if (group) {
+      group.total += 1;
+      if (group.shown.length < 3) group.shown.push(line);
+    } else {
+      groups.set(file, { shown: [line], total: 1 });
+    }
   }
   if (groups.size === 0) return null;
   const label = pattern ? `\`${pattern}\`` : "search";
   const details: string[] = [];
-  for (const [file, first] of groups) {
-    const total = lines.filter((l) => l === file || l.startsWith(`${file}:`)).length;
-    details.push(`${file}: ${total} hits (first ${first.length} shown)`);
-    details.push(...first);
+  for (const [file, group] of groups) {
+    details.push(`${file}: ${group.total} hits (first ${group.shown.length} shown)`);
+    details.push(...group.shown);
   }
   return {
     oneLiner: `${settledPrefix()}Search ${label} — ${groups.size} files, ${hits} hits`,
