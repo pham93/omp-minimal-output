@@ -437,7 +437,7 @@ describe("thinking widget 4-line placeholder above editor", () => {
     setPluginConfigForTest(null);
   });
 
-  test("thinking widget reserves its 4-line slot but renders no thought text when hideThinkingBlock is true", async () => {
+  test("thinking widget keeps streaming when hideThinkingBlock is true", async () => {
     type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
     const eventHandlers = new Map<string, EventHandler[]>();
     const widgets = new Map<
@@ -511,8 +511,11 @@ describe("thinking widget 4-line placeholder above editor", () => {
 
     const liveContainer = thinkingWidget!.factory(null, null) as unknown as MockContainer;
     const liveLines = liveContainer.children[0]?.render?.(80) ?? [];
-    // Height is still reserved, but hidden thinking renders no text at all.
-    expect(liveLines).toEqual(["", "", "", ""]);
+    // `hideThinkingBlock` governs the native block and the transcript thought surfaces; the plugin's
+    // own widget is the replacement for them and keeps streaming.
+    const plain = liveLines.map((line) => Bun.stripANSI(String(line)));
+    expect(plain.some((line) => line.includes("Thinking"))).toBe(true);
+    expect(plain.join("").trim().length).toBeGreaterThan(0);
   });
 
   test("a host widget wipe does not orphan the thinking widget across a session switch", async () => {

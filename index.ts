@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { Container } from "@oh-my-pi/pi-tui";
 import { acquireRuntimeOwner } from "./core/runtime-owner.ts";
 import { getContainerInterceptor } from "./core/container-interceptor.ts";
-import { getPluginConfig, isHideThinkingBlock, reloadPluginConfig, wrapTool, isWrappedTool } from "./core/config.ts";
+import { getPluginConfig, reloadPluginConfig, wrapTool, isWrappedTool } from "./core/config.ts";
 import { AnimationPump } from "./core/animation-pump.ts";
 import { ActivityTracker, ACTIVITY_LABEL_SOURCE } from "./core/activity-tracker.ts";
 import {
@@ -59,7 +59,7 @@ export default function (pi: ExtensionAPI) {
         }
       ).registerAssistantThinkingRenderer(() => undefined);
     } catch {
-      // Older hosts without this hook keep hideThinkingBlock + the widget path.
+      // Older hosts without this hook fall back to the plugin's own thinking widget.
     }
   }
 
@@ -132,7 +132,6 @@ export default function (pi: ExtensionAPI) {
     const thinkingWidget = new ThinkingWidget({
       owns: runtimeOwner.owns,
       activityRunId: () => activityTracker.activityRunId,
-      hideThinking: () => isHideThinkingBlock(sessionContext),
       onSyncThought: (fp, thought) => {
         groupedTools.upsertGroupRow(fp, thought);
       },

@@ -12,7 +12,6 @@ export interface ThinkingWidgetDeps {
   owns: () => boolean;
   activityRunId: () => string | null;
   /** Whether the host hides thinking blocks. The widget then renders no thought text. */
-  hideThinking?: () => boolean;
   onSyncThought?: (
     fp: string,
     thought: { body: string; live: boolean; right: string; startedAt: number; detail?: string },
@@ -336,10 +335,6 @@ export class ThinkingWidget {
         if (!this.#deps.owns()) return [];
         if (this.#tui) ensureThinkingBeforeTodos(this.#tui);
         if (!this.#live) {
-          return ["", "", "", ""];
-        }
-        if (this.#deps.hideThinking?.() === true) {
-          // Thinking is hidden: keep the reserved height, render no thought text.
           return ["", "", "", ""];
         }
         const lines: string[] = [
