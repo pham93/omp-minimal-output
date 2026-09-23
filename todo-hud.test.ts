@@ -43,10 +43,13 @@ class Host {
 // `installTodoChrome` is once-per-process and its hook re-reads `hideHud` on every insertion, so the
 // file shares one install and flips the flag per case.
 let hideFlag = true;
+let hideCardFlag = false;
+const PAINTED = "Painted todo card";
 const dispose = installTodoChrome(Host, {
   hideHud: () => hideFlag,
-  skinCard: () => false,
-  paintCard: () => [],
+  hideCard: () => hideCardFlag,
+  skinCard: () => true,
+  paintCard: () => [PAINTED],
   active: () => true,
 });
 afterAll(() => dispose());
@@ -109,5 +112,62 @@ describe("the HUD container is identified by structure, not only by class name",
     const hud = new Host();
     hud.addChild(hostText(["", "TODO ├─ a"]));
     expect(hud.children).toHaveLength(1);
+  });
+});
+
+describe("the transcript todo card is skinned, and only when it is a todo", () => {
+  /** A host ToolExecutionComponent: the methods `isTodoCardHost` requires, and nothing else. */
+  function hostToolCard(native: readonly string[] = ["native row"]) {
+    const card = {
+      rows: [...native],
+      updateResult(_result: unknown) {},
+      setExpanded(_expanded: boolean) {},
+      seal() {},
+      canBeDisplacedBy: () => true,
+      isDisplaceableBlock: () => true,
+      render: () => [...card.rows],
+    };
+    return card;
+  }
+
+  const todoResult = { details: { phases: [{ name: "Work", tasks: [] }] } };
+
+  test("a todo result takes over the card's rows", () => {
+    hideCardFlag = false;
+    const parent = new Host();
+    const card = hostToolCard();
+    parent.addChild(card);
+    card.updateResult(todoResult);
+    expect(card.render()).toEqual([PAINTED]);
+  });
+
+  test("a non-todo result keeps the native rows", () => {
+    hideCardFlag = false;
+    const parent = new Host();
+    const card = hostToolCard();
+    parent.addChild(card);
+    card.updateResult({ details: { output: "not a todo" } });
+    expect(card.render()).toEqual(["native row"]);
+  });
+
+  test("hideCard drops the transcript card entirely", () => {
+    hideCardFlag = true;
+    const parent = new Host();
+    const card = hostToolCard();
+    parent.addChild(card);
+    card.updateResult(todoResult);
+    expect(card.render()).toEqual([]);
+    hideCardFlag = false;
+  });
+
+  test("a component without the ToolExecutionComponent shape is not skinned", () => {
+    hideCardFlag = false;
+    const parent = new Host();
+    const card = hostToolCard();
+    // A read-group host: same render/updateResult pair, but `removeEntry` marks it.
+    (card as Record<string, unknown>)["removeEntry"] = () => {};
+    parent.addChild(card);
+    card.updateResult(todoResult);
+    expect(card.render()).toEqual(["native row"]);
   });
 });
