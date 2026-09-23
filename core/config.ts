@@ -374,6 +374,36 @@ function readYamlFlag(filePath: string, key: string): boolean | undefined {
   return undefined;
 }
 
+/**
+ * The yml fallbacks require `readFileSync`, and this runs from render paths (the thinking widget's
+ * render callback, the commentary slot, grouped thought rows) — so cache the answer for the same
+ * interval the config mtime check uses instead of hitting the disk every frame.
+ */
+let yamlHideThinking: { at: number; value: boolean | undefined } | undefined;
+let yamlHideThinkingReads = 0;
+
+function yamlHideThinkingBlock(): boolean | undefined {
+  const now = Date.now();
+  if (yamlHideThinking !== undefined && now - yamlHideThinking.at < CONFIG_MTIME_CHECK_INTERVAL_MS) {
+    return yamlHideThinking.value;
+  }
+  yamlHideThinkingReads += 1;
+  const local = readYamlFlag(join(process.cwd(), "minimal-output.yml"), "hideThinkingBlock");
+  const value = local !== undefined ? local : readYamlFlag(join(homedir(), ".omp", "agent", "config.yml"), "hideThinkingBlock");
+  yamlHideThinking = { at: now, value };
+  return value;
+}
+
+/** Test hook: how many times the yml fallback has been read, and a reset for both it and the cache. */
+export function resetHideThinkingCacheForTest(): void {
+  yamlHideThinking = undefined;
+  yamlHideThinkingReads = 0;
+}
+
+export function yamlHideThinkingReadsForTest(): number {
+  return yamlHideThinkingReads;
+}
+
 export function isHideThinkingBlock(ctx?: unknown, config = getPluginConfig()): boolean {
   if (typeof ctx === "object" && ctx !== null) {
     const rec = ctx as Record<string, unknown>;
@@ -389,13 +419,8 @@ export function isHideThinkingBlock(ctx?: unknown, config = getPluginConfig()): 
   if (typeof config.hideThinkingBlock === "boolean") {
     return config.hideThinkingBlock;
   }
-  // Check minimal-output.yml in working directory
-  const localYml = readYamlFlag(join(process.cwd(), "minimal-output.yml"), "hideThinkingBlock");
-  if (localYml !== undefined) return localYml;
-
-  // Check ~/.omp/agent/config.yml
-  const agentConfig = readYamlFlag(join(homedir(), ".omp", "agent", "config.yml"), "hideThinkingBlock");
-  if (agentConfig !== undefined) return agentConfig;
+  const fromYaml = yamlHideThinkingBlock();
+  if (fromYaml !== undefined) return fromYaml;
 
   return false;
 }

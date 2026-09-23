@@ -6,6 +6,9 @@ import {
   getPluginConfig,
   indicatorFrames,
   indicatorSettled,
+  isHideThinkingBlock,
+  resetHideThinkingCacheForTest,
+  yamlHideThinkingReadsForTest,
   maybeReloadConfig,
   setPluginConfigForTest,
 } from "./core/config.ts";
@@ -81,5 +84,21 @@ describe("maybeReloadConfig throttling", () => {
     expect(() => maybeReloadConfig(now + CONFIG_MTIME_CHECK_INTERVAL_MS - 1)).not.toThrow();
     // Check after interval elapses runs
     expect(() => maybeReloadConfig(now + CONFIG_MTIME_CHECK_INTERVAL_MS + 1)).not.toThrow();
+  });
+});
+
+describe("thinking visibility stays off the disk in render paths", () => {
+  test("repeated calls reuse one cached yml answer", () => {
+    resetHideThinkingCacheForTest();
+    for (let i = 0; i < 50; i += 1) isHideThinkingBlock();
+    // One read set (cwd yml, then the agent yml only if the first missed) per cache window.
+    expect(yamlHideThinkingReadsForTest()).toBeLessThanOrEqual(1);
+  });
+
+  test("a context-provided value short-circuits without touching the cache", () => {
+    resetHideThinkingCacheForTest();
+    expect(isHideThinkingBlock({ hideThinkingBlock: false })).toBe(false);
+    expect(isHideThinkingBlock({ hideThinkingBlock: true })).toBe(true);
+    expect(yamlHideThinkingReadsForTest()).toBe(0);
   });
 });
