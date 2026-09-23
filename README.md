@@ -1,6 +1,6 @@
 # omp-minimal-output
 
-Grok-build-style minimal console output for omp. Collapsed rows use theme-derived settled marks (`●` for web search, Task, and Hub; the configured indicator elsewhere) with no background fill; `ctrl+o` (`app.tools.expand`) toggles expansion globally with a configurable 20-content-line default allowance per section. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path. `/inspect` (or `ctrl+alt+i`) opens a Rewind-like fullscreen replica; ↑/↓ outlines one tool card, Enter expands that replica only, and Esc closes without rewriting transcript scrollback.
+Grok-build-style minimal console output for omp. Collapsed rows use the configured `indicator` mark with no background fill — every card, plus the collapsed one-liners of tools without a card, so no surface hardcodes a mark; `ctrl+o` (`app.tools.expand`) toggles expansion globally with a configurable 20-content-line default allowance per section. Rows are not clickable: row input is core-owned and custom renderers are display-only, so there is no per-row click path. `/inspect` (or `ctrl+alt+i`) opens a Rewind-like fullscreen replica; ↑/↓ outlines one tool card, Enter expands that replica only, and Esc closes without rewriting transcript scrollback.
 
 Wrapped tools merge call and result into one row. Task and Hub keep their native registrations, schemas, approvals, execution, and result details; a display-only skin projects their native component state into the same minimal card language.
 

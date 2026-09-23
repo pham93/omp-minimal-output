@@ -89,7 +89,7 @@ Grouped reads (native group skinned):
 ◆ Glob `src/**/*.ts` — 12 files
 ```
 
-LSP, AST-grep, and Debug keep their native Standard/Detailed rendering. Their opaque rendered rows do not expose reliable input/output boundaries, so the plugin does not guess which rows are headers. These tools have no card: their rows come from the rewritten result text, so the leading `◆` is literal and does not follow the `indicator` setting.
+LSP, AST-grep, and Debug keep their native Standard/Detailed rendering. Their opaque rendered rows do not expose reliable input/output boundaries, so the plugin does not guess which rows are headers. These tools have no card: their rows come from the rewritten result text, whose leading one-liner prefix is the configured `indicator` mark (`◆` for `diamond`, `●` for `dot`, none for `none`) — the mark follows the setting even though the rows around it are host-rendered. MCP one-liners take the same mark; they no longer carry a separate `◇` badge.
 
 ```text
 ◆ Lsp references foo.ts — 8 results

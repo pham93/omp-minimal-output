@@ -144,9 +144,9 @@ Contract: line 1 is always the collapsed row. Dedicated cards (`write`, `edit`, 
 | Web search | `Search \`q\` — N sources`                   | bounded bold titles + dim URLs                      | `webSearchMaxResults` / `detailedMaxRows`     |
 | Task       | `Task N agents — completed`                  | bounded agent / status / result rows                | `taskMaxAgents` / `detailedMaxRows`           |
 | Hub        | `Hub op target — summary`                    | bounded peer / job / message rows                   | `hubMaxItems` / `detailedMaxRows`             |
-| Read group | `● Read N files`                             | bounded file list                                   | `detailedMaxRows`                             |
+| Read group | `◆ Read N files`                             | bounded file list                                   | `detailedMaxRows`                             |
 
-LSP, AST-grep, and Debug retain native Standard/Detailed rendering because their rendered rows do not expose reliable content boundaries. Minimal retains its existing single-row projection. Dedicated running rows show the live indicator and elapsed time; error rows retain identity and bounded failure detail. See [`EXAMPLES.md`](EXAMPLES.md) for row shapes.
+LSP, AST-grep, and Debug retain native Standard/Detailed rendering because their rendered rows do not expose reliable content boundaries. Minimal retains its existing single-row projection, whose prefix is the configured `indicator` mark: `collapseToolText` in `core/filters.ts` takes it from `indicatorSettled()`, so a tool without a card still follows the setting. Dedicated running rows show the live indicator and elapsed time; error rows retain identity and bounded failure detail. See [`EXAMPLES.md`](EXAMPLES.md) for row shapes.
 
 ## 7. Config (`core/config.ts` + `package.json`)
 
