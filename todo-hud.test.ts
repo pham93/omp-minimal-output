@@ -68,7 +68,18 @@ describe("native TODO HUD identity", () => {
   });
 
   test("transcript text is not a HUD banner", () => {
-    for (const lines of [["Todo"], ["// TODO: token"], ["TODO: implement this"], ["- [ ] TODO"], [""]]) {
+    for (const lines of [
+      ["Todo"],
+      ["// TODO: token"],
+      ["TODO: implement this"],
+      ["- [ ] TODO"],
+      [""],
+      // Plain prose/code that merely starts with the word: an all-text container carrying this must
+      // not be dropped, or the transcript would lose the line.
+      ["TODO fix later"],
+      ["TODO write the docs"],
+      ["TODO 3 items left"],
+    ]) {
       expect(isTodoHudBanner(hostText(lines)), JSON.stringify(lines)).toBe(false);
     }
     expect(isTodoHudBanner({ render: () => [] })).toBe(false);

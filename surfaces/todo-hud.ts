@@ -45,7 +45,13 @@ export function isTodoHudBanner(child: unknown): boolean {
     .map((line) => line.trim())
     .filter(Boolean);
   const head = lines[0] ?? "";
-  return head === "TODO" || head.startsWith("TODO ");
+  // Only the host's three shapes: the banner alone, the banner with tree-spine rows joined onto it
+  // (18.2.9), and the compact `TODO i/r · …` status line. A transcript line that merely starts with
+  // the word — a `TODO fix later` code line — must not match, because a container of plain text that
+  // carries the banner is dropped wholesale.
+  if (head === "TODO") return true;
+  if (/^TODO \d+\/\d+(?:\s|$)/u.test(head)) return true;
+  return /^TODO\s/u.test(head) && /[├└│]/u.test(head);
 }
 
 /** 18.2.9 renamed the HUD container, so identity also comes from its structure. */
