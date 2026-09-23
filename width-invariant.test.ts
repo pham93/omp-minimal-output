@@ -68,6 +68,9 @@ const { renderDensityTodoHeader } = await import("./surfaces/todos-header.ts");
 const { paintAlertLine } = await import("./surfaces/warning-skin.ts");
 const { ThinkingWidget } = await import("./surfaces/thinking-widget.ts");
 const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
+const { installNativeToolCardSkin } = await import("./cards/native-tool-card-skin.ts");
+const { eventFingerprint } = await import("./core/results.ts");
+const { Container: PatchedContainer } = await import("@oh-my-pi/pi-tui");
 
 const theme = { fg: (_token: string, text: string) => text, bold: (text: string) => text, dim: (text: string) => text };
 
@@ -251,6 +254,83 @@ surfaces.push({
     }),
 });
 
+// The native Task/Hub skin repaints host ToolExecutionComponent rows, so its output lands in the
+// transcript like any other row producer.
+installNativeToolCardSkin(PatchedContainer, {
+  enabled: () => true,
+  theme: () => theme,
+  parentLabel: () => "",
+  active: () => true,
+});
+
+const NATIVE_FALLBACK = "__native_fallback__";
+
+interface HostToolExecution {
+  render: (width: number) => readonly string[];
+  updateArgs: (args: unknown, toolCallId: string) => void;
+  updateResult: (result: unknown, partial: boolean, toolCallId: string) => void;
+  setExecutionStarted: (toolCallId: string) => void;
+  setExpanded: (expanded: boolean) => void;
+  seal: () => void;
+}
+
+function hostToolExecution(native: (width: number) => readonly string[]): HostToolExecution {
+  return {
+    render: native,
+    updateArgs: () => {},
+    updateResult: () => {},
+    setExecutionStarted: () => {},
+    setExpanded: () => {},
+    seal: () => {},
+  };
+}
+
+function nativeSkinSurface(name: string, toolName: "task" | "hub", expanded: boolean): Surface {
+  return {
+    name,
+    render: (width, hostile) => {
+      const args =
+        toolName === "task"
+          ? { name: hostile, prompt: hostile, i: "Delegating hostile work" }
+          : { op: "send", to: hostile, message: hostile, i: "Sending hostile work" };
+      const result =
+        toolName === "task"
+          ? {
+              details: {
+                results: [
+                  { agent: hostile, status: "completed", result: hostile, durationMs: 1200 },
+                  { agent: `${hostile}b`, status: "failed", result: hostile },
+                ],
+                totalDurationMs: 2400,
+              },
+              content: [{ type: "text", text: hostile }],
+            }
+          : {
+              details: { op: "send", to: hostile, delivered: true, message: hostile, preview: hostile },
+              content: [{ type: "text", text: hostile }],
+            };
+      const toolCallId = `native:${toolName}`;
+      eventFingerprint({ toolName, toolCallId, input: args });
+      const container = new PatchedContainer();
+      // A sentinel the skin must replace: if it survives, the skin fell back to native rows and this
+      // surface would be checking the harness instead of the plugin.
+      const child = hostToolExecution(() => [NATIVE_FALLBACK, `${NATIVE_FALLBACK} ${hostile}`]);
+      container.addChild(child);
+      child.setExecutionStarted(toolCallId);
+      child.updateArgs(args, toolCallId);
+      child.updateResult(result, false, toolCallId);
+      child.setExpanded(expanded);
+      child.seal();
+      return rowsOf(container, width);
+    },
+  };
+}
+
+surfaces.push(nativeSkinSurface("native-skin/task", "task", false));
+surfaces.push(nativeSkinSurface("native-skin/task/expanded", "task", true));
+surfaces.push(nativeSkinSurface("native-skin/hub", "hub", false));
+surfaces.push(nativeSkinSurface("native-skin/hub/expanded", "hub", true));
+
 const hookAbove = { children: [] as unknown[], render: () => [] as string[] };
 const statusContainer: Record<string, unknown> = { setComponent: () => {} };
 const composer: Record<string, unknown> = { ui: undefined };
@@ -271,6 +351,7 @@ describe("every row-producing surface respects the width it was given", () => {
   test("no row is wider than the render width for hostile content", () => {
     const violations: string[] = [];
     const silent: string[] = [];
+    const fellBack: string[] = [];
     let totalRows = 0;
     try {
       for (const detailLevel of ["minimal", "standard", "detailed"] as const) {
@@ -282,6 +363,7 @@ describe("every row-producing surface respects the width it was given", () => {
               for (const row of surface.render(width, hostile)) {
                 surfaceRows += 1;
                 const cells = cellsOf(String(row));
+                if (String(row).includes(NATIVE_FALLBACK)) fellBack.push(surface.name);
                 if (cells > width) {
                   violations.push(
                     `${surface.name} ${detailLevel} @${width} -> ${cells} cells: ${JSON.stringify(String(row).slice(0, 60))}`,
@@ -299,6 +381,8 @@ describe("every row-producing surface respects the width it was given", () => {
     }
     // A surface that renders nothing would pass the width check vacuously.
     expect(silent).toEqual([]);
+    // Likewise a native-skin surface that fell back to the host's rows.
+    expect([...new Set(fellBack)]).toEqual([]);
     expect(totalRows).toBeGreaterThan(5000);
     expect([...new Set(violations)]).toEqual([]);
   });
