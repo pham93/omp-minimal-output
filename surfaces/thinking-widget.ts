@@ -1,6 +1,8 @@
 import { Container, visibleWidth } from "@oh-my-pi/pi-tui";
 import { TextScroller } from "./scrolling-text.ts";
 import { getPluginConfig } from "../core/config.ts";
+import { installStatusRowGuard, restoreStatusRowGuard } from "./composer-status.ts";
+import { definedChildren } from "../core/container-interceptor.ts";
 import { wrapLatestLines } from "../core/text.ts";
 import { LINE_WIDTH_RATIO, formatRowLine, elapsedSuffix } from "../core/theme.ts";
 import { THOUGHT_RAIL_PREFIX, thoughtRailLine } from "../cards/card-primitives.ts";
@@ -114,16 +116,104 @@ function runtimeHostFor(tui: unknown): ComposerRuntimeHost | undefined {
   return undefined;
 }
 
+interface RecoveredRuntimeChildren {
+  children: readonly unknown[];
+  /** True when the composer's stored list held a non-component that was dropped. */
+  pruned: boolean;
+}
+
+/** The composer mounts its status wrapper as the last child of the TUI (`setComponent` host). */
+function statusWrapperFor(tui: unknown): unknown {
+  const children = (tui as { children?: unknown } | undefined)?.children;
+  if (!Array.isArray(children) || children.length === 0) return undefined;
+  const last = children[children.length - 1] as { setComponent?: unknown; render?: unknown } | undefined;
+  if (!last || typeof last.setComponent !== "function" || typeof last.render !== "function") return undefined;
+  return last;
+}
+
 /** Composer runtime children recovered from `[header, ...runtimeChildren, statusHost]`. */
-function currentRuntimeChildren(tui: unknown, host: ComposerRuntimeHost): readonly unknown[] | undefined {
+function currentRuntimeChildren(tui: unknown, host: ComposerRuntimeHost): RecoveredRuntimeChildren | undefined {
   const children = (tui as { children?: unknown }).children;
   if (!Array.isArray(children) || children.length < 4) return undefined;
   const last = children[children.length - 1] as { setComponent?: unknown } | undefined;
   if (!last || typeof last.setComponent !== "function") return undefined;
-  const runtime = children.slice(1, children.length - 1);
-  if (!runtime.includes(host.statusContainer)) return undefined;
-  if (!runtime.includes(host.hookWidgetContainerAbove)) return undefined;
-  return runtime;
+  const stored = children.slice(1, children.length - 1);
+  if (!stored.includes(host.statusContainer)) return undefined;
+  if (!stored.includes(host.hookWidgetContainerAbove)) return undefined;
+  // The composer renders every entry of this list as a component, so a slot the
+  // host never constructed (an undefined chrome container) would crash the frame
+  // loop on the next paint.
+  const runtime = definedChildren(stored);
+  return { children: runtime, pruned: runtime !== stored };
+}
+
+/**
+ * Repair a chrome container whose stored child list holds a non-component. The
+ * composer renders these containers itself and dereferences every child
+ * (`Composer.renderFrame` → `rowTargetCandidates`), so a slot left undefined by
+ * a host or widget factory before our seam existed crashes the frame loop. The
+ * array is replaced, never spliced: an in-flight `Container.render` keeps the
+ * list it captured, and the container is invalidated on a microtask.
+ */
+function repairContainerChildren(container: unknown): void {
+  if (!container || typeof container !== "object") return;
+  const target = container as { children?: unknown; invalidate?: () => void };
+  const children = target.children;
+  if (!Array.isArray(children)) return;
+  const kept = definedChildren(children);
+  if (kept === children) return;
+  target.children = kept;
+  queueMicrotask(() => {
+    try {
+      target.invalidate?.();
+    } catch {
+      // Cache invalidation is best-effort; the next render recomputes anyway.
+    }
+  });
+}
+
+/**
+ * Keep the composer's stored child list component-only, and keep the hook
+ * container before the status row. Every host handoff goes through the wrapper,
+ * and a list the host already stored is repaired by re-mounting it here.
+ */
+function syncRuntimeChildren(tui: unknown, host: ComposerRuntimeHost): void {
+  if (!(host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE]) {
+    const native = host.applyRuntimeChildren;
+    const wrapper = (children: readonly unknown[]): void =>
+      native(moveBefore(definedChildren(children), host.hookWidgetContainerAbove, host.statusContainer));
+    host.composer.setRuntimeChildren = wrapper;
+    (host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE] = { wrapper, native } as RuntimeReorderState;
+  }
+  installStatusRowGuard(statusWrapperFor(tui));
+  const runtime = currentRuntimeChildren(tui, host);
+  if (!runtime) return;
+  const fixed = moveBefore(runtime.children, host.hookWidgetContainerAbove, host.statusContainer);
+  if (fixed !== runtime.children || runtime.pruned) host.applyRuntimeChildren(fixed);
+  for (const root of fixed) repairContainerChildren(root);
+}
+
+/**
+ * Re-assert the thinking-above-todos order. The host rebuilds its hook container after every
+ * `setWidget`, i.e. after our factories ran, so both widget render callbacks call this each frame;
+ * the lookup is a couple of indexOf scans, and it no-ops once the order is right.
+ */
+export function ensureThinkingBeforeTodos(tui: unknown): void {
+  const host = runtimeHostFor(tui);
+  if (!host) return;
+  orderHookWidgets(host);
+  syncRuntimeChildren(tui, host);
+}
+
+/**
+ * Keep the `aboveEditor` widget container before the status row, with the thinking block above the
+ * todos widget, so the composer stack reads thinking → todos → working status → editor.
+ */
+export function ensureThinkingAboveStatus(tui: unknown): void {
+  const host = runtimeHostFor(tui);
+  if (!host) return;
+  orderHookWidgets(host);
+  syncRuntimeChildren(tui, host);
 }
 
 /** Copy with `target` immediately before `anchor`; returns the input array when already there. */
@@ -186,39 +276,9 @@ function orderHookWidgets(host: ComposerRuntimeHost): void {
   });
 }
 
-/**
- * Re-assert the thinking-above-todos order. The host rebuilds its hook container after every
- * `setWidget`, i.e. after our factories ran, so both widget render callbacks call this each frame;
- * the lookup is a couple of indexOf scans, and it no-ops once the order is right.
- */
-export function ensureThinkingBeforeTodos(tui: unknown): void {
-  const host = runtimeHostFor(tui);
-  if (host) orderHookWidgets(host);
-}
-
-/**
- * Keep the `aboveEditor` widget container before the status row, with the thinking block above the
- * todos widget, so the composer stack reads thinking → todos → working status → editor.
- */
-export function ensureThinkingAboveStatus(tui: unknown): void {
-  const host = runtimeHostFor(tui);
-  if (!host) return;
-  orderHookWidgets(host);
-  if (!(host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE]) {
-    const native = host.applyRuntimeChildren;
-    const wrapper = (children: readonly unknown[]): void =>
-      native(moveBefore(children, host.hookWidgetContainerAbove, host.statusContainer));
-    host.composer.setRuntimeChildren = wrapper;
-    (host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE] = { wrapper, native } as RuntimeReorderState;
-  }
-  const runtime = currentRuntimeChildren(tui, host);
-  if (!runtime) return;
-  const fixed = moveBefore(runtime, host.hookWidgetContainerAbove, host.statusContainer);
-  if (fixed !== runtime) host.applyRuntimeChildren(fixed);
-}
-
 /** Restore the native order (hook container after the status/chip band) and drop the wrapper. */
 export function restoreStatusOrder(tui: unknown): void {
+  restoreStatusRowGuard(statusWrapperFor(tui));
   const host = runtimeHostFor(tui);
   if (!host) return;
   const state = (host.composer as Record<symbol, unknown>)[RUNTIME_REORDER_STATE] as RuntimeReorderState | undefined;
@@ -229,8 +289,8 @@ export function restoreStatusOrder(tui: unknown): void {
   const runtime = currentRuntimeChildren(tui, host);
   if (!runtime) return;
   const anchor = host.attachmentChipsContainer ?? host.statusContainer;
-  const restored = moveAfter(runtime, host.hookWidgetContainerAbove, anchor);
-  if (restored !== runtime) host.applyRuntimeChildren(restored);
+  const restored = moveAfter(runtime.children, host.hookWidgetContainerAbove, anchor);
+  if (restored !== runtime.children || runtime.pruned) host.applyRuntimeChildren(restored);
 }
 
 export class ThinkingWidget {

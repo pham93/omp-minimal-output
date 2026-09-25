@@ -35,7 +35,9 @@ Prefer boring, explicit code over clever abstractions. Make the smallest coheren
   - `cards/*-card.ts`: dedicated tool cards (write, edit, eval, web_search, task, hub).
   - `cards/native-tool-card-skin.ts`: display skin for native Task and Hub cards.
 - `surfaces/`: prompt chrome, widgets, and alert skins:
-  - `surfaces/composer-shapes.ts`: prompt composer layouts (Bottom Dock, Top Dock, Grayscale).
+  - `surfaces/composer-shapes.ts`: prompt composer layouts (Bottom Dock, Top Dock, Below Dock, Grayscale).
+  - `surfaces/composer-editor.ts`: editor re-framing, below-dock status row, and the composer refresh timer.
+  - `surfaces/composer-status.ts`, `surfaces/composer-gauge.ts`, `surfaces/composer-primitives.ts`: status text pipeline and providers, the crash-dump guard and session-title strip for the composer status surface, context gauge, host glyph vocabulary and ANSI/width helpers.
   - `surfaces/thinking-widget.ts`: animated reasoning stream widget above editor.
   - `surfaces/todo-widget.ts`, `surfaces/todos-header.ts`, `surfaces/todo-hud.ts`: sticky Todo widget and status line HUD.
   - `surfaces/commands.ts`: top-level slash command and shortcut registrations.

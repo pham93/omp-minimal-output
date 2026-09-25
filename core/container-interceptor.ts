@@ -19,6 +19,28 @@ function prototypeOf(value: unknown): ContainerPrototype | undefined {
   }
 }
 
+/**
+ * Drop `undefined`/`null` children before they reach the host. The composer's
+ * frame layout walks every entry of its chrome list and dereferences it
+ * (`Composer.renderFrame` → `rowTargetCandidates`), so one non-component takes
+ * the whole render loop down with `TypeError: undefined is not an object`.
+ * Components pass through untouched, and a clean list is returned as-is (same
+ * array reference), so callers can detect whether anything was dropped.
+ */
+export function definedChildren(children: readonly unknown[]): readonly unknown[] {
+  if (!Array.isArray(children)) return [];
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (child !== undefined && child !== null) continue;
+    const kept: unknown[] = [];
+    for (const candidate of children) {
+      if (candidate !== undefined && candidate !== null) kept.push(candidate);
+    }
+    return kept;
+  }
+  return children;
+}
+
 export class ContainerInterceptor {
   readonly #prototype: ContainerPrototype | undefined;
   #hooks: ContainerAddChildHook[] = [];
@@ -50,12 +72,19 @@ export class ContainerInterceptor {
           for (let index = hooks.length - 1; index >= 0; index -= 1) {
             try {
               const result = hooks[index]?.(this, children);
-              if (result) children = result.children;
+              if (result && Array.isArray(result.children)) children = result.children;
             } catch {
               // Skin failures must not change native insertion or error semantics.
             }
           }
-          return native.apply(this, children as unknown[]);
+          const kept = definedChildren(children);
+          // `Container.addChild` pushes its argument unconditionally: calling it with no child stores
+          // a literal `undefined` in the child list, and the composer's frame loop dereferences every
+          // chrome child (`Composer.renderFrame` → `rowTargetCandidates`), so one dropped row would
+          // take the render loop down with `TypeError: undefined is not an object`. Dropping a child
+          // means inserting nothing at all.
+          if (kept.length === 0) return undefined;
+          return native.apply(this, kept as unknown[]);
         };
         prototype.addChild = patched;
         if (prototype.addChild !== patched) return;

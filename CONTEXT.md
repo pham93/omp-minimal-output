@@ -20,7 +20,7 @@ The managed 120ms ticker coordinating shared spin frames and requesting UI repai
 The runtime interception layer that preserves native tool implementations, schemas, approvals, and execution semantics while delegating to minimal card renderers. Guarantees exactly one native execution pass per call.
 
 ### Container Interceptor
-The single owner of `Container.prototype.addChild` interception. Read-group, assistant commentary, native tool, warning, and Todo skins register subscribers rather than prototype patches. Hooks run newest-first, preserve one native insertion, and fail open independently. Disable removes subscribers; enable reinstalls them; runtime replacement disposes the shared interceptor without overwriting another extension's hook.
+The single owner of `Container.prototype.addChild` interception. Read-group, assistant commentary, native tool, warning, and Todo skins register subscribers rather than prototype patches. Hooks run newest-first, delegate to exactly one native insertion, and fail open independently. A hook that drops every child (the Todo skin hides the native HUD that way) inserts nothing at all: the host's `addChild` pushes whatever it receives, so a zero-argument delegation would store a literal `undefined` that the composer frame loop dereferences on the next paint. Disable removes subscribers; enable reinstalls them; runtime replacement disposes the shared interceptor without overwriting another extension's hook.
 
 ### Thinking Widget
 The animated streaming widget (`minimal-thinking`) positioned above the prompt editor, rendering live reasoning tokens via a bottom-to-top scrolling buffer (`TextScroller`).
@@ -29,4 +29,4 @@ The animated streaming widget (`minimal-thinking`) positioned above the prompt e
 The sticky prompt widget (`minimal-todos`) and status line HUD presenting parsed task phases, completion countdowns, and expand/collapse toggles synchronized with host session state.
 
 ### Composer Dock
-Custom prompt chrome layouts (`Minimal Output · Bottom Dock`, `Top Dock`, and Grayscale variants) that frame editor inputs, Git status, provider quota usage, and the context gauge.
+Custom prompt chrome layouts (`Minimal Output · Bottom Dock`, `Top Dock`, `Below Dock`, and Grayscale variants) that frame editor inputs, Git status, provider quota usage, and the context gauge. The Below Dock moves the status off the frame onto a row of its own under the closing rule. The docks drop the host's `session_name` segment (the auto-generated task title) — task metadata, not session state, and the longest text a preset can put on the row. Every dock renders one status row: multi-line status text is flattened, and a status text that carries a JavaScript crash dump — a failed segment provider, or an extension that stringifies an exception into its hook status — is dropped, both from the dock's own status text and from the host status wrapper's rows, so a stack trace never replaces the project, model, or gauge.

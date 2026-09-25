@@ -23,13 +23,13 @@ import { TodoWidget, parseTodoResult, todoRawText } from "./surfaces/todo-widget
 import { registerPluginCommands } from "./surfaces/commands.ts";
 import { renderSkillPrompt } from "./surfaces/skill-prompt-renderer.ts";
 import { runPluginDemo } from "./surfaces/demo-showcase.ts";
+import { registerMinimalComposerShapes } from "./surfaces/composer-shapes.ts";
+import { installMinimalPromptEditor } from "./surfaces/composer-editor.ts";
 import {
-  registerMinimalComposerShapes,
-  installMinimalPromptEditor,
-  updateMinimalPromptEditorProviders,
   createPlanStatusProvider,
+  updateMinimalPromptEditorProviders,
   type MinimalWorkingStatus,
-} from "./surfaces/composer-shapes.ts";
+} from "./surfaces/composer-status.ts";
 import { installReadGroupSkin } from "./surfaces/read-group.ts";
 import { commentaryStatusFromMessage, installAssistantCommentarySkin } from "./surfaces/assistant-commentary-skin.ts";
 import { openInspectOverlay } from "./surfaces/inspect-overlay.ts";
@@ -387,6 +387,13 @@ export default function (pi: ExtensionAPI) {
           },
           createPlanStatusProvider(ctx),
           createWorkingStatusProvider(),
+          () => {
+            try {
+              return ctx.sessionManager.getSessionName();
+            } catch {
+              return undefined;
+            }
+          },
         );
       }
       grabTui(ctx);
@@ -425,6 +432,13 @@ export default function (pi: ExtensionAPI) {
         },
         createPlanStatusProvider(ctx),
         createWorkingStatusProvider(),
+        () => {
+          try {
+            return ctx.sessionManager.getSessionName();
+          } catch {
+            return undefined;
+          }
+        },
       );
       pump.stopIfIdle(ctx);
     });
@@ -449,6 +463,13 @@ export default function (pi: ExtensionAPI) {
         },
         createPlanStatusProvider(ctx),
         createWorkingStatusProvider(),
+        () => {
+          try {
+            return ctx.sessionManager.getSessionName();
+          } catch {
+            return undefined;
+          }
+        },
       );
     });
 

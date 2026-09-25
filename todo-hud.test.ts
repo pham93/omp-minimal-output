@@ -33,7 +33,11 @@ function hostText(lines: readonly string[]) {
 class Host {
   children: unknown[] = [];
   addChild(...children: unknown[]) {
-    this.children.push(...children);
+    // The host's `Container.addChild(child)` pushes its argument unconditionally, so a zero-argument
+    // delegation stores a literal `undefined`. The composer's frame loop dereferences every entry of a
+    // chrome container's child list (`Composer.renderFrame` → row frame targets), which makes one
+    // refused insertion fatal for the whole TUI.
+    this.children.push(...(children.length === 0 ? [undefined] : children));
   }
   render() {
     return [] as string[];
@@ -94,7 +98,8 @@ describe("the HUD container is identified by structure, not only by class name",
     hideFlag = true;
     const hud = new Host();
     hud.addChild(hostText(["", "TODO ├─ a"]));
-    expect(hud.children).toEqual([]);
+    // Strict: a refused insertion must leave the child list empty, never `[undefined]`.
+    expect(hud.children).toStrictEqual([]);
   });
 
   test("the legacy class name is still recognised", async () => {

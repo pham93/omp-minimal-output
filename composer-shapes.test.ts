@@ -101,25 +101,42 @@ interface FakeEditorTheme {
   __borderStyle: string;
   __borderColor: (value: string) => string;
   __inner: string[];
+  __widths: number[];
 }
 
-interface ComposerModuleUnderTest {
+interface ComposerShapesModule {
   MINIMAL_COMPOSER_STYLE: {
     bottomDock: string;
     topDock: string;
     grayscaleBottomDock: string;
     grayscaleTopDock: string;
+    belowDock: string;
   };
+  registerMinimalComposerShapes: (pi: { registerComposerShape: (shape: TestComposerShape) => void }) => void;
+}
+
+interface ComposerEditorModule {
   MinimalPromptEditor: new (
     tui: unknown,
     theme: FakeEditorTheme,
     keybindings: unknown,
   ) => { render: (width: number) => string[] };
-  registerMinimalComposerShapes: (pi: { registerComposerShape: (shape: TestComposerShape) => void }) => void;
+  getComposerRefreshIntervalMs: () => number;
+  syncComposerRefreshTimer: (tui?: unknown) => void;
+  stopComposerRefreshTimer: () => void;
+}
+
+interface ComposerStatusModule {
+  isCrashDumpText: (text: string) => boolean;
+  dockStatusContent: (content: string) => string;
+  installStatusRowGuard: (wrapper: unknown) => (() => void) | undefined;
+  restoreStatusRowGuard: (wrapper: unknown) => void;
+  decorateStatusContent: (content: string, ctx: TestChromeContext, gaugeWidthReduction?: number) => string;
   updateMinimalPromptEditorProviders: (
     getContextUsage: () => TestContextUsage | undefined,
     getPlanStatus: () => TestPlanStatus | undefined,
     getWorkingStatus?: () => TestWorkingStatus | undefined,
+    getSessionName?: () => string | undefined,
   ) => void;
 }
 
@@ -197,18 +214,21 @@ class FakeEditor {
   borderColor: (value: string) => string;
   private styleId: string;
   private inner: string[];
+  private theme: FakeEditorTheme;
 
   constructor(_tui: unknown, theme: FakeEditorTheme, _keybindings: unknown) {
     this.styleId = theme.__borderStyle;
     this.borderColor = theme.__borderColor;
     this.inner = [...theme.__inner];
+    this.theme = theme;
   }
 
   getBorderStyle(): string {
     return this.styleId;
   }
 
-  render(_width: number): string[] {
+  render(width: number): string[] {
+    this.theme.__widths.push(width);
     return [...this.inner];
   }
 }
@@ -219,9 +239,13 @@ mock.module("@oh-my-pi/pi-coding-agent", () => ({
     fg: (_color: string, text: string): string => `${MAGENTA}${text}${RESET}`,
   },
 }));
-// Dynamic import: mock.module() above must execute before composer-shapes.ts
-// loads, so a hoisted static import cannot work here.
-const composer: ComposerModuleUnderTest = await import("./surfaces/composer-shapes.ts");
+// Dynamic imports: mock.module() above must execute before the composer modules
+// load, so hoisted static imports cannot work here. The split mirrors the
+// runtime layout: shapes own the frames, editor owns the re-framing, status
+// owns the text pipeline and the live providers.
+const composer: ComposerShapesModule = await import("./surfaces/composer-shapes.ts");
+const composerEditor: ComposerEditorModule = await import("./surfaces/composer-editor.ts");
+const composerStatus: ComposerStatusModule = await import("./surfaces/composer-status.ts");
 
 const BOX: TestComposerBox = {
   topLeft: "╭",
@@ -244,9 +268,9 @@ function makeChromeContext(topContent: string, width = 80): TestChromeContext {
   };
 }
 
-function makeRowContext(gutter: string): TestRowContext {
+function makeRowContext(gutter: string, topContent = ""): TestRowContext {
   return {
-    ...makeChromeContext(""),
+    ...makeChromeContext(topContent),
     text: "hello",
     pad: "  ",
     gutter,
@@ -263,6 +287,7 @@ function makeEditorTheme(styleId: string, inner: string[]): FakeEditorTheme {
     __borderStyle: styleId,
     __borderColor: (value: string): string => `${GREEN}${value}${RESET}`,
     __inner: inner,
+    __widths: [],
   };
 }
 
@@ -283,6 +308,7 @@ const bottomDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_
 const topDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.topDock);
 const grayscaleBottomDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock);
 const grayscaleTopDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.grayscaleTopDock);
+const belowDock = (): TestComposerStyle => styleById(composer.MINIMAL_COMPOSER_STYLE.belowDock);
 
 const STATUS = "Opus ⌂ myproj ⎇ main 🗺 Plan";
 
@@ -332,36 +358,41 @@ function expectChromeLayout(line: string, width: number, expectedInner: string):
 
 const resetProviders = (): void => {
   setPluginConfigForTest(null);
-  composer.updateMinimalPromptEditorProviders(
+  composerStatus.updateMinimalPromptEditorProviders(
     () => undefined,
     () => undefined,
     () => undefined,
   );
-  composer.stopComposerRefreshTimer?.();
+  composerEditor.stopComposerRefreshTimer?.();
 };
 
 describe("composer shape registration", () => {
-  test("registers the two colorful and two grayscale composers", () => {
+  test("registers the colorful, grayscale, and below-dock composers", () => {
     expect(registered.map((shape) => shape.style.id)).toEqual([
       composer.MINIMAL_COMPOSER_STYLE.bottomDock,
       composer.MINIMAL_COMPOSER_STYLE.topDock,
       composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock,
       composer.MINIMAL_COMPOSER_STYLE.grayscaleTopDock,
+      composer.MINIMAL_COMPOSER_STYLE.belowDock,
     ]);
   });
 
   test("grayscale ids are distinct and labelled as grayscale", () => {
-    const colorful = new Set([composer.MINIMAL_COMPOSER_STYLE.bottomDock, composer.MINIMAL_COMPOSER_STYLE.topDock]);
+    const colorful: Record<string, true> = {
+      [composer.MINIMAL_COMPOSER_STYLE.bottomDock]: true,
+      [composer.MINIMAL_COMPOSER_STYLE.topDock]: true,
+      [composer.MINIMAL_COMPOSER_STYLE.belowDock]: true,
+    };
     for (const shape of registered) {
       const isGrayscale =
         shape.style.id === composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock ||
         shape.style.id === composer.MINIMAL_COMPOSER_STYLE.grayscaleTopDock;
-      expect(colorful.has(shape.style.id)).toBe(!isGrayscale);
+      expect(Object.hasOwn(colorful, shape.style.id)).toBe(!isGrayscale);
       expect(shape.label.includes("Grayscale")).toBe(isGrayscale);
     }
   });
 
-  test("all four shapes share the same frame contract", () => {
+  test("every shape shares the same frame contract", () => {
     for (const shape of registered) {
       expect(shape.style.sideBorders).toBe(false);
       expect(shape.style.verticalChrome).toBe(2);
@@ -371,11 +402,95 @@ describe("composer shape registration", () => {
       expect(typeof shape.style.renderBottom).toBe("function");
     }
   });
+
+  test("only the below dock leaves the closing rule to the last content row", () => {
+    for (const shape of registered) {
+      const below = shape.style.id === composer.MINIMAL_COMPOSER_STYLE.belowDock;
+      expect(shape.style.renderBottom(makeChromeContext(STATUS)) === undefined).toBe(below);
+    }
+  });
+});
+
+describe("below dock", () => {
+  test("frame rules carry no status and the closing rule rides the last content row", () => {
+    resetProviders();
+    const top = stripAnsi(belowDock().renderTop(makeChromeContext(STATUS)) ?? "");
+    expect(top).toBe(`${BOX.topLeft}${"─".repeat(78)}${BOX.topRight}`);
+    expect(belowDock().renderBottom(makeChromeContext(STATUS))).toBeUndefined();
+  });
+
+  test("last content row emits the closing rule and the status row below it", () => {
+    resetProviders();
+    // The host's shape preview pushes renderRow rows before renderBottom, so the
+    // closing rule and the status row must ride the last content row.
+    const rows = belowDock().renderRow(makeRowContext("❯ ", STATUS));
+    expect(rows).toHaveLength(3);
+    expect(stripAnsi(rows[0] ?? "")).toBe("❯ hello  ");
+    const rule = stripAnsi(rows[1] ?? "");
+    expect(rule.startsWith(BOX.bottomLeft)).toBe(true);
+    expect(rule.endsWith(BOX.bottomRight)).toBe(true);
+    expect(mockVisibleWidth(rows[1] ?? "")).toBe(80);
+    const status = stripAnsi(rows[2] ?? "");
+    expect(status).toContain("myproj");
+    expect(status).toContain("main");
+    expect(status).not.toContain("Plan");
+    expect(mockVisibleWidth(rows[2] ?? "")).toBeLessThanOrEqual(80);
+  });
+
+  test("status row keeps the working prefix, effort label, gauge, and pinned mode chip", () => {
+    setPluginConfigForTest({ ...DEFAULT_CONFIG, indicator: "diamond" });
+    composerStatus.updateMinimalPromptEditorProviders(
+      () => ({ percent: 50, contextWindow: 200_000 }),
+      () => ({ enabled: false, paused: false }),
+      () => ({ startedAt: Date.now() - 12_000 }),
+    );
+    try {
+      const content = "Opus · \uf017 xhi ⌂ myproj ⎇ main ▶────50%────200K──◀";
+      const status = stripAnsi(belowDock().renderRow(makeRowContext("❯ ", content))[2] ?? "");
+      expect(status).toMatch(/[◈◉◎○]\s+12s/);
+      expect(status).toContain("xhigh");
+      expect(status).toContain("50%/200K");
+      expect(status.endsWith("build")).toBe(true);
+      expect(status).not.toContain("Plan");
+      expect(mockVisibleWidth(status)).toBe(80);
+    } finally {
+      resetProviders();
+    }
+  });
+
+  test("editor keeps the status row flush left under the frame and indents autocomplete", () => {
+    resetProviders();
+    const dockWidth = 40;
+    const innerWidth = dockWidth - 4;
+    const inner = [
+      `╭${"─".repeat(innerWidth - 2)}╮`,
+      `hello${" ".repeat(innerWidth - 5)}`,
+      `╰${"─".repeat(innerWidth - 2)}╯`,
+      "⬡ Opus ⌂ myproj ⎇ main",
+      "› suggestion",
+    ];
+    const theme = makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.belowDock, inner);
+    const editor = new composerEditor.MinimalPromptEditor({}, theme, {});
+    const rows = editor.render(dockWidth);
+    const plain = rows.map(stripAnsi);
+    // The host wraps and scrolls the prompt at the width it is handed, and the frame adds
+    // `EDITOR_FRAME_CHROME` columns around it: asking for the outer width would drop the prompt's
+    // last columns from the painted frame.
+    expect(theme.__widths).toEqual([innerWidth]);
+    expect(rows).toHaveLength(5);
+    expect(plain[0]?.startsWith(BOX.topLeft)).toBe(true);
+    expect(plain[2]?.startsWith(BOX.bottomLeft)).toBe(true);
+    expect(plain[3]).toBe("⬡ Opus ⌂ myproj ⎇ main");
+    expect(plain[4]).toBe("  › suggestion");
+    for (const row of rows) expect(mockVisibleWidth(row)).toBeLessThanOrEqual(dockWidth);
+    expect(mockVisibleWidth(rows[0] ?? "")).toBe(dockWidth);
+    expect(mockVisibleWidth(rows[2] ?? "")).toBe(dockWidth);
+  });
 });
 
 test("all docks pin one mode indicator through build, plan, and paused transitions", () => {
   let status = { enabled: false, paused: false };
-  composer.updateMinimalPromptEditorProviders(
+  composerStatus.updateMinimalPromptEditorProviders(
     () => undefined,
     () => status,
   );
@@ -434,7 +549,7 @@ describe("colorful docks preserve theme colors", () => {
   });
 
   test("top dock renders the full status on top and a plain rule below", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => undefined,
       () => ({ enabled: true, paused: false }),
       () => undefined,
@@ -454,7 +569,7 @@ describe("colorful docks preserve theme colors", () => {
   test("live run prefixes spinner and elapsed ahead of project", () => {
     // Pin the indicator: the resolved config otherwise follows this machine's lockfile.
     setPluginConfigForTest({ ...DEFAULT_CONFIG, indicator: "diamond" });
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => undefined,
       () => undefined,
       () => ({ startedAt: Date.now() - 12_000 }),
@@ -474,7 +589,7 @@ describe("colorful docks preserve theme colors", () => {
   });
 
   test("idle session adds no prefix", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => undefined,
       () => undefined,
       () => undefined,
@@ -515,7 +630,7 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
   });
 
   test("subagent job chunk does not remove the context gauge", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => ({ percent: 50, contextWindow: 200_000 }),
       () => ({ enabled: true, paused: false }),
       () => ({ startedAt: Date.now() - 12_000 }),
@@ -535,7 +650,7 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
   });
 
   test("worktree project icon is recognized and keeps gauge in both docks", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => ({ percent: 50, contextWindow: 200_000 }),
       () => ({ enabled: true, paused: false }),
       () => ({ startedAt: Date.now() - 12_000 }),
@@ -555,7 +670,7 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
   });
 
   test("every status-line separator keeps the project name on both docks", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => ({ percent: 50, contextWindow: 200_000 }),
       () => undefined,
       () => undefined,
@@ -643,7 +758,7 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
   });
 
   test("narrow width keeps the gauge ahead of tail content", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => ({ percent: 50, contextWindow: 200_000 }),
       () => ({ enabled: true, paused: false }),
       () => ({ startedAt: Date.now() - 12_000 }),
@@ -659,7 +774,7 @@ describe("grayscale docks collapse color to equal-RGB gray", () => {
   });
 
   test("grayscale context gauge keeps its label but loses accent and frame colors", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => ({ percent: 50, contextWindow: 200_000 }),
       () => ({ enabled: true, paused: false }),
       () => undefined,
@@ -687,7 +802,7 @@ describe("grayscale editor frame", () => {
   ];
 
   test("grayscale style frames the editor in gray instead of the host green", () => {
-    const editor = new composer.MinimalPromptEditor(
+    const editor = new composerEditor.MinimalPromptEditor(
       {},
       makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock, frameInner(36)),
       {},
@@ -700,7 +815,7 @@ describe("grayscale editor frame", () => {
   });
 
   test("colorful style keeps the host border color and adds no gray", () => {
-    const editor = new composer.MinimalPromptEditor(
+    const editor = new composerEditor.MinimalPromptEditor(
       {},
       makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.bottomDock, frameInner(36)),
       {},
@@ -713,13 +828,13 @@ describe("grayscale editor frame", () => {
 
   test("unknown border styles fall through to the base editor", () => {
     const inner = ["alpha", "beta"];
-    const editor = new composer.MinimalPromptEditor({}, makeEditorTheme("box", inner), {});
+    const editor = new composerEditor.MinimalPromptEditor({}, makeEditorTheme("box", inner), {});
     expect(editor.render(40)).toEqual(inner);
   });
 
   test("narrow widths fall through to the base editor even for grayscale styles", () => {
     const inner = ["alpha", "beta"];
-    const editor = new composer.MinimalPromptEditor(
+    const editor = new composerEditor.MinimalPromptEditor(
       {},
       makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.grayscaleTopDock, inner),
       {},
@@ -729,7 +844,7 @@ describe("grayscale editor frame", () => {
 });
 describe("composer layout is presented correctly", () => {
   test("top dock chrome fills the full width with padded corners", () => {
-    composer.updateMinimalPromptEditorProviders(
+    composerStatus.updateMinimalPromptEditorProviders(
       () => undefined,
       () => ({ enabled: true, paused: false }),
       () => undefined,
@@ -803,7 +918,7 @@ describe("composer layout is presented correctly", () => {
       composer.MINIMAL_COMPOSER_STYLE.bottomDock,
       composer.MINIMAL_COMPOSER_STYLE.grayscaleBottomDock,
     ]) {
-      const editor = new composer.MinimalPromptEditor({}, makeEditorTheme(styleId, frameInner(36)), {});
+      const editor = new composerEditor.MinimalPromptEditor({}, makeEditorTheme(styleId, frameInner(36)), {});
       const rows = editor.render(40);
       expect(rows).toHaveLength(3);
       const plain = rows.map(stripAnsi);
@@ -876,7 +991,7 @@ describe("thinking effort expansion", () => {
       `hello${" ".repeat(innerWidth - 5)}`,
       `╰ Opus · 󰪥 xhigh ${"─".repeat(Math.max(0, innerWidth - 20))}╯`,
     ];
-    const editor = new composer.MinimalPromptEditor(
+    const editor = new composerEditor.MinimalPromptEditor(
       {},
       makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.bottomDock, inner(36)),
       {},
@@ -959,20 +1074,20 @@ describe("composer usage filtering and auto-refresh", () => {
 
   test("getComposerRefreshIntervalMs returns default 60s when unconfigured", () => {
     resetProviders();
-    expect(composer.getComposerRefreshIntervalMs()).toBe(60_000);
+    expect(composerEditor.getComposerRefreshIntervalMs()).toBe(60_000);
   });
 
   test("getComposerRefreshIntervalMs uses plugin config value for refreshing", () => {
     try {
       resetProviders();
       setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 15 });
-      expect(composer.getComposerRefreshIntervalMs()).toBe(15_000);
+      expect(composerEditor.getComposerRefreshIntervalMs()).toBe(15_000);
 
       setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 5 });
-      expect(composer.getComposerRefreshIntervalMs()).toBe(5_000);
+      expect(composerEditor.getComposerRefreshIntervalMs()).toBe(5_000);
 
       setPluginConfigForTest({ ...DEFAULT_CONFIG, composerRefreshInterval: 120 });
-      expect(composer.getComposerRefreshIntervalMs()).toBe(120_000);
+      expect(composerEditor.getComposerRefreshIntervalMs()).toBe(120_000);
     } finally {
       resetProviders();
     }
@@ -988,9 +1103,9 @@ describe("composer usage filtering and auto-refresh", () => {
           renders += 1;
         },
       };
-      composer.syncComposerRefreshTimer(mockTui as any);
-      expect(typeof composer.stopComposerRefreshTimer).toBe("function");
-      composer.stopComposerRefreshTimer();
+      composerEditor.syncComposerRefreshTimer(mockTui as any);
+      expect(typeof composerEditor.stopComposerRefreshTimer).toBe("function");
+      composerEditor.stopComposerRefreshTimer();
     } finally {
       resetProviders();
     }
@@ -1011,16 +1126,266 @@ describe("composer usage filtering and auto-refresh", () => {
         `hello${" ".repeat(innerWidth - 5)}`,
         `╰ ${"─".repeat(innerWidth - 2)}╯`,
       ];
-      const editor = new composer.MinimalPromptEditor(
+      const editor = new composerEditor.MinimalPromptEditor(
         mockTui as any,
         makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.bottomDock, inner(36)),
         {} as any,
       );
       editor.render(40);
-      expect(composer.getComposerRefreshIntervalMs()).toBe(25_000);
-      composer.stopComposerRefreshTimer();
+      expect(composerEditor.getComposerRefreshIntervalMs()).toBe(25_000);
+      composerEditor.stopComposerRefreshTimer();
     } finally {
       resetProviders();
     }
+  });
+});
+
+/*
+ * The host rewrites its status-line text for every `statusLine` option: preset (default, minimal,
+ * compact, full, nerd, ascii, custom), separator, and context-line mode each produce a different
+ * segment set — no model, no path, hostname/session/time/cost segments, or a context gauge drawn as
+ * a rule run instead of caps. The docks parse that text, so every preset must render without
+ * throwing and must keep the row inside the dock width.
+ *
+ * Fixtures: raw status contents captured from OMP 18.3.0 with `statusLine.preset` switched per run.
+ */
+const PRESET_STATUS: Record<string, string> = {
+  ascii:
+    "\u001b[49m\u001b[39m \u001b[38;2;211;134;155m\uec19 Gemini 3.1 Pro\u001b[39m\u001b[38;2;211;134;155m \u00b7 \udb82\ude9e min\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;142;192;124m\uf014 omp-probe-run\u001b[39m \u001b[0m\u001b[49m\u001b[38;2;142;192;124m\u25001%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;146;131;116m\udb81\udd5d\u001b[38;2;118;144;108m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;118;144;108m1M\u001b[38;2;69;133;136m\u2500\u001b[39m\u001b[49m\u001b[39m \u001b[38;2;211;134;155m\udb81\ude7a\u001b[39m \u001b[0m",
+  compact:
+    "\u001b[49m\u001b[39m \u001b[38;2;211;134;155m\uec19 Gemini 3.1 Pro\u001b[39m \u001b[0m\u001b[49m\u001b[38;2;142;192;124m\u25001%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;146;131;116m\udb81\udd5d\u001b[38;2;69;133;136m\u2500\u001b[38;2;118;144;108m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;118;144;108m1M\u001b[38;2;69;133;136m\u2500\u001b[39m\u001b[49m\u001b[39m \u001b[38;2;211;134;155m\udb81\ude7a\u001b[39m \u001b[0m",
+  custom:
+    "\u001b[49m\u001b[39m \u001b[38;2;211;134;155m\uec19 Gemini 3.1 Pro\u001b[39m\u001b[38;2;211;134;155m \u00b7 \udb82\ude9e min\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \uf017 5h \u001b[38;2;146;131;116m0%\u001b[39m\u001b[38;2;146;131;116m (4h 57m)\u001b[39m \u00b7 7d \u001b[38;2;146;131;116m0%\u001b[39m\u001b[38;2;146;131;116m (7d)\u001b[39m \u001b[0m\u001b[49m\u001b[38;2;142;192;124m\u25002%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;118;144;108m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u001b[38;2;118;144;108m1M\u001b[38;2;69;133;136m\u2500\u001b[39m\u001b[49m\u001b[39m \u001b[38;2;142;192;124m\uf014 omp-probe-run\u001b[39m \u001b[0m",
+  default:
+    "\u001b[49m\u001b[39m \u001b[38;2;124;111;100m\udb83\udd57\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;211;134;155m\uec19 Gemini 3.1 Pro\u001b[39m\u001b[38;2;211;134;155m \u00b7 \udb82\ude9e min\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;142;192;124m\uf014 omp-probe-run\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;211;134;155m\udb81\ude7a\u001b[39m \u001b[0m\u001b[49m\u001b[38;2;142;192;124m\u25001%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;146;131;116m\udb81\udd5d\u001b[38;2;118;144;108m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u001b[38;2;118;144;108m1M\u001b[38;2;69;133;136m\u2500\u001b[39m",
+  full: "\u001b[49m\u001b[39m \u001b[38;2;124;111;100m\udb83\udd57\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \uf109 omarchy \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;211;134;155m\uec19 Gemini 3.1 Pro\u001b[39m\u001b[38;2;211;134;155m \u00b7 \udb82\ude9e min\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;142;192;124m\uf014 omp-probe-run\u001b[39m \u001b[0m\u001b[49m\u001b[38;2;142;192;124m\u25001%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;146;131;116m\udb81\udd5d\u001b[38;2;118;144;108m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u001b[38;2;118;144;108m1M\u001b[38;2;69;133;136m\u2500\u001b[39m\u001b[49m\u001b[39m \u001b[38;2;211;134;155m\udb81\ude7a\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \uf017 11:23 \u001b[0m",
+  minimal:
+    "\u001b[49m\u001b[39m \u001b[38;2;142;192;124m\uf014 omp-probe-run\u001b[39m \u001b[0m\u001b[49m\u001b[38;2;142;192;124m\u25001%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;146;131;116m\udb81\udd5d\u001b[38;2;69;133;136m\u2500\u2500\u001b[38;2;118;144;108m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;118;144;108m1M\u001b[38;2;69;133;136m\u2500\u001b[39m",
+  nerd: "\u001b[49m\u001b[39m \u001b[38;2;124;111;100m\udb83\udd57\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \uf109 omarchy \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;211;134;155m\uec19 Gemini 3.1 Pro\u001b[39m\u001b[38;2;211;134;155m \u00b7 \udb82\ude9e min\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \u001b[38;2;142;192;124m\uf014 omp-probe-run\u001b[39m \u001b[38;2;102;92;84m \u001b[39m \udb80\udc51 01a0d6ce \u001b[0m\u001b[49m\u001b[38;2;142;192;124m\u25001%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;118;144;108m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u001b[38;2;118;144;108m1M\u001b[38;2;69;133;136m\u2500\u001b[39m\u001b[49m\u001b[39m \u001b[38;2;211;134;155m\udb81\ude7a\u001b[39m \u001b[0m",
+};
+
+describe("every status-line preset renders through the docks", () => {
+  /** Raw status content of a *named* session with `statusLine.preset: minimal` (session_name included). */
+  const NAMED_SESSION_STATUS =
+    "\u001b[49m\u001b[39m \u001b[38;2;142;192;124m\uf014 omp-probe-run\u001b[39m \u001b[0m\u001b[49m\u001b[38;2;87;250;132m\u25002%\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;146;131;116m\udb81\udd5d\u001b[38;2;69;133;136m\u2500\u001b[38;2;102;187;126m\udb80\udc68\u001b[38;2;69;133;136m\u2500\u2500\u2500\u2500\u2500\u2500\u001b[38;2;102;187;126m1M\u001b[38;2;69;133;136m\u2500\u001b[39m\u001b[49m\u001b[39m \u001b[38;2;87;250;132mFix Composer Click Agent Crash Loop\u001b[39m \u001b[0m";
+  const NAMED_SESSION_TITLE = "Fix Composer Click Agent Crash Loop";
+
+  const DOCK_WIDTH = 96;
+
+  function presetContext(content: string) {
+    return makeChromeContext(content, DOCK_WIDTH);
+  }
+
+  function presetRow(content: string) {
+    // Same shape as `makeRowContext`, at the dock width instead of the helper's default.
+    return {
+      ...presetContext(content),
+      text: "hello",
+      pad: "  ",
+      gutter: "❯ ",
+      isLastRow: true,
+      cursorOverflow: 0,
+      imeSafeCursorTail: false,
+      scrollbarThumb: false,
+    };
+  }
+
+  function presetProviders(usage = { percent: 2, contextWindow: 1_000_000 }) {
+    composerStatus.updateMinimalPromptEditorProviders(
+      () => usage,
+      () => ({ enabled: false, paused: false }),
+    );
+  }
+
+  test("status rules fill the dock width and keep the mode chip", () => {
+    for (const [preset, content] of Object.entries(PRESET_STATUS)) {
+      for (const dock of [bottomDock(), topDock(), grayscaleBottomDock(), grayscaleTopDock()]) {
+        presetProviders();
+        const ctx = presetContext(content);
+        const rows = [dock.renderTop(ctx), dock.renderBottom(ctx)].filter(
+          (row): row is string => typeof row === "string" && row.length > 0,
+        );
+        for (const row of rows) {
+          expect(mockVisibleWidth(row), `${preset}/${dock.id} rule width`).toBe(DOCK_WIDTH);
+        }
+        expect(
+          rows.some((row) => stripAnsi(row).includes("build")),
+          `${preset}/${dock.id} mode chip`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  test("the below dock row fills the dock width, keeps the chip, and replaces the host gauge", () => {
+    for (const [preset, content] of Object.entries(PRESET_STATUS)) {
+      presetProviders();
+      const status = stripAnsi(belowDock().renderRow(presetRow(content))[2] ?? "");
+      expect(mockVisibleWidth(status), `${preset} below-dock width`).toBe(DOCK_WIDTH);
+      expect(status, `${preset} below-dock mode chip`).toContain("build");
+      // The host draws its context gauge as a rule run; the dock swaps in its own gauge.
+      expect(status, `${preset} gauge`).toContain("2%/1M");
+      expect(status.includes("─1%"), `${preset} kept the host gauge rule`).toBe(false);
+    }
+  });
+
+  test("the editor frames the below-dock rows for every preset", () => {
+    const innerWidth = DOCK_WIDTH - 4;
+    for (const [preset, content] of Object.entries(PRESET_STATUS)) {
+      presetProviders();
+      const hostRows = [
+        belowDock().renderTop(presetContext(content)) ?? "",
+        ...belowDock().renderRow(presetRow(content)),
+      ];
+      const editor = new composerEditor.MinimalPromptEditor(
+        {},
+        makeEditorTheme(composer.MINIMAL_COMPOSER_STYLE.belowDock, hostRows),
+        {},
+      );
+      const rows = editor.render(DOCK_WIDTH);
+      const plain = rows.map(stripAnsi);
+      for (const row of rows) {
+        expect(mockVisibleWidth(row), `${preset} editor row width`).toBeLessThanOrEqual(DOCK_WIDTH);
+      }
+      expect(plain[0]?.startsWith(BOX.topLeft), `${preset} top rule`).toBe(true);
+      const statusIndex = plain.findIndex((row) => row.includes("build"));
+      expect(statusIndex, `${preset} status row`).toBeGreaterThan(0);
+      // The status row rides flush left under the closing rule, never inside the frame.
+      expect(plain[statusIndex]?.startsWith(BOX.vertical), `${preset} status row framed`).toBe(false);
+      expect(mockVisibleWidth(rows[statusIndex] ?? "")).toBeLessThanOrEqual(DOCK_WIDTH);
+    }
+  });
+
+  test("a crash dump in the status content never reaches the frame", () => {
+    // A failed status segment (or an extension that stringifies an exception into its hook status)
+    // hands the dock a stack trace. Painting it would replace the status row with a multi-line crash
+    // dump and break the frame, so the docks drop it and keep their own chrome.
+    const dump =
+      "TypeError: undefined is not an object (evaluating 'segment.render')\n" +
+      "    at render (/bundle.js:1:2)\n    at frame (/bundle.js:3:4)";
+    const oneLine = "TypeError: undefined is not an object (evaluating 'segment.render')";
+    const ansiHead = `\x1b[31m${oneLine}\x1b[39m`;
+
+    for (const content of [dump, oneLine, ansiHead]) {
+      for (const dock of [bottomDock(), topDock(), grayscaleBottomDock(), grayscaleTopDock()]) {
+        presetProviders();
+        const ctx = presetContext(content);
+        const rows = [dock.renderTop(ctx), dock.renderBottom(ctx)].filter(
+          (row): row is string => typeof row === "string" && row.length > 0,
+        );
+        for (const row of rows) {
+          expect(stripAnsi(row), `${dock.id} leaked a newline`).not.toContain("\n");
+          expect(stripAnsi(row), `${dock.id} painted the dump`).not.toContain("TypeError");
+          expect(mockVisibleWidth(row), `${dock.id} rule width`).toBe(DOCK_WIDTH);
+        }
+      }
+      presetProviders();
+      const belowRows = belowDock().renderRow(presetRow(content));
+      expect(belowRows, "below dock row count").toHaveLength(3);
+      for (const row of belowRows) {
+        expect(stripAnsi(row), "below dock leaked a newline").not.toContain("\n");
+        expect(stripAnsi(row), "below dock painted the dump").not.toContain("TypeError");
+      }
+      expect(mockVisibleWidth(belowRows[2] ?? ""), "below dock status width").toBe(DOCK_WIDTH);
+    }
+  });
+
+  test("ordinary multi-line status content is flattened onto the one row", () => {
+    presetProviders();
+    const rows = belowDock().renderRow(presetRow("Opus ⌂ myproj\n⎇ main\n"));
+    const status = stripAnsi(rows[2] ?? "");
+    expect(status, "flattened status").not.toContain("\n");
+    expect(status, "flattened status").toContain("myproj");
+    expect(status, "flattened status").toContain("main");
+    expect(mockVisibleWidth(rows[2] ?? ""), "flattened width").toBe(DOCK_WIDTH);
+  });
+
+  test("drops the host's session title from the status row", () => {
+    // `session_name` is the auto-generated task title: presets that list it paint a whole task name
+    // (often one that reads like the failure it describes) into the dock's status row.
+    expect(stripAnsi(NAMED_SESSION_STATUS), "fixture carries the title").toContain(NAMED_SESSION_TITLE);
+    const ctx = presetContext(NAMED_SESSION_STATUS);
+
+    composerStatus.updateMinimalPromptEditorProviders(
+      () => ({ percent: 2, contextWindow: 1_000_000 }),
+      () => ({ enabled: false, paused: false }),
+      () => undefined,
+      () => NAMED_SESSION_TITLE,
+    );
+    const status = stripAnsi(belowDock().renderRow(presetRow(NAMED_SESSION_STATUS))[2] ?? "");
+    expect(status, "title dropped").not.toContain(NAMED_SESSION_TITLE);
+    expect(status, "title dropped (prefix)").not.toContain("Crash Loop");
+    expect(status, "project kept").toContain("omp-probe-run");
+    expect(status, "gauge kept").toContain("2%/1M");
+    expect(status.includes("─2%"), "host gauge rule kept").toBe(false);
+    expect(mockVisibleWidth(status), "row width").toBe(DOCK_WIDTH);
+
+    // A title that is only a slice of another segment must not be cut out of it.
+    composerStatus.updateMinimalPromptEditorProviders(
+      () => ({ percent: 2, contextWindow: 1_000_000 }),
+      () => ({ enabled: false, paused: false }),
+      () => undefined,
+      () => "probe",
+    );
+    expect(stripAnsi(belowDock().renderRow(presetRow(NAMED_SESSION_STATUS))[2] ?? "")).toContain("omp-probe-run");
+
+    // No session name available: the content passes through untouched (fail open).
+    composerStatus.updateMinimalPromptEditorProviders(
+      () => ({ percent: 2, contextWindow: 1_000_000 }),
+      () => ({ enabled: false, paused: false }),
+    );
+    expect(stripAnsi(composerStatus.decorateStatusContent(NAMED_SESSION_STATUS, ctx))).toContain(NAMED_SESSION_TITLE);
+  });
+
+  test("unknown, empty, and oversized content still renders inside the dock width", () => {
+    const oversized = `${PRESET_STATUS.full ?? ""} ${"segment ".repeat(60)}`;
+    for (const content of ["", "plain status", "\x1b[32mweird\x1b[39m", oversized]) {
+      presetProviders();
+      const status = belowDock().renderRow(presetRow(content))[2] ?? "";
+      expect(mockVisibleWidth(status)).toBeLessThanOrEqual(DOCK_WIDTH);
+      const rule = belowDock().renderTop(presetContext(content)) ?? "";
+      expect(mockVisibleWidth(rule)).toBe(DOCK_WIDTH);
+    }
+  });
+});
+describe("the composer status surface keeps crash dumps out", () => {
+  test("recognises crash dumps and leaves ordinary status text alone", () => {
+    for (const dump of [
+      "TypeError: undefined is not an object (evaluating 'segment.render')",
+      "Error: boom",
+      "\x1b[31mRangeError: Invalid string length\x1b[39m",
+      "⚠ TypeError: undefined is not an object",
+      "line one\n    at render (/bundle.js:1:2)",
+    ]) {
+      expect(composerStatus.isCrashDumpText(dump), JSON.stringify(dump.slice(0, 40))).toBe(true);
+    }
+    for (const ok of [
+      "✓ Headroom -20% (1,234 saved)",
+      "○ Headroom off",
+      "Opus ⌂ myproj ⎇ main",
+      '⚠ Could not connect to "srv" yet',
+      "Error rate: 3",
+      "Todo 3/7 · next task",
+    ]) {
+      expect(composerStatus.isCrashDumpText(ok), ok).toBe(false);
+    }
+  });
+
+  test("the host status wrapper drops dump rows, keeps real ones, and restores on disable", () => {
+    const nativeRows = [
+      "✓ Headroom -20% saved",
+      "TypeError: undefined is not an object (evaluating 'segment.render') at render (/bundle.js:1:2)",
+      "○ Headroom off",
+    ];
+    const wrapper: { render: (width: number) => string[] } = { render: (_width: number) => [...nativeRows] };
+    const restore = composerStatus.installStatusRowGuard(wrapper);
+    expect(restore, "guard installed").toBeDefined();
+    expect(wrapper.render(80)).toEqual(["✓ Headroom -20% saved", "○ Headroom off"]);
+    restore?.();
+    expect(wrapper.render(80)).toEqual(nativeRows);
+  });
+
+  test("a dump in the status content renders no status text, multi-line text is flattened", () => {
+    expect(composerStatus.dockStatusContent("TypeError: x\n    at y")).toBe("");
+    expect(composerStatus.dockStatusContent("Opus ⌂ myproj\n⎇ main")).toBe("Opus ⌂ myproj ⎇ main");
   });
 });

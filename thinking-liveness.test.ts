@@ -694,7 +694,7 @@ describe("transcript settled thought block rendering", () => {
     }
   });
 
-    setPluginConfigForTest(null);
+  setPluginConfigForTest(null);
   test("when hideThinkingBlock is true, settled thought renders exactly 1 line (Thought with duration)", async () => {
     type EventHandler = (event: unknown, ctx: unknown) => Promise<void>;
     const eventHandlers = new Map<string, EventHandler[]>();
@@ -1008,6 +1008,57 @@ describe("transcript settled thought block rendering", () => {
       expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
     });
 
+    test("drops a crash dump from the host status surface and restores it on teardown", async () => {
+      const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
+      const host = createHost();
+      const statusHost = host.tui.children[host.tui.children.length - 1] as { render: (w: number) => string[] };
+      const rows = [
+        "✓ Headroom -20% saved",
+        "TypeError: undefined is not an object (evaluating 'segment.render') at render (/bundle.js:1:2)",
+        "○ Headroom off",
+      ];
+      statusHost.render = () => [...rows];
+
+      ensureThinkingAboveStatus(host.tui);
+      expect(statusHost.render(80)).toEqual(["✓ Headroom -20% saved", "○ Headroom off"]);
+
+      restoreStatusOrder(host.tui);
+      expect(statusHost.render(80)).toEqual(rows);
+    });
+
+    test("never lets an unconstructed chrome container reach the composer's frame loop", async () => {
+      const { ensureThinkingAboveStatus } = await import("./surfaces/thinking-widget.ts");
+      // OMP 18.3.0 hands the composer a chrome slot it can leave undefined
+      // (`judgmentBatchProgressContainer`); the host's frame loop dereferences every
+      // entry of that list, so one missing slot crashed the whole render loop with
+      // `TypeError: undefined is not an object`.
+      const withMissingSlot = (order: readonly unknown[]): readonly unknown[] => [
+        ...order.slice(0, 2),
+        undefined,
+        ...order.slice(2),
+      ];
+
+      // A list the host stores after our wrapper is installed is sanitized on handoff.
+      const live = createHost();
+      ensureThinkingAboveStatus(live.tui);
+      live.composer.setRuntimeChildren(withMissingSlot(live.nativeOrder));
+      expect(live.composer.runtime).not.toContain(undefined);
+      expect(() => live.composer.frame()).not.toThrow();
+
+      // A list the host stored before the wrapper existed is repaired in place.
+      const stale = createHost();
+      stale.composer.setRuntimeChildren(withMissingSlot(stale.nativeOrder));
+      ensureThinkingAboveStatus(stale.tui);
+      expect(stale.composer.runtime).not.toContain(undefined);
+      expect(() => stale.composer.frame()).not.toThrow();
+
+      // A chrome container that already holds a stray slot is repaired in place.
+      const stray = createHost();
+      stray.hookAbove.children.push(undefined as never);
+      ensureThinkingAboveStatus(stray.tui);
+      expect(stray.hookAbove.children).not.toContain(undefined);
+    });
+
     test("unmounting the widget hands the composer back its native order", async () => {
       const { ThinkingWidget } = await import("./surfaces/thinking-widget.ts");
       const { composer, tui } = createHost();
@@ -1049,9 +1100,8 @@ describe("transcript settled thought block rendering", () => {
     });
 
     test("orders the thinking block above the todos widget in the shared hook container", async () => {
-      const { ensureThinkingAboveStatus, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } = await import(
-        "./surfaces/thinking-widget.ts"
-      );
+      const { ensureThinkingAboveStatus, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } =
+        await import("./surfaces/thinking-widget.ts");
 
       const thinking: Record<string, unknown> = { render: () => ["THINKING"] };
       thinking[THINKING_WIDGET_FLAG] = true;
@@ -1096,9 +1146,8 @@ describe("transcript settled thought block rendering", () => {
     });
 
     test("reordering the hook widgets during a frame never duplicates or drops one", async () => {
-      const { ensureThinkingBeforeTodos, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } = await import(
-        "./surfaces/thinking-widget.ts"
-      );
+      const { ensureThinkingBeforeTodos, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } =
+        await import("./surfaces/thinking-widget.ts");
       const { tui, hookAbove } = createHost();
 
       // Host `Container.render` captures the child array and its length before its loop and reads

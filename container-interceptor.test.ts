@@ -44,22 +44,92 @@ test("hooks preserve nested order, fail open, and delegate native insertion exac
   }
 });
 
-test("empty child filtering still calls native and preserves native exceptions", () => {
+test("dropping every child inserts nothing, never a hole", () => {
+  // Mirrors the host's arity: `addChild(e) { this.children.push(e); }` pushes whatever it receives,
+  // so delegating a dropped row as a zero-argument call stores a literal `undefined`. The composer's
+  // frame loop dereferences every chrome child (`Composer.renderFrame` → `rowTargetCandidates`), so
+  // that hole takes the whole render loop down. The todo HUD is hidden exactly this way.
+  class Host {
+    children: unknown[] = [];
+    calls = 0;
+    addChild(child: unknown) {
+      this.calls += 1;
+      this.children.push(child);
+    }
+  }
+  const interceptor = getContainerInterceptor(Host);
+  const dropping = interceptor.registerHook(() => ({ children: [] }))!;
+  const host = new Host();
+  try {
+    host.addChild("hidden HUD");
+    host.addChild();
+    expect(host.calls).toBe(0);
+    expect(host.children).toStrictEqual([]);
+
+    dropping();
+    interceptor.registerHook(() => {});
+    host.addChild("kept");
+    expect(host.calls).toBe(1);
+    expect(host.children).toEqual(["kept"]);
+  } finally {
+    interceptor.dispose();
+  }
+});
+
+test("native insertion failures still propagate for kept children", () => {
   const failure = new Error("native failed");
   class Host {
     calls = 0;
-    addChild(...children: unknown[]) {
+    addChild(child: unknown) {
+      expect(child).toBe("kept");
       this.calls += 1;
-      expect(children).toEqual([]);
       throw failure;
     }
   }
   const interceptor = getContainerInterceptor(Host);
-  interceptor.registerHook(() => ({ children: [] }));
+  interceptor.registerHook(() => {});
   const host = new Host();
   try {
-    expect(() => host.addChild("hidden HUD")).toThrow(failure);
+    expect(() => host.addChild("kept")).toThrow(failure);
     expect(host.calls).toBe(1);
+  } finally {
+    interceptor.dispose();
+  }
+});
+
+test("never hands the host an undefined or null child", () => {
+  class Host {
+    children: unknown[] = [];
+    addChild(...children: unknown[]) {
+      this.children.push(...children);
+    }
+  }
+  const interceptor = getContainerInterceptor(Host);
+  interceptor.registerHook(() => ({ children: [undefined, "kept", null] }));
+  const host = new Host();
+  try {
+    // The composer's frame layout dereferences every child of its chrome
+    // containers, so a non-component child must never reach native insertion.
+    host.addChild("original");
+    expect(host.children).toEqual(["kept"]);
+  } finally {
+    interceptor.dispose();
+  }
+});
+
+test("ignores a hook result without a child array", () => {
+  class Host {
+    children: unknown[] = [];
+    addChild(...children: unknown[]) {
+      this.children.push(...children);
+    }
+  }
+  const interceptor = getContainerInterceptor(Host);
+  interceptor.registerHook(() => ({ children: undefined }) as never);
+  const host = new Host();
+  try {
+    host.addChild("kept");
+    expect(host.children).toEqual(["kept"]);
   } finally {
     interceptor.dispose();
   }
@@ -77,9 +147,9 @@ test("disposal leaves external wrappers intact and reinstallation never revives 
     events.push("old");
   })!;
   const oldWrapper = Host.prototype.addChild;
-  const external = function (this: Host) {
+  const external = function (this: Host, ...args: unknown[]) {
     events.push("external");
-    return oldWrapper.call(this);
+    return oldWrapper.call(this, ...args);
   };
   Host.prototype.addChild = external;
   interceptor.dispose();
@@ -89,12 +159,12 @@ test("disposal leaves external wrappers intact and reinstallation never revives 
   })!;
   try {
     oldDispose();
-    new Host().addChild();
+    new Host().addChild("block");
     expect(events).toEqual(["new", "external", "native"]);
     remove();
     expect(Host.prototype.addChild).toBe(external);
     events.length = 0;
-    new Host().addChild();
+    new Host().addChild("block");
     expect(events).toEqual(["external", "native"]);
   } finally {
     interceptor.dispose();
@@ -112,7 +182,7 @@ test("captures the current native method at registration, not construction", () 
   Host.prototype.addChild = replacement;
   const remove = interceptor.registerHook(() => {})!;
   try {
-    expect(new Host().addChild()).toBe("external");
+    expect(new Host().addChild("block")).toBe("external");
   } finally {
     remove();
   }
