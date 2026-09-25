@@ -25,7 +25,10 @@ const CYAN = "\x1b[36m";
 const MAGENTA = "\x1b[35m";
 const RESET = "\x1b[39m";
 
-const ANSI_PART = String.raw`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)`;
+// Escape sequences as the terminal consumes them: CSI, OSC (BEL, ST, or C1 ST terminated), and the
+// short ESC forms. An OSC-8 hyperlink's label is visible text between two markers, so the mock width
+// and strip helpers below must keep it: the docks index plain text and map it back onto the raw row.
+const ANSI_PART = String.raw`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b\u009c]*(?:\x07|\x1b\\|\u009c)|\x1b[ -/]*[0-~]?`;
 
 interface AnsiToken {
   ansi: boolean;
@@ -545,6 +548,44 @@ describe("colorful docks preserve theme colors", () => {
       const bottom = dock.renderBottom(makeChromeContext(duplicated)) ?? "";
       expect(stripAnsi(top)).not.toContain("Plan");
       expect(stripAnsi(bottom)).not.toContain("Plan");
+    }
+  });
+
+  test("a hyperlinked project path leaves exactly one mode chip", () => {
+    // The host wraps the path segment in an OSC-8 hyperlink: `ESC]8;<params> ST <label> ESC]8;; ST`.
+    // Only the two markers are invisible, so a strip that reads the whole span as one sequence lands
+    // its edits off target, leaves the native chip in the row, and the pinned chip doubles it.
+    const hyperlink = (label: string, url: string): string => `\x1b]8;id=4a1;${url}\x1b\\${label}\x1b]8;;\x1b\\`;
+    const content = `\uec19 Opus · min ${hyperlink("⌂ myproj", "file:///tmp/myproj")} \uf126 main \uf2d2 Plan ⏸`;
+    composerStatus.updateMinimalPromptEditorProviders(
+      () => undefined,
+      () => ({ enabled: false, paused: true }),
+    );
+    try {
+      for (const dock of [bottomDock(), topDock(), grayscaleBottomDock(), grayscaleTopDock()]) {
+        const rules = stripAnsi(
+          `${dock.renderTop(makeChromeContext(content)) ?? ""}\n${dock.renderBottom(makeChromeContext(content)) ?? ""}`,
+        );
+        expect(rules.match(/Plan/gu), "native chip replaced by the pinned chip").toHaveLength(1);
+        expect(rules, "hyperlink label kept").toContain("myproj");
+      }
+
+      const rows = belowDock().renderRow(makeRowContext("❯ ", content));
+      const status = stripAnsi(rows[2] ?? "");
+      expect(status.match(/Plan/gu), "native chip replaced by the pinned chip").toHaveLength(1);
+      expect(status, "hyperlink label kept").toContain("myproj");
+      // The label is visible columns, not escape bytes: the row must still fit the dock exactly.
+      expect(mockVisibleWidth(rows[2] ?? "")).toBe(80);
+
+      // The rule dock cuts project and Git out of the same hyperlinked row for its title rule.
+      const title = stripAnsi(bottomDock().renderTop(makeChromeContext(content)) ?? "");
+      expect(title, "project moved into the title rule").toContain("myproj");
+      expect(title, "branch moved into the title rule").toContain("main");
+      expect(stripAnsi(bottomDock().renderBottom(makeChromeContext(content)) ?? ""), "project left behind").not.toContain(
+        "myproj",
+      );
+    } finally {
+      resetProviders();
     }
   });
 

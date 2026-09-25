@@ -29,7 +29,15 @@ export const BUILD_STATUS_VARIANTS = {
 } as const;
 export const USAGE_ICON_VARIANTS = ["⏱", "\uf017", "time:"] as const;
 export const CONTEXT_GAUGE_MAX_WIDTH = 24;
-export const ANSI_SEQUENCE_RE = /^(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\))/u;
+/**
+ * One escape sequence as the terminal consumes it: CSI, OSC (BEL, ST, or C1 ST terminated), and the
+ * short ESC forms. `rawOffsetForPlainIndex` walks a raw string with this pattern while its callers
+ * index the same text with `Bun.stripANSI`, so the two notions of "plain text" must agree exactly.
+ * An OSC-8 hyperlink's label is visible text between two markers, and a greedy OSC payload runs past
+ * its own terminator into the label — and into every following sequence — which silently shifts every
+ * mapped offset. The payload therefore stops at BEL, ST, or C1 ST.
+ */
+export const ANSI_SEQUENCE_RE = /^(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b\u009c]*(?:\x07|\x1b\\|\u009c)|\x1b[ -/]*[0-~]?)/u;
 export const STATUS_COLOR = {
   project: "statusLinePath",
   build: "statusLineModel",
