@@ -280,7 +280,7 @@ export async function openTodoPanel(ctx: ExtensionContext, deps: OpenTodoPanelDe
       {
         overlay: true,
         overlayOptions: {
-          anchor: "bottom-center",
+          anchor: "center",
           width: "70%",
           maxHeight: "70%",
           margin: 1,

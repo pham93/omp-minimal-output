@@ -189,7 +189,7 @@ describe("todos panel lifecycle", () => {
       const opening = openTodoPanel(ctx, deps);
       expect(isTodoPanelOpen(), "open flag set synchronously").toBe(true);
       expect(options?.overlay, "overlay route").toBe(true);
-      expect(options?.overlayOptions?.anchor).toBe("bottom-center");
+      expect(options?.overlayOptions?.anchor).toBe("center");
 
       // A second open while the panel is up must not stack a second overlay.
       await openTodoPanel(ctx, deps);
