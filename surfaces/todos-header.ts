@@ -381,20 +381,20 @@ export function todoPanelHint(): string {
 }
 
 /**
- * The sticky composer row: exactly one row, painted from state alone. No scan window, no strike sweep,
- * no `now` — a row that animates inside the composer reflows and repaints the block around it on every
- * pump tick, which is what the panel exists to avoid. `state` is null once the list is cleared, so the
- * row stays mounted and reports the empty list instead of collapsing the composer by a row.
+ * Inline status-row segment: counts plus the running label, sized to the cells the host's trailer row
+ * has left next to the tok/s readout. Empty when the list is empty, so the host row is untouched, and
+ * never animated: this row repaints with the working indicator, not on a todo timer.
  */
-export function renderTodoSummary(theme: unknown, width: number, state: TodoHeaderState | null): string[] {
+export function todoStatusSegment(theme: unknown, state: TodoHeaderState | null, budget: number): string {
   const items = state?.items ?? [];
-  const head =
-    state && items.length > 0
-      ? `▸ Todos ${state.open} open, ${state.done} done${state.blocked > 0 ? `, ${state.blocked} blocked` : ""}`
-      : "▸ Todos — none";
+  if (!state || items.length === 0 || budget < 10) return "";
+  const op = getPluginConfig().opacity;
+  const blocked = state.blocked > 0 ? `, ${state.blocked} blocked` : "";
+  const head = truncatePlain(`◆ Todos ${state.open} open, ${state.done} done${blocked}`, budget);
   const active = items.find((item) => item.status === "active");
-  const body = active ? `${head} — ${paintAt(theme, truncatePlain(active.label.trim(), 60), "accent", 1)}` : head;
-  return [formatRowLine(theme, width, { body, right: todoPanelHint(), indent: TODO_ROW_INDENT, header: true })];
+  const rest = budget - head.length;
+  const label = active && rest > 8 ? truncatePlain(` — ${active.label.trim()}`, rest) : "";
+  return `${paintAt(theme, head, "toolOutput", op)}${label ? paintAt(theme, label, "accent", 1) : ""}`;
 }
 export function renderTodoHeader(
   theme: unknown,

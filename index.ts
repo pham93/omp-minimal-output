@@ -42,7 +42,8 @@ import {
 import { installWarningSkin, alertSkinActive, invalidateLiveAlerts } from "./surfaces/warning-skin.ts";
 import { installTodoChrome } from "./surfaces/todo-hud.ts";
 import { closeTodoPanel, isTodoPanelOpen, openTodoPanel } from "./surfaces/todo-panel.ts";
-import { parseTodoPhases, renderDensityTodoHeader } from "./surfaces/todos-header.ts";
+import { ensureTodoStatusRow, restoreTodoStatusRow } from "./surfaces/todo-status-row.ts";
+import { parseTodoPhases, renderDensityTodoHeader, todoStatusSegment } from "./surfaces/todos-header.ts";
 import { renderWriteCard, writeCardsNeedPump } from "./cards/write-card.ts";
 import { eventFingerprint, stashFullText } from "./core/results.ts";
 import { collapseToolText } from "./core/filters.ts";
@@ -195,6 +196,24 @@ export default function (pi: ExtensionAPI) {
      * what wakes the pump for todo frames; closing it drops the pump gate and the next tick stops the
      * timer. The summary row stays mounted either way, so the composer never changes height.
      */
+    /** Segment budget for the status row: the host row also carries the indicator and the tok/s. */
+    const TODO_SEGMENT_CELLS = 56;
+
+    function installTodoSegment(tui: unknown): void {
+      ensureTodoStatusRow(tui, {
+        owns: runtimeOwner.owns,
+        enabled: () => enabled,
+        segment: (budget) => {
+          try {
+            const state = todoWidget.peekState();
+            return todoStatusSegment(readGroupTheme, state, Math.min(TODO_SEGMENT_CELLS, budget));
+          } catch {
+            return "";
+          }
+        },
+      });
+    }
+
     async function toggleTodoPanel(ctx: ExtensionContext): Promise<void> {
       if (isTodoPanelOpen()) {
         closeTodoPanel();
@@ -290,9 +309,9 @@ export default function (pi: ExtensionAPI) {
     armContainerSkins();
 
     const PUMP_WIDGET_KEY = "minimal-pump";
+    let statusRowTui: unknown;
     function grabTui(ctx: unknown): void {
       thinkingWidget.bindUi(ctx);
-      todoWidget.bindUi(ctx);
       todoWidget.bindSource(ctx);
       if (typeof ctx === "object" && ctx !== null && "ui" in ctx) {
         const ui = (ctx as { ui?: unknown }).ui;
@@ -301,6 +320,8 @@ export default function (pi: ExtensionAPI) {
             (ui as { setWidget: (key: string, fn: unknown) => void }).setWidget(PUMP_WIDGET_KEY, (tui: unknown) => {
               pump.bindUi(tui);
               thinkingWidget.setTui(tui);
+              statusRowTui = tui;
+              installTodoSegment(tui);
               const c = new Container();
               c.addChild({ render: (): readonly string[] => [] });
               return c;
@@ -323,6 +344,7 @@ export default function (pi: ExtensionAPI) {
     runtimeOwner.setCleanup(() => {
       enabled = false;
       closeTodoPanel();
+      restoreTodoStatusRow();
       activityTracker.dispose();
       thinkingWidget.dispose();
       todoWidget.dispose();
@@ -370,7 +392,7 @@ export default function (pi: ExtensionAPI) {
       thinkingWidget.setWidget(false);
       thinkingWidget.resetRegistration();
       thinkingWidget.reset();
-      todoWidget.setWidget(false);
+      restoreTodoStatusRow();
       todoWidget.resetSessionState();
       todoWidget.agentRunning = false;
       activityTracker.clearRun();
@@ -390,7 +412,6 @@ export default function (pi: ExtensionAPI) {
       todoWidget.resetSessionState();
       reloadPluginConfig();
       thinkingWidget.bindUi(ctx);
-      todoWidget.bindUi(ctx);
       todoWidget.bindSource(ctx);
       todoWidget.sessionVisible = true;
       todoWidget.syncFromSession(ctx);
@@ -440,7 +461,6 @@ export default function (pi: ExtensionAPI) {
       sessionContext = ctx;
       todoWidget.agentRunning = false;
       todoWidget.resetSessionState();
-      todoWidget.bindUi(ctx);
       // A session change can run through OMP's `clearHookWidgets()`, which drops every extension
       // widget without telling us; re-register instead of trusting the previous registration.
       thinkingWidget.resetRegistration();
@@ -476,7 +496,7 @@ export default function (pi: ExtensionAPI) {
       todoWidget.sessionVisible = true;
       todoWidget.syncFromSession(ctx);
       pump.ensureTimer(ctx);
-      if (todoWidget.headerState) todoWidget.refreshWidget();
+      installTodoSegment(statusRowTui);
       reloadPluginConfig();
       toolWrapper.wrapAllTools();
       updateMinimalPromptEditorProviders(
@@ -665,7 +685,6 @@ export default function (pi: ExtensionAPI) {
       reloadPluginConfig();
       toolWrapper.wrapAllTools();
       thinkingWidget.bindUi(ctx);
-      todoWidget.bindUi(ctx);
       todoWidget.bindSource(ctx);
       todoWidget.sessionVisible = true;
       todoWidget.syncFromSession(ctx);
@@ -682,7 +701,8 @@ export default function (pi: ExtensionAPI) {
       activityTracker.maybeSendSettledActivity(true);
       activityTracker.clearRun();
       thinkingWidget.reset();
-      todoWidget.refreshWidget();
+      // The inline segment repaints with the status row; re-assert the seam in case the host rebuilt it.
+      installTodoSegment(statusRowTui);
       pump.stopIfIdle(ctx);
     });
 
@@ -709,7 +729,7 @@ export default function (pi: ExtensionAPI) {
         // Thinking registers first: the host appends hook widgets in registration order, so the first
         // registered widget is the topmost and the stack never needs a render-time reorder.
         thinkingWidget.installWidget();
-        todoWidget.installWidget();
+        installTodoSegment(statusRowTui);
         _ctx.ui.notify("Minimal output enabled", "info");
       },
       minimalOff: (_ctx) => {
@@ -720,7 +740,7 @@ export default function (pi: ExtensionAPI) {
         resetNativeToolCardPump();
         activityTracker.clearRun();
         closeTodoPanel();
-        todoWidget.setWidget(false);
+        restoreTodoStatusRow();
         // Unmounting the widget restores the native composer order (hook container after the status row).
         thinkingWidget.setWidget(false);
         thinkingWidget.reset();
@@ -731,10 +751,13 @@ export default function (pi: ExtensionAPI) {
         if (!runtimeOwner.owns()) return;
         todoWidget.sessionVisible = true;
         todoWidget.syncFromSession(_ctx);
-        todoWidget.installWidget();
-        const hasTodos = todoWidget.showsTodos();
+        installTodoSegment(statusRowTui);
         _ctx.ui.notify(
-          todoWidget.widgetOn ? "Todos shown" : hasTodos ? "Todos header is disabled" : "No todos in this session",
+          todoWidget.showsTodos()
+            ? "Todos shown on the status row"
+            : getPluginConfig().todosHeader === false
+              ? "Todos header is disabled"
+              : "No todos in this session",
           "info",
         );
       },

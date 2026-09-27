@@ -24,9 +24,9 @@ const {
   TODO_STRIKE_HOLD_MS,
   renderDensityTodoHeader,
   renderTodoHeader,
-  renderTodoSummary,
   todoItemKey,
   todoStatusBox,
+  todoStatusSegment,
 } = await import("./surfaces/todos-header.ts");
 const { paintAt } = await import("./core/theme.ts");
 const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
@@ -91,32 +91,30 @@ describe("todo status boxes", () => {
   });
 });
 
-describe("todo summary row", () => {
-  test("is one static row: counts, active label, and the panel hint", () => {
-    const rows = renderTodoSummary(BOX_THEME, 80, state());
-    expect(rows).toHaveLength(1);
-    const plain = Bun.stripANSI(rows[0]!);
+describe("todo status segment", () => {
+  test("is one static run: counts, active label, and no clock", () => {
+    const segment = todoStatusSegment(BOX_THEME, state(), 60);
+    const plain = Bun.stripANSI(segment);
     expect(plain).toContain("Todos 3 open, 1 done, 1 blocked");
     expect(plain).toContain("Running item");
-    expect(plain).toContain("panel · Ctrl+Alt+T");
-    // The active label is one accent run, not a scan window: no clock, no per-character mix.
-    expect(rows[0]).toContain(paintAt(BOX_THEME, "Running item", "accent", 1));
-    expect(rows[0]!.split("Running item")).toHaveLength(2);
-    // The composer row never carries the settle sweep.
-    expect(rows[0]).not.toContain("\x1b[9m");
+    // The active label is one accent run, not a scan window: no per-character mix, no strike sweep.
+    expect(segment).toContain(paintAt(BOX_THEME, " — Running item", "accent", 1));
+    expect(segment.split("Running item")).toHaveLength(2);
+    expect(segment).not.toContain("\x1b[9m");
+    expect(Bun.stripANSI(segment).length).toBeLessThanOrEqual(60);
   });
 
-  test("an empty list keeps the row so the composer height never changes", () => {
-    const cleared = renderTodoSummary(BOX_THEME, 80, null);
-    expect(cleared).toHaveLength(1);
-    expect(Bun.stripANSI(cleared[0]!)).toContain("Todos — none");
-    expect(Bun.stripANSI(cleared[0]!)).toContain("panel · Ctrl+Alt+T");
+  test("an empty list renders nothing so the host row stays untouched", () => {
+    expect(todoStatusSegment(BOX_THEME, null, 60)).toBe("");
+    expect(todoStatusSegment(BOX_THEME, { items: [], open: 0, done: 0, blocked: 0, activeLabel: "" }, 60)).toBe("");
+    // A budget too small to say anything is also nothing, rather than a clipped word.
+    expect(todoStatusSegment(BOX_THEME, state(), 6)).toBe("");
   });
 
-  test("stays inside the dock width at narrow widths", () => {
-    for (const width of [12, 24, 40]) {
-      const [row] = renderTodoSummary(BOX_THEME, width, state());
-      expect(Bun.stripANSI(row ?? "").length).toBeLessThanOrEqual(width);
+  test("shrinks to the budget the tok/s row leaves", () => {
+    for (const budget of [12, 20, 32]) {
+      const segment = todoStatusSegment(BOX_THEME, state(), budget);
+      expect(Bun.stripANSI(segment).length, `budget ${budget}`).toBeLessThanOrEqual(budget);
     }
   });
 });

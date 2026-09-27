@@ -1,19 +1,13 @@
-import { Container } from "@oh-my-pi/pi-tui";
-import { getPluginConfig } from "../core/config.ts";
 import {
   latestTodoDetailsFromEntries,
   parseTodoPhases,
   parseTodoResult,
-  renderTodoSummary,
   todoItemKey,
   todoNeedsPump,
   todoHasActiveTransition,
   type TodoHeaderState,
 } from "./todos-header.ts";
-import { TODOS_WIDGET_FLAG, ensureThinkingAboveStatus, ensureThinkingBeforeTodos } from "./thinking-widget.ts";
 export { parseTodoResult, parseTodoPhases };
-
-export const TODOS_WIDGET_KEY = "minimal-todos";
 
 export function todoRawText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -30,14 +24,17 @@ export interface TodoWidgetDeps {
   kickPump?: () => void;
 }
 
+/**
+ * Todo session state: the parsed snapshot, completion transitions, and the panel's pump gate. The
+ * summary itself is painted by the status-row skin (`todo-status-row.ts`) and the full list by the
+ * panel, so this class owns no widget of its own.
+ */
 export class TodoWidget {
-  #ui: unknown = undefined;
   #headerState: TodoHeaderState | null = null;
   readonly #completingAt = new Map<string, number>();
   readonly #todoSeen = new Map<string, string>();
   #agentRunning = false;
   #panelOpen = false;
-  #widgetOn = false;
   #headerSig = "";
   #todoSource: (() => { phases: unknown } | undefined) | undefined;
   #sessionVisible = false;
@@ -72,13 +69,9 @@ export class TodoWidget {
     this.#panelOpen = value;
   }
 
-  /** Whether the summary row lists todos (as opposed to reporting an empty list). */
+  /** Whether the inline segment lists todos (as opposed to reporting an empty list). */
   showsTodos(): boolean {
     return this.#headerState !== null && this.#headerState.items.length > 0;
-  }
-
-  get widgetOn(): boolean {
-    return this.#widgetOn;
   }
 
   get sessionVisible(): boolean {
@@ -99,12 +92,6 @@ export class TodoWidget {
 
   hasFastAnimation(): boolean {
     return this.#panelOpen && todoHasActiveTransition(this.#completingAt);
-  }
-
-  bindUi(ctx: unknown): void {
-    if (!this.#deps.owns() || typeof ctx !== "object" || ctx === null || !("ui" in ctx)) return;
-    const ui = (ctx as { ui?: unknown }).ui;
-    if (ui) this.#ui = ui;
   }
 
   bindSource(ctx: unknown): void {
@@ -161,8 +148,6 @@ export class TodoWidget {
     }
     this.#headerSig = sig;
     this.#headerState = hide ? null : next;
-    this.installWidget();
-    this.refreshWidget();
     this.#deps.kickPump?.();
   }
 
@@ -197,73 +182,6 @@ export class TodoWidget {
     }
   }
 
-  paintTodosWidget(tui: unknown, theme: unknown): Container {
-    const c = new Container();
-    (c as Record<string, unknown>)[TODOS_WIDGET_FLAG] = true;
-    // Another widget mount rebuilds the host's hook container; re-assert the stack order then too.
-    if (tui && typeof tui === "object") ensureThinkingAboveStatus(tui);
-    c.addChild({
-      render: (width: number): readonly string[] => {
-        if (!this.#deps.owns()) return [];
-        ensureThinkingBeforeTodos(tui);
-        let show = true;
-        try {
-          show = getPluginConfig().todosHeader !== false;
-        } catch {
-          // Config read is best-effort.
-        }
-        if (!show) return [];
-        // One row, always: a summary that grows, shrinks, or vanishes reflows the composer block and
-        // repaints everything around it. The full list lives in the panel.
-        return renderTodoSummary(theme, width, this.peekState());
-      },
-    });
-    return c;
-  }
-
-  setWidget(show: boolean): void {
-    const ui = this.#ui;
-    if (!ui || typeof ui !== "object" || typeof (ui as { setWidget?: unknown }).setWidget !== "function") return;
-    try {
-      if (!show) {
-        (ui as { setWidget: (key: string, val: unknown) => void }).setWidget(TODOS_WIDGET_KEY, undefined);
-        this.#widgetOn = false;
-        return;
-      }
-      if (!this.#deps.owns()) return;
-      if (this.#widgetOn) {
-        const requestRender = (ui as { requestRender?: unknown }).requestRender;
-        if (typeof requestRender === "function") requestRender.call(ui);
-        return;
-      }
-      (ui as { setWidget: (key: string, fn: unknown, opts: unknown) => void }).setWidget(
-        TODOS_WIDGET_KEY,
-        (tui: unknown, theme: unknown) => this.paintTodosWidget(tui, theme),
-        { placement: "aboveEditor" },
-      );
-      this.#widgetOn = true;
-    } catch {
-      this.#widgetOn = false;
-    }
-  }
-
-  installWidget(): void {
-    let show = true;
-    try {
-      show = getPluginConfig().todosHeader !== false;
-    } catch {
-      // Config reload is best-effort.
-    }
-    // Sticky once mounted: unmounting on an empty list collapses the composer by a row and hands the
-    // transcript card back in the same frame, so the summary stays and reports the empty list.
-    this.setWidget(show && (this.showsTodos() || this.#widgetOn));
-  }
-
-  refreshWidget(): void {
-    if (!this.#widgetOn) this.installWidget();
-    else this.setWidget(true);
-  }
-
   resetSessionState(): void {
     this.#todoSource = undefined;
     this.#panelOpen = false;
@@ -272,12 +190,9 @@ export class TodoWidget {
     this.#headerState = null;
     this.#todoSeen.clear();
     this.#completingAt.clear();
-    this.setWidget(false);
   }
 
   dispose(): void {
-    this.setWidget(false);
-    this.#ui = undefined;
     this.resetSessionState();
   }
 }

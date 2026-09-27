@@ -259,11 +259,11 @@ Error:
 
 ## Todo / warning chrome
 
-The sticky summary row is one fixed-height line; `ctrl+alt+t` (or `/todos`) opens the full list in the
-panel, and `esc` closes it:
+The inline summary rides the host's status HUD row, immediately before the right-docked tok/s readout;
+`ctrl+alt+t` (or `/todos`) opens the full list in the panel, and `esc` closes it:
 
 ```text
- ◆ ▸ Todos 2 open, 1 done — shipping SSD docs                              panel · Ctrl+Alt+T
+ ◈ Working…                                    ◆ Todos 2 open, 1 done — shipping SSD docs  tok/s: 12.3 tok/s
  ⚠ 2 incomplete todos - reminder 1/5 ☐ Wire inspect overlay hints ☐ Ship the SSD docs
 ```
 

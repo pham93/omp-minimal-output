@@ -39,7 +39,7 @@ Prefer boring, explicit code over clever abstractions. Make the smallest coheren
   - `surfaces/composer-editor.ts`: editor re-framing, below-dock status row, and the composer refresh timer.
   - `surfaces/composer-status.ts`, `surfaces/composer-gauge.ts`, `surfaces/composer-primitives.ts`: status text pipeline and providers, the crash-dump guard and session-title strip for the composer status surface, context gauge, host glyph vocabulary and ANSI/width helpers.
   - `surfaces/thinking-widget.ts`: animated reasoning stream widget above editor.
-  - `surfaces/todo-widget.ts`, `surfaces/todos-header.ts`, `surfaces/todo-panel.ts`, `surfaces/todo-hud.ts`: sticky Todo summary row (one fixed-height, timer-free row), the todo row/list renderers, the on-demand full-list overlay panel, and the status line HUD.
+  - `surfaces/todo-widget.ts`, `surfaces/todos-header.ts`, `surfaces/todo-status-row.ts`, `surfaces/todo-panel.ts`, `surfaces/todo-hud.ts`: todo session state, the todo row/list/segment renderers, the inline status-row segment spliced before the tok/s trailer, the on-demand full-list overlay panel, and the status line HUD.
   - `surfaces/commands.ts`: top-level slash command and shortcut registrations.
   - `surfaces/warning-skin.ts`, `surfaces/assistant-commentary-skin.ts`, `surfaces/read-group.ts`: overlay skins.
   - `surfaces/scrolling-text.ts`: TextScroller animation buffer.

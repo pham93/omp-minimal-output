@@ -1099,94 +1099,6 @@ describe("transcript settled thought block rendering", () => {
       expect(composer.frame().join("\n")).toMatch(/Working…[\s\S]*Thinking/);
     });
 
-    test("orders the thinking block above the todos widget in the shared hook container", async () => {
-      const { ensureThinkingAboveStatus, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } =
-        await import("./surfaces/thinking-widget.ts");
-
-      const thinking: Record<string, unknown> = { render: () => ["THINKING"] };
-      thinking[THINKING_WIDGET_FLAG] = true;
-      const todos: Record<string, unknown> = { render: () => ["TODOS"] };
-      todos[TODOS_WIDGET_FLAG] = true;
-      const spacer = { render: () => [""] };
-      const hookAbove = {
-        children: [spacer, todos, thinking] as Array<{ render: (w: number) => readonly string[] }>,
-        render: () => hookAbove.children.flatMap((child) => child.render(80)),
-      };
-      const statusContainer = {
-        mode: undefined as unknown,
-        render: () => ["◈ 12s Working… (esc to interrupt)"],
-      };
-      const chips = { render: (): readonly string[] => [] };
-      const editor = { render: () => ["╭─ prompt ─╮"] };
-      const header = { render: () => ["welcome"] };
-      const statusHost = { setComponent: () => {}, render: () => ["model · git"] };
-      const tui = { children: [] as unknown[], requestRender: () => {} };
-      const composer = {
-        ui: tui,
-        runtime: [] as readonly unknown[],
-        setRuntimeChildren(children: readonly unknown[]) {
-          this.runtime = children;
-          tui.children = [header, ...children, statusHost];
-        },
-        frame(): string[] {
-          return this.runtime.flatMap((root) => (root as { render: (w: number) => readonly string[] }).render(80));
-        },
-      };
-      const mode = { statusContainer, hookWidgetContainerAbove: hookAbove, attachmentChipsContainer: chips, composer };
-      statusContainer.mode = mode;
-      composer.setRuntimeChildren([hookAbove, statusContainer, chips, editor]);
-
-      ensureThinkingAboveStatus(tui);
-
-      // Non-flagged children keep their slot; the two widgets swap into thinking → todos.
-      expect(hookAbove.children[0]).toBe(spacer);
-      expect(hookAbove.children[1]).toBe(thinking);
-      expect(hookAbove.children[2]).toBe(todos);
-      expect(composer.frame().join("\n")).toMatch(/THINKING[\s\S]*TODOS[\s\S]*Working…/);
-    });
-
-    test("reordering the hook widgets during a frame never duplicates or drops one", async () => {
-      const { ensureThinkingBeforeTodos, THINKING_WIDGET_FLAG, TODOS_WIDGET_FLAG } =
-        await import("./surfaces/thinking-widget.ts");
-      const { tui, hookAbove } = createHost();
-
-      // Host `Container.render` captures the child array and its length before its loop and reads
-      // `children[i]` live, so a child that reorders the array mid-frame shifts what later indices
-      // see. Both plugin widgets call `ensureThinkingBeforeTodos` from their render callback.
-      const rendered: string[] = [];
-      const widget = (flag: string, name: string) => {
-        const c: { render: (w: number) => readonly string[] } & Record<string, unknown> = {
-          render: () => {
-            rendered.push(name);
-            ensureThinkingBeforeTodos(tui);
-            return [name];
-          },
-        };
-        c[flag] = true;
-        return c;
-      };
-      const spacer: { render: (w: number) => readonly string[] } = { render: () => ["spacer"] };
-      // The order the host builds after /minimal-off then /minimal-on before this fix.
-      hookAbove.children = [spacer, widget(TODOS_WIDGET_FLAG, "todos"), widget(THINKING_WIDGET_FLAG, "thinking")];
-      hookAbove.render = () => {
-        const children = hookAbove.children;
-        const count = children.length;
-        const rows: string[] = [];
-        for (let i = 0; i < count; i += 1) rows.push(...children[i]!.render(80));
-        return rows;
-      };
-
-      // The frame that corrects the order must still paint each widget exactly once.
-      const frame = hookAbove.render(80);
-      expect(frame.filter((row) => row === "todos")).toHaveLength(1);
-      expect(frame.filter((row) => row === "thinking")).toHaveLength(1);
-      expect([...rendered].sort()).toEqual(["thinking", "todos"]);
-
-      rendered.length = 0;
-      expect(hookAbove.render(80)).toEqual(["spacer", "thinking", "todos"]);
-      expect(rendered).toEqual(["thinking", "todos"]);
-    });
-
     test("leaves hosts it cannot identify untouched", async () => {
       const { ensureThinkingAboveStatus, restoreStatusOrder } = await import("./surfaces/thinking-widget.ts");
       const children = [{ render: () => ["a"] }];
@@ -1285,7 +1197,9 @@ test("headless bindings never acquire or tear down the interactive UI", async ()
   await parent.emit("session_start");
   const editor = parent.editor;
   expect(typeof editor).toBe("function");
-  expect(parent.widgets.has("minimal-todos")).toBe(true);
+  // The todos surface is the host status row now, not a widget: the thinking widget is the plugin's
+  // session-armed `aboveEditor` mount.
+  expect(parent.widgets.has("minimal-thinking")).toBe(true);
   expect(parent.tools.has("grep")).toBe(true);
   const child = createHost(false);
   try {
@@ -1295,9 +1209,7 @@ test("headless bindings never acquire or tear down the interactive UI", async ()
     await earlyChild.emit("session_shutdown");
     expect(parent.editor).toBe(editor);
     expect(parent.editorRemovals).toBe(0);
-    expect(parent.widgets.has("minimal-todos")).toBe(true);
-    const todoComponent = parent.widgets.get("minimal-todos")!(null, null) as unknown as MockContainer;
-    expect(todoComponent.children[0]!.render!(100).map(Bun.stripANSI).join("\n")).toContain("Keep parent alive");
+    expect(parent.widgets.has("minimal-thinking")).toBe(true);
     const transcript = parent.tools.get("grep")!.renderResult(
       {
         content: [{ type: "text", text: "parent output" }],
@@ -1323,7 +1235,7 @@ test("headless bindings never acquire or tear down the interactive UI", async ()
     expect(typeof replacement.editor).toBe("function");
     expect(replacement.tools.has("grep")).toBe(true);
     await parent.emit("session_shutdown");
-    expect(replacement.widgets.has("minimal-todos")).toBe(true);
+    expect(replacement.widgets.has("minimal-thinking")).toBe(true);
     await replacement.emit("session_shutdown");
     expect(replacement.editorRemovals).toBe(1);
   } finally {
@@ -1378,23 +1290,23 @@ test("a session shutdown and restart in the same process re-arms the runtime", a
   // generation running; the plugin must come back on the next session instead of staying inert.
   registerExtension(pi);
   await emit("session_start");
-  expect(widgets.has("minimal-todos")).toBe(true);
+  expect(widgets.has("minimal-thinking")).toBe(true);
   expect(typeof editor).toBe("function");
   expect(tools.has("grep")).toBe(true);
 
   await emit("session_shutdown");
-  expect(widgets.has("minimal-todos")).toBe(false);
+  expect(widgets.has("minimal-thinking")).toBe(false);
   expect(editor).toBeUndefined();
 
   await emit("session_start");
-  expect(widgets.has("minimal-todos")).toBe(true);
+  expect(widgets.has("minimal-thinking")).toBe(true);
   expect(typeof editor).toBe("function");
   expect(tools.has("grep")).toBe(true);
   await emit("session_shutdown");
 
   // `/resume`-style switches can arrive without a fresh `session_start`; they must recover too.
   await emit("session_switch");
-  expect(widgets.has("minimal-todos")).toBe(true);
+  expect(widgets.has("minimal-thinking")).toBe(true);
   expect(typeof editor).toBe("function");
   await emit("session_shutdown");
 });

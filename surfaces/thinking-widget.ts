@@ -57,7 +57,7 @@ interface ComposerLike {
   setRuntimeChildren?: (children: readonly unknown[]) => void;
 }
 
-interface ComposerRuntimeHost {
+export interface ComposerRuntimeHost {
   /** Bound native `Composer.setRuntimeChildren` captured before the wrapper is installed. */
   applyRuntimeChildren: (children: readonly unknown[]) => void;
   composer: ComposerLike;
@@ -83,7 +83,7 @@ interface RuntimeReorderState {
  * `TUI.children`. Reach that composer through the status HUD container, which owns the mode it
  * renders for and whose `mode.composer` is the single InteractiveMode composer.
  */
-function runtimeHostFor(tui: unknown): ComposerRuntimeHost | undefined {
+export function runtimeHostFor(tui: unknown): ComposerRuntimeHost | undefined {
   if (!tui || typeof tui !== "object") return undefined;
   const children = (tui as { children?: unknown }).children;
   if (!Array.isArray(children)) return undefined;
@@ -194,25 +194,12 @@ function syncRuntimeChildren(tui: unknown, host: ComposerRuntimeHost): void {
 }
 
 /**
- * Re-assert the thinking-above-todos order. The host rebuilds its hook container after every
- * `setWidget`, i.e. after our factories ran, so both widget render callbacks call this each frame;
- * the lookup is a couple of indexOf scans, and it no-ops once the order is right.
- */
-export function ensureThinkingBeforeTodos(tui: unknown): void {
-  const host = runtimeHostFor(tui);
-  if (!host) return;
-  orderHookWidgets(host);
-  syncRuntimeChildren(tui, host);
-}
-
-/**
- * Keep the `aboveEditor` widget container before the status row, with the thinking block above the
- * todos widget, so the composer stack reads thinking → todos → working status → editor.
+ * Keep the `aboveEditor` widget container before the status row, so the composer stack reads
+ * thinking → working status → editor.
  */
 export function ensureThinkingAboveStatus(tui: unknown): void {
   const host = runtimeHostFor(tui);
   if (!host) return;
-  orderHookWidgets(host);
   syncRuntimeChildren(tui, host);
 }
 
@@ -236,44 +223,6 @@ function moveAfter(children: readonly unknown[], target: unknown, anchor: unknow
   const [moved] = next.splice(targetIdx, 1);
   next.splice(anchorIdx > targetIdx ? anchorIdx : anchorIdx + 1, 0, moved);
   return next;
-}
-
-/** Flags the composer ordering helper uses to find the plugin's two hook widgets. */
-export const THINKING_WIDGET_FLAG = "isThinkingWidget";
-export const TODOS_WIDGET_FLAG = "isTodosWidget";
-
-/**
- * Keep the live thinking block above the todos widget inside the host's shared hook container. Both
- * widgets are `aboveEditor`, and the host re-adds them in registration order after every rebuild, so
- * the order is re-asserted whenever either side (re)mounts.
- */
-function orderHookWidgets(host: ComposerRuntimeHost): void {
-  const container = host.hookWidgetContainerAbove as { children?: unknown } | undefined;
-  const children = container?.children;
-  if (!Array.isArray(children)) return;
-  const flagged = (child: unknown, flag: string): boolean =>
-    typeof child === "object" && child !== null && (child as Record<string, unknown>)[flag] === true;
-  const thinkingIdx = children.findIndex((child) => flagged(child, THINKING_WIDGET_FLAG));
-  const todosIdx = children.findIndex((child) => flagged(child, TODOS_WIDGET_FLAG));
-  if (thinkingIdx < 0 || todosIdx < 0 || thinkingIdx < todosIdx) return;
-  // Reorder through a fresh array: the host's `Container.render` captures `children` and its length
-  // before its loop, so splicing in place shifts the indices it is about to read and renders one
-  // widget twice. Replacing the array leaves an in-flight frame untouched.
-  const next = children.slice();
-  const [thinking] = next.splice(thinkingIdx, 1);
-  next.splice(todosIdx, 0, thinking);
-  container.children = next;
-  // Invalidate on a microtask, never inline: the host's `Container.render` decides whether its cached
-  // frame is still valid *before* it iterates children, then returns that cache — so clearing it from
-  // inside a child's render hands this frame back as `undefined`. A microtask lands after the
-  // synchronous render pass and still keeps the positional cache honest for the next one.
-  queueMicrotask(() => {
-    try {
-      container.invalidate?.();
-    } catch {
-      // Cache invalidation is best-effort; the next render recomputes anyway.
-    }
-  });
 }
 
 /** Restore the native order (hook container after the status/chip band) and drop the wrapper. */
@@ -389,11 +338,9 @@ export class ThinkingWidget {
     const effectiveTheme = theme !== undefined ? theme : tuiOrTheme;
     if (theme !== undefined) this.setTui(tuiOrTheme);
     const c = new Container();
-    (c as Record<string, unknown>)[THINKING_WIDGET_FLAG] = true;
     c.addChild({
       render: (width: number): readonly string[] => {
         if (!this.#deps.owns()) return [];
-        if (this.#tui) ensureThinkingBeforeTodos(this.#tui);
         if (!this.#live) {
           return ["", "", "", ""];
         }
