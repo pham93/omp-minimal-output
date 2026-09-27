@@ -48,7 +48,7 @@ export function registerPluginCommands(
   });
 
   pi.registerCommand("todos", {
-    description: "Toggle todos widget expand/collapse",
+    description: "Open the todos panel (full phase and task list)",
     handler: async (_args, ctx) => {
       await ensureActivated(ctx);
       await commandDelegates?.todos(ctx);
@@ -102,7 +102,7 @@ export function registerPluginCommands(
     },
   });
   pi.registerShortcut("ctrl+alt+t", {
-    description: "Toggle todos widget expand/collapse",
+    description: "Open the todos panel",
     handler: async (ctx) => {
       await ensureActivated(ctx);
       await commandDelegates?.toggleTodosShortcut(ctx);

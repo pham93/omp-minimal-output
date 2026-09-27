@@ -259,10 +259,11 @@ Error:
 
 ## Todo / warning chrome
 
-Collapsed summary (hover/`ctrl+alt+t` expands):
+The sticky summary row is one fixed-height line; `ctrl+alt+t` (or `/todos`) opens the full list in the
+panel, and `esc` closes it:
 
 ```text
- ◆ ▸ Todos 2 open, 1 done — shipping SSD docs                             ▸ expand · Ctrl+Alt+T
+ ◆ ▸ Todos 2 open, 1 done — shipping SSD docs                              panel · Ctrl+Alt+T
  ⚠ 2 incomplete todos - reminder 1/5 ☐ Wire inspect overlay hints ☐ Ship the SSD docs
 ```
 
@@ -270,18 +271,20 @@ The `⚠` row pulses while it is the newest transcript block; as soon as anythin
 finalizes, so the host commits the row to scrollback (static) instead of pinning the transcript and
 dropping the head of later long answers.
 
-Expanded widget: one checkbox per row — empty for pending (label color unchanged), checked for
-settled, in-between for blocked (`[!]`/`☒`) and dropped (`[-]`/`⊟`) — while the in-progress row keeps
-its `◐` indicator. Settled labels are struck through, revealed by an animated line when the item
-settles.
+Panel: one checkbox per row — empty for pending (label color unchanged), checked for settled,
+in-between for blocked (`[!]`/`☒`) and dropped (`[-]`/`⊟`) — while the in-progress row keeps its `◐`
+indicator and its scan. Settled labels are struck through, revealed by an animated line when the item
+settles. The panel floats over the transcript and never reflows the composer.
 
 ```text
- ◆ ▾ Todos 2 open, 2 done, 1 blocked                  ▾ collapse · Ctrl+Alt+T
-     Diagnosis
-     ├─ [x] Investigate tool execution background
-     ╰─ [ ] Wire inspect overlay hints
-     Verification
-     ├─ ◐ Add automated demo command
-     ├─ [!] Blocked on host affordance — blocked: tool callback
-     ╰─ [-] Dropped styling experiment (dropped)
+                  ╭─ Todos ──────────────────────────────────────────────────────────╮
+                  │  ◆ ▾ Todos 2 open, 2 done                ↑↓ scroll · esc close   │
+                  │      Diagnosis                                                    │
+                  │      ├─ [x] Investigate tool execution background                  │
+                  │      ╰─ [ ] Wire inspect overlay hints                             │
+                  │      Verification                                                  │
+                  │      ├─ ◐ Add automated demo command                               │
+                  │      ├─ [!] Blocked on host affordance — blocked: tool callback    │
+                  │      ╰─ [-] Dropped styling experiment (dropped)                   │
+                  ╰──────────────────────────────────────────────────────────────────╯
 ```

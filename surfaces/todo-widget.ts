@@ -4,7 +4,7 @@ import {
   latestTodoDetailsFromEntries,
   parseTodoPhases,
   parseTodoResult,
-  renderDensityTodoHeader,
+  renderTodoSummary,
   todoItemKey,
   todoNeedsPump,
   todoHasActiveTransition,
@@ -36,7 +36,7 @@ export class TodoWidget {
   readonly #completingAt = new Map<string, number>();
   readonly #todoSeen = new Map<string, string>();
   #agentRunning = false;
-  #todosCollapsed = true;
+  #panelOpen = false;
   #widgetOn = false;
   #headerSig = "";
   #todoSource: (() => { phases: unknown } | undefined) | undefined;
@@ -63,12 +63,18 @@ export class TodoWidget {
     this.#agentRunning = value;
   }
 
-  get todosCollapsed(): boolean {
-    return this.#todosCollapsed;
+  /** Whether the full-list panel is on screen. The panel is the only animated todo surface. */
+  get panelOpen(): boolean {
+    return this.#panelOpen;
   }
 
-  set todosCollapsed(value: boolean) {
-    this.#todosCollapsed = value;
+  set panelOpen(value: boolean) {
+    this.#panelOpen = value;
+  }
+
+  /** Whether the summary row lists todos (as opposed to reporting an empty list). */
+  showsTodos(): boolean {
+    return this.#headerState !== null && this.#headerState.items.length > 0;
   }
 
   get widgetOn(): boolean {
@@ -88,11 +94,11 @@ export class TodoWidget {
   }
 
   needsPump(): boolean {
-    return todoNeedsPump(this.#headerState, this.#completingAt, this.#agentRunning);
+    return this.#panelOpen && todoNeedsPump(this.#headerState, this.#completingAt, this.#agentRunning);
   }
 
   hasFastAnimation(): boolean {
-    return todoHasActiveTransition(this.#completingAt);
+    return this.#panelOpen && todoHasActiveTransition(this.#completingAt);
   }
 
   bindUi(ctx: unknown): void {
@@ -206,9 +212,10 @@ export class TodoWidget {
         } catch {
           // Config read is best-effort.
         }
-        const state = this.peekState();
-        if (!show || !state || state.items.length === 0) return [];
-        return renderDensityTodoHeader(theme, width, state, !this.#todosCollapsed, this.todoAnim());
+        if (!show) return [];
+        // One row, always: a summary that grows, shrinks, or vanishes reflows the composer block and
+        // repaints everything around it. The full list lives in the panel.
+        return renderTodoSummary(theme, width, this.peekState());
       },
     });
     return c;
@@ -247,7 +254,9 @@ export class TodoWidget {
     } catch {
       // Config reload is best-effort.
     }
-    this.setWidget(show && !!this.#headerState && this.#headerState.items.length > 0);
+    // Sticky once mounted: unmounting on an empty list collapses the composer by a row and hands the
+    // transcript card back in the same frame, so the summary stays and reports the empty list.
+    this.setWidget(show && (this.showsTodos() || this.#widgetOn));
   }
 
   refreshWidget(): void {
@@ -257,7 +266,7 @@ export class TodoWidget {
 
   resetSessionState(): void {
     this.#todoSource = undefined;
-    this.#todosCollapsed = true;
+    this.#panelOpen = false;
     this.#sessionVisible = false;
     this.#headerSig = "";
     this.#headerState = null;

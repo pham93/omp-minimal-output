@@ -25,8 +25,8 @@ The single owner of `Container.prototype.addChild` interception. Read-group, ass
 ### Thinking Widget
 The animated streaming widget (`minimal-thinking`) positioned above the prompt editor, rendering live reasoning tokens via a bottom-to-top scrolling buffer (`TextScroller`).
 
-### Todo Widget & HUD
-The sticky prompt widget (`minimal-todos`) and status line HUD presenting parsed task phases, completion countdowns, and expand/collapse toggles synchronized with host session state.
+### Todo Summary, Panel & HUD
+The sticky prompt row (`minimal-todos`) is one fixed-height, timer-free summary line mounted on the first todo of a session and kept for the rest of it, so the composer never reflows; the full list, with the scan and settle-strike animations, is the on-demand overlay panel (`Ctrl+Alt+T`, `/todos`). Both read the same parsed task phases, completion countdowns, and host session state. The status line HUD is the native fallback the Todo skin hides.
 
 ### Composer Dock
 Custom prompt chrome layouts (`Minimal Output · Bottom Dock`, `Top Dock`, `Below Dock`, and Grayscale variants) that frame editor inputs, Git status, provider quota usage, and the context gauge. The Below Dock moves the status off the frame onto a row of its own under the closing rule. The docks drop the host's `session_name` segment (the auto-generated task title) — task metadata, not session state, and the longest text a preset can put on the row. Every dock renders one status row: multi-line status text is flattened, and a status text that carries a JavaScript crash dump — a failed segment provider, or an extension that stringifies an exception into its hook status — is dropped, both from the dock's own status text and from the host status wrapper's rows, so a stack trace never replaces the project, model, or gauge.

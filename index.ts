@@ -41,6 +41,7 @@ import {
 } from "./cards/native-tool-card-skin.ts";
 import { installWarningSkin, alertSkinActive, invalidateLiveAlerts } from "./surfaces/warning-skin.ts";
 import { installTodoChrome } from "./surfaces/todo-hud.ts";
+import { closeTodoPanel, isTodoPanelOpen, openTodoPanel } from "./surfaces/todo-panel.ts";
 import { parseTodoPhases, renderDensityTodoHeader } from "./surfaces/todos-header.ts";
 import { renderWriteCard, writeCardsNeedPump } from "./cards/write-card.ts";
 import { eventFingerprint, stashFullText } from "./core/results.ts";
@@ -189,6 +190,26 @@ export default function (pi: ExtensionAPI) {
       if (ctx !== undefined && todoWidget.needsPump()) pump.ensureTimer(ctx);
     };
 
+    /**
+     * Toggle the full-list panel. The panel is the only todo surface that animates, so opening it is
+     * what wakes the pump for todo frames; closing it drops the pump gate and the next tick stops the
+     * timer. The summary row stays mounted either way, so the composer never changes height.
+     */
+    async function toggleTodoPanel(ctx: ExtensionContext): Promise<void> {
+      if (isTodoPanelOpen()) {
+        closeTodoPanel();
+        return;
+      }
+      await openTodoPanel(ctx, {
+        state: () => todoWidget.peekState(),
+        anim: () => todoWidget.todoAnim(),
+        onOpenChange: (open) => {
+          todoWidget.panelOpen = open;
+          kickTodoPump();
+        },
+      });
+    }
+
     const containerInterceptor = getContainerInterceptor(Container);
     function installContainerSkins(): () => void {
       const disposeReadGroupSkin = installReadGroupSkin(containerInterceptor, {
@@ -223,13 +244,16 @@ export default function (pi: ExtensionAPI) {
 
       const disposeTodoChrome = installTodoChrome(containerInterceptor, {
         hideHud: () => runtimeOwner.owns() && enabled && getPluginConfig().todoHud === false,
-        hideCard: () => runtimeOwner.owns() && enabled && todoWidget.widgetOn,
+        // Only while the summary row actually lists todos: an empty list leaves the transcript card as
+        // the durable record instead of hiding and restoring it on every clear.
+        hideCard: () => runtimeOwner.owns() && enabled && todoWidget.showsTodos(),
         skinCard: () => runtimeOwner.owns() && enabled,
         active: runtimeOwner.owns,
         paintCard: (width, expanded) => {
           const state = todoWidget.peekState();
           if (!state || state.items.length === 0) return [];
-          return renderDensityTodoHeader(readGroupTheme, width, state, expanded, todoWidget.todoAnim());
+          // No anim clock: the transcript card is a record, not a surface that repaints on a tick.
+          return renderDensityTodoHeader(readGroupTheme, width, state, expanded);
         },
         onHud: () => todoWidget.syncFromSession(),
         onTodoDetails: (details) => {
@@ -298,6 +322,7 @@ export default function (pi: ExtensionAPI) {
 
     runtimeOwner.setCleanup(() => {
       enabled = false;
+      closeTodoPanel();
       activityTracker.dispose();
       thinkingWidget.dispose();
       todoWidget.dispose();
@@ -335,6 +360,7 @@ export default function (pi: ExtensionAPI) {
      */
     function teardownSession(): void {
       disarmContainerSkins();
+      closeTodoPanel();
       try {
         disposeMinimalPromptEditor();
       } catch {
@@ -693,6 +719,7 @@ export default function (pi: ExtensionAPI) {
         disarmContainerSkins();
         resetNativeToolCardPump();
         activityTracker.clearRun();
+        closeTodoPanel();
         todoWidget.setWidget(false);
         // Unmounting the widget restores the native composer order (hook container after the status row).
         thinkingWidget.setWidget(false);
@@ -705,17 +732,15 @@ export default function (pi: ExtensionAPI) {
         todoWidget.sessionVisible = true;
         todoWidget.syncFromSession(_ctx);
         todoWidget.installWidget();
-        const hasTodos = !!todoWidget.headerState && todoWidget.headerState.items.length > 0;
+        const hasTodos = todoWidget.showsTodos();
         _ctx.ui.notify(
           todoWidget.widgetOn ? "Todos shown" : hasTodos ? "Todos header is disabled" : "No todos in this session",
           "info",
         );
       },
-      todos: (_ctx) => {
+      todos: async (ctx) => {
         if (!runtimeOwner.owns()) return;
-        todoWidget.todosCollapsed = !todoWidget.todosCollapsed;
-        todoWidget.refreshWidget();
-        _ctx.ui.notify(todoWidget.todosCollapsed ? "Todos collapsed" : "Todos expanded", "info");
+        await toggleTodoPanel(ctx);
       },
       demoWrite: async (_ctx) => {
         if (!runtimeOwner.owns() || !_ctx.hasUI) return;
@@ -744,10 +769,9 @@ export default function (pi: ExtensionAPI) {
           "info",
         );
       },
-      toggleTodosShortcut: (_ctx) => {
+      toggleTodosShortcut: async (ctx) => {
         if (!runtimeOwner.owns()) return;
-        todoWidget.todosCollapsed = !todoWidget.todosCollapsed;
-        todoWidget.refreshWidget();
+        await toggleTodoPanel(ctx);
       },
       inspect: async (ctx) => {
         if (!runtimeOwner.owns()) return;

@@ -217,6 +217,11 @@ export function todoHasActiveTransition(completingAt: ReadonlyMap<string, number
   return false;
 }
 
+/**
+ * Whether the animated todo surface needs the pump. The inline summary is timer-free, so this only
+ * answers for the panel: it animates the active row while a run is live and the rows that settled
+ * within the strike window.
+ */
 export function todoNeedsPump(
   state: TodoHeaderState | null,
   completingAt: ReadonlyMap<string, number>,
@@ -370,8 +375,26 @@ export const TODO_TOGGLE_SHORTCUT = "Ctrl+Alt+T";
  */
 export const TODO_ROW_INDENT = " ";
 
-export function todoToggleHint(collapsed: boolean): string {
-  return `${collapsed ? "▸ expand" : "▾ collapse"} · ${TODO_TOGGLE_SHORTCUT}`;
+/** Right-hand hint of the sticky summary row and the transcript card: the full list lives in the panel. */
+export function todoPanelHint(): string {
+  return `panel · ${TODO_TOGGLE_SHORTCUT}`;
+}
+
+/**
+ * The sticky composer row: exactly one row, painted from state alone. No scan window, no strike sweep,
+ * no `now` — a row that animates inside the composer reflows and repaints the block around it on every
+ * pump tick, which is what the panel exists to avoid. `state` is null once the list is cleared, so the
+ * row stays mounted and reports the empty list instead of collapsing the composer by a row.
+ */
+export function renderTodoSummary(theme: unknown, width: number, state: TodoHeaderState | null): string[] {
+  const items = state?.items ?? [];
+  const head =
+    state && items.length > 0
+      ? `▸ Todos ${state.open} open, ${state.done} done${state.blocked > 0 ? `, ${state.blocked} blocked` : ""}`
+      : "▸ Todos — none";
+  const active = items.find((item) => item.status === "active");
+  const body = active ? `${head} — ${paintAt(theme, truncatePlain(active.label.trim(), 60), "accent", 1)}` : head;
+  return [formatRowLine(theme, width, { body, right: todoPanelHint(), indent: TODO_ROW_INDENT, header: true })];
 }
 export function renderTodoHeader(
   theme: unknown,
@@ -380,6 +403,7 @@ export function renderTodoHeader(
   collapsed: boolean,
   anim?: TodoAnim,
   phaseTaskLimit = TODO_PHASE_TASK_LIMIT,
+  hint = todoPanelHint(),
 ): string[] {
   if (!state || state.items.length === 0) return [];
   const activeSuffix = state.activeLabel ? ` — ${truncatePlain(state.activeLabel.trim(), 60)}` : "";
@@ -394,7 +418,7 @@ export function renderTodoHeader(
     return [
       formatRowLine(theme, width, {
         body,
-        right: todoToggleHint(true),
+        right: hint,
         indent: TODO_ROW_INDENT,
         header: true,
       }),
@@ -403,7 +427,7 @@ export function renderTodoHeader(
   const rows = [
     formatRowLine(theme, width, {
       body: head,
-      right: todoToggleHint(false),
+      right: hint,
       indent: TODO_ROW_INDENT,
       header: true,
     }),
@@ -456,10 +480,11 @@ export function renderDensityTodoHeader(
   state: TodoHeaderState,
   expanded: boolean,
   anim?: TodoAnim,
+  hint?: string,
 ): string[] {
-  if (!expanded) return renderTodoHeader(theme, width, state, true, anim);
+  if (!expanded) return renderTodoHeader(theme, width, state, true, anim, TODO_PHASE_TASK_LIMIT, hint);
   const maxRows = detailedRowLimit();
-  const lines = renderTodoHeader(theme, width, state, false, anim, maxRows);
+  const lines = renderTodoHeader(theme, width, state, false, anim, maxRows, hint);
   const hiddenRows = Math.max(1, lines.length - maxRows + 1);
   const overflow = formatRowLine(theme, width, {
     body: `Todos — … ${hiddenRows} more rows`,
