@@ -70,6 +70,23 @@ export function trailerStart(plain: string): number {
 }
 
 /**
+ * Index of the row that carries the right-docked trailer, or -1 when the host rendered no trailer.
+ *
+ * The host's idle HUD is two rows — a leading blank line and the reading line (`renderIdleStatusHud` in
+ * `interactive-mode.ts`) — so painting every row would draw the segment twice: once alone in the blank
+ * row the host reserved, once before the reading. The rate marker picks the reading row; with no reading
+ * the last row carrying visible text is the trailer.
+ */
+export function trailerRowIndex(rows: readonly string[]): number {
+  const rate = rows.findIndex((row) => Bun.stripANSI(row ?? "").includes(RATE_MARKER));
+  if (rate >= 0) return rate;
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (Bun.stripANSI(rows[index] ?? "").trim()) return index;
+  }
+  return -1;
+}
+
+/**
  * Splice the segment into one host row, immediately before the right-docked trailer. The row is
  * width-fitted already, so the dock padding before the trailer is what the segment takes; when the
  * host content leaves too little room the segment shrinks, and below a readable width the row is left
@@ -93,17 +110,21 @@ export function spliceStatusSegment(row: string, width: number, segment: string)
   return `${content}${pad}${shown}${TRAILER_GAP}${trailer}`;
 }
 
-/** Paint the status HUD rows with the todo segment, or add the row the host left out. */
+/** Paint the status HUD with the todo segment: the trailer row, or a row of our own when it has none. */
 function paintRows(rows: readonly string[], width: number, deps: TodoStatusRowDeps): readonly string[] {
   if (!deps.owns() || !deps.enabled()) return rows;
-  if (rows.length === 0) {
+  const target = trailerRowIndex(rows);
+  if (target < 0) {
+    // No reading and no working row yet: keep the host's own rows and add the segment below them, so a
+    // summary never disappears just because the host has nothing to dock it next to.
     const segment = deps.segment(Math.min(MAX_SEGMENT_CELLS, Math.max(0, width)));
     if (!segment) return rows;
-    return [`${padding(Math.max(0, width - visibleWidth(segment)))}${segment}`];
+    return [...rows, `${padding(Math.max(0, width - visibleWidth(segment)))}${segment}`];
   }
   const segment = deps.segment(Math.min(MAX_SEGMENT_CELLS, Math.max(0, width - MIN_BUDGET - TRAILER_GAP.length)));
   if (!segment) return rows;
-  return rows.map((row) => spliceStatusSegment(row, width, segment));
+  // Exactly one row: the host's blank spacer rows stay as painted.
+  return rows.map((row, index) => (index === target ? spliceStatusSegment(row, width, segment) : row));
 }
 
 let installed: SegmentHost | undefined;

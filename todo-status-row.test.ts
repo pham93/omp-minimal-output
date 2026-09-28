@@ -204,6 +204,38 @@ describe("status row install", () => {
     }
   });
 
+  test("paints once when the host's idle HUD is a blank row plus the reading row", () => {
+    // The host's idle stand-in is `["", padding + reading]`; painting both rows would double the
+    // summary, once alone in the reserved blank row and once before the reading.
+    const host = fakeHost();
+    host.setHostRows(["", idleRow()]);
+    try {
+      ensureTodoStatusRow(host.tui, deps());
+      const rows = host.statusContainer.render(WIDTH);
+      expect(rows).toHaveLength(2);
+      expect(rows[0], "the host's spacer row stays blank").toBe("");
+      const painted = rows.map((row) => Bun.stripANSI(row));
+      expect(painted.filter((row) => row.includes(SEGMENT))).toHaveLength(1);
+      expect(painted[1]?.endsWith("tok/s: 12.3 tok/s")).toBe(true);
+    } finally {
+      restoreTodoStatusRow();
+    }
+  });
+
+  test("adds its own row after host blanks that carry no trailer", () => {
+    const host = fakeHost();
+    host.setHostRows(["", ""]);
+    try {
+      ensureTodoStatusRow(host.tui, deps());
+      const rows = host.statusContainer.render(WIDTH);
+      expect(rows).toHaveLength(3);
+      expect(rows.slice(0, 2)).toEqual(["", ""]);
+      expect(Bun.stripANSI(rows[2] ?? "").trim()).toBe(SEGMENT);
+    } finally {
+      restoreTodoStatusRow();
+    }
+  });
+
   test("without todos the host row is returned untouched", () => {
     const host = fakeHost();
     host.setHostRows([workingRow()]);
