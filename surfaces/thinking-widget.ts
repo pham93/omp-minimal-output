@@ -341,6 +341,9 @@ export class ThinkingWidget {
     c.addChild({
       render: (width: number): readonly string[] => {
         if (!this.#deps.owns()) return [];
+        // The host rebuilds its chrome containers and status wrapper as sessions come and go; re-assert
+        // the ordering and the status-row guard every frame so a swap cannot leave them unpatched.
+        if (this.#tui) ensureThinkingAboveStatus(this.#tui);
         if (!this.#live) {
           return ["", "", "", ""];
         }

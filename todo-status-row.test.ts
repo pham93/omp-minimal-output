@@ -68,8 +68,9 @@ mock.module("@oh-my-pi/pi-coding-agent", () => ({
   theme: { fg: (_token: string, text: string) => text },
 }));
 
-const { ensureTodoStatusRow, restoreTodoStatusRow, spliceStatusSegment, trailerStart } =
+const { ensureTodoStatusRow, installTodoStatusRowSkin, restoreTodoStatusRow, spliceStatusSegment, trailerStart } =
   await import("./surfaces/todo-status-row.ts");
+const { getContainerInterceptor } = await import("./core/container-interceptor.ts");
 
 const WIDTH = 80;
 const SEGMENT = "◆ Todos 3 open, 1 done — Task Alpha";
@@ -233,6 +234,30 @@ describe("status row install", () => {
       expect(Bun.stripANSI(rows[2] ?? "").trim()).toBe(SEGMENT);
     } finally {
       restoreTodoStatusRow();
+    }
+  });
+
+  test("installs through the addChild seam, so a reloaded generation still finds it", async () => {
+    // A hot reload re-registers the extension without replaying `session_start`, so the segment has to
+    // install when the composer mounts its status container rather than on the session event.
+    class FakeContainer {
+      children: unknown[] = [];
+      addChild(child: unknown) {
+        this.children.push(child);
+      }
+    }
+    const host = fakeHost();
+    host.setHostRows([workingRow()]);
+    const interceptor = getContainerInterceptor(FakeContainer);
+    const dispose = installTodoStatusRowSkin(interceptor, deps());
+    try {
+      expect(host.statusContainer).not.toBe(host.tui.children[1]);
+      new FakeContainer().addChild(host.statusContainer);
+      expect(Bun.stripANSI(host.statusContainer.render(WIDTH)[0] ?? "")).toContain(SEGMENT);
+    } finally {
+      dispose();
+      restoreTodoStatusRow();
+      interceptor.dispose();
     }
   });
 

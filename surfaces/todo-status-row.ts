@@ -8,6 +8,7 @@
  * at all (no tok/s reading yet) the segment gets a row of its own rather than disappearing.
  */
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import { getContainerInterceptor, type ContainerInterceptor } from "../core/container-interceptor.ts";
 import { rawOffsetForPlainIndex } from "./composer-primitives.ts";
 import { runtimeHostFor } from "./thinking-widget.ts";
 
@@ -127,6 +128,13 @@ function paintRows(rows: readonly string[], width: number, deps: TodoStatusRowDe
   return rows.map((row, index) => (index === target ? spliceStatusSegment(row, width, segment) : row));
 }
 
+/** The host's status HUD container owns the mode it renders for, and that mode owns it back. */
+export function isStatusHudContainer(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const mode = (value as { mode?: { statusContainer?: unknown } }).mode;
+  return !!mode && typeof mode === "object" && mode.statusContainer === value;
+}
+
 let installed: SegmentHost | undefined;
 
 /**
@@ -136,6 +144,12 @@ let installed: SegmentHost | undefined;
  */
 export function ensureTodoStatusRow(tui: unknown, deps: TodoStatusRowDeps): void {
   const container = runtimeHostFor(tui)?.statusContainer as SegmentHost | undefined;
+  ensureTodoStatusRowOnContainer(container, deps);
+}
+
+/** Install the segment on a known status container. Safe to call repeatedly and from any generation. */
+export function ensureTodoStatusRowOnContainer(value: unknown, deps: TodoStatusRowDeps): void {
+  const container = value as SegmentHost | undefined;
   if (!container || typeof container.render !== "function") return;
   const existing = container[STATUS_ROW_SEGMENT];
   if (existing) {
@@ -162,6 +176,27 @@ export function ensureTodoStatusRow(tui: unknown, deps: TodoStatusRowDeps): void
   container[STATUS_ROW_SEGMENT] = state;
   container.render = state.wrapper;
   installed = container;
+}
+
+/**
+ * Install the segment through the `Container.addChild` seam, so every generation finds the host's
+ * status container when the composer mounts it. A hot reload re-registers the extension without
+ * replaying `session_start`, which is why the TUI-handle path alone could leave the segment unpainted
+ * after an edit to the plugin.
+ */
+export function installTodoStatusRowSkin(
+  interceptor: ContainerInterceptor,
+  deps: TodoStatusRowDeps,
+): () => void {
+  if (!interceptor.isAvailable) return () => {};
+  // The host mounts the status HUD as a *child* of the composer, so the hook has to look at the
+  // children it is inserting, not at the container that is receiving them.
+  const unregister = interceptor.registerHook((_container, children) => {
+    for (const child of children) {
+      if (isStatusHudContainer(child)) ensureTodoStatusRowOnContainer(child, deps);
+    }
+  });
+  return unregister ?? ((): void => {});
 }
 
 /** Restore the host status container's own render (disable, session teardown, hot reload). */

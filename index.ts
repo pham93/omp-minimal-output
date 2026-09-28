@@ -42,7 +42,7 @@ import {
 import { installWarningSkin, alertSkinActive, invalidateLiveAlerts } from "./surfaces/warning-skin.ts";
 import { installTodoChrome } from "./surfaces/todo-hud.ts";
 import { closeTodoPanel, isTodoPanelOpen, openTodoPanel } from "./surfaces/todo-panel.ts";
-import { ensureTodoStatusRow, restoreTodoStatusRow } from "./surfaces/todo-status-row.ts";
+import { ensureTodoStatusRow, installTodoStatusRowSkin, restoreTodoStatusRow } from "./surfaces/todo-status-row.ts";
 import { parseTodoPhases, renderDensityTodoHeader, todoStatusSegment } from "./surfaces/todos-header.ts";
 import { renderWriteCard, writeCardsNeedPump } from "./cards/write-card.ts";
 import { eventFingerprint, stashFullText } from "./core/results.ts";
@@ -196,22 +196,37 @@ export default function (pi: ExtensionAPI) {
      * what wakes the pump for todo frames; closing it drops the pump gate and the next tick stops the
      * timer. The summary row stays mounted either way, so the composer never changes height.
      */
+    /**
+     * Whether the plugin's own todo surface (the inline summary) is enabled. `todosHeader: false`
+     * hands the whole list back to the transcript card, so the card gate has to ask the same question —
+     * otherwise a disabled header would suppress the card and paint nothing in its place.
+     */
+    function todoHeaderEnabled(): boolean {
+      try {
+        return getPluginConfig().todosHeader !== false;
+      } catch {
+        return true;
+      }
+    }
+
     /** Segment budget for the status row: the host row also carries the indicator and the tok/s. */
     const TODO_SEGMENT_CELLS = 56;
 
+    const todoStatusRowDeps = {
+      owns: runtimeOwner.owns,
+      enabled: () => enabled && todoHeaderEnabled(),
+      segment: (budget: number): string => {
+        try {
+          const state = todoWidget.peekState();
+          return todoStatusSegment(readGroupTheme, state, Math.min(TODO_SEGMENT_CELLS, budget));
+        } catch {
+          return "";
+        }
+      },
+    };
+
     function installTodoSegment(tui: unknown): void {
-      ensureTodoStatusRow(tui, {
-        owns: runtimeOwner.owns,
-        enabled: () => enabled,
-        segment: (budget) => {
-          try {
-            const state = todoWidget.peekState();
-            return todoStatusSegment(readGroupTheme, state, Math.min(TODO_SEGMENT_CELLS, budget));
-          } catch {
-            return "";
-          }
-        },
-      });
+      ensureTodoStatusRow(tui, todoStatusRowDeps);
     }
 
     async function toggleTodoPanel(ctx: ExtensionContext): Promise<void> {
@@ -261,11 +276,12 @@ export default function (pi: ExtensionAPI) {
         active: runtimeOwner.owns,
       });
 
+      const disposeTodoStatusRow = installTodoStatusRowSkin(containerInterceptor, todoStatusRowDeps);
       const disposeTodoChrome = installTodoChrome(containerInterceptor, {
         hideHud: () => runtimeOwner.owns() && enabled && getPluginConfig().todoHud === false,
-        // Only while the summary row actually lists todos: an empty list leaves the transcript card as
-        // the durable record instead of hiding and restoring it on every clear.
-        hideCard: () => runtimeOwner.owns() && enabled && todoWidget.showsTodos(),
+        // Only while the inline summary is on and actually lists todos: an empty list (or a disabled
+        // header) leaves the transcript card as the durable record instead of hiding and restoring it.
+        hideCard: () => runtimeOwner.owns() && enabled && todoHeaderEnabled() && todoWidget.showsTodos(),
         skinCard: () => runtimeOwner.owns() && enabled,
         active: runtimeOwner.owns,
         paintCard: (width, expanded) => {
@@ -282,6 +298,7 @@ export default function (pi: ExtensionAPI) {
         },
       });
       return () => {
+        disposeTodoStatusRow();
         disposeTodoChrome();
         disposeWarningSkin();
         disposeNativeToolCardSkin();
@@ -753,10 +770,10 @@ export default function (pi: ExtensionAPI) {
         todoWidget.syncFromSession(_ctx);
         installTodoSegment(statusRowTui);
         _ctx.ui.notify(
-          todoWidget.showsTodos()
-            ? "Todos shown on the status row"
-            : getPluginConfig().todosHeader === false
-              ? "Todos header is disabled"
+          !todoHeaderEnabled()
+            ? "Todos header is disabled"
+            : todoWidget.showsTodos()
+              ? "Todos shown on the status row"
               : "No todos in this session",
           "info",
         );

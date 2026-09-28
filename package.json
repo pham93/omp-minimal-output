@@ -167,12 +167,12 @@
       "todosHeader": {
         "type": "boolean",
         "default": true,
-        "description": "Show live todos in the sticky header (expand/collapse via /todos)."
+        "description": "Show the inline todo summary on the status row (before the tok/s); the full list opens with ctrl+alt+t or /todos."
       },
       "todoHud": {
         "type": "boolean",
         "default": false,
-        "description": "Show the native TODO HUD above the editor. Off hides it; the plugin widget remains if todosHeader is on."
+        "description": "Show the native TODO HUD above the editor. Off hides it; the inline summary still rides the status row when todosHeader is on."
       },
       "todoReminderOneLine": {
         "type": "boolean",

@@ -572,7 +572,7 @@ export async function runPluginDemo(ctx: ExtensionContext, rawTarget?: string): 
   }
 
   if (target === "todo" || target === "todos") {
-    ctx.ui.notify("Demo: Todos widget & checklist header", "info");
+    ctx.ui.notify("Demo: Todos summary & checklist list", "info");
     setDemoComponent((_tui, theme) => {
       const container = new Container();
       container.addChild({
