@@ -5,7 +5,7 @@ import { installStatusRowGuard, restoreStatusRowGuard } from "./composer-status.
 import { definedChildren } from "../core/container-interceptor.ts";
 import { wrapLatestLines } from "../core/text.ts";
 import { LINE_WIDTH_RATIO, formatRowLine, elapsedSuffix } from "../core/theme.ts";
-import { THOUGHT_RAIL_PREFIX, thoughtRailLine } from "../cards/card-primitives.ts";
+import { CARD_CONTENT_PREFIX, THOUGHT_RAIL_PREFIX, thoughtRailLine } from "../cards/card-primitives.ts";
 
 export const THOUGHT_PREVIEW_LINES = 3;
 export const THOUGHT_WIDGET_KEY = "minimal-thinking";
@@ -350,6 +350,9 @@ export class ThinkingWidget {
         const lines: string[] = [
           formatRowLine(effectiveTheme, width, {
             body: "Thinking...",
+            // Indent the header to the card content column so its mark lines up with the rail and its
+            // text with the thought content below it; the rail rows keep their own prefix.
+            indent: CARD_CONTENT_PREFIX,
             live: true,
             fadeKey: this.thoughtFadeKey(),
             right: this.#startedAt > 0 ? elapsedSuffix(this.#startedAt) : "",

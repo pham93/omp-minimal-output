@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { Container } from "@oh-my-pi/pi-tui";
-import { renderImagePlaceholderBox } from "../cards/card-primitives.ts";
+import { CARD_CONTENT_PREFIX, renderImagePlaceholderBox } from "../cards/card-primitives.ts";
 import { renderWriteCard } from "../cards/write-card.ts";
 import { renderPrettyEditCard } from "../cards/edit-card.ts";
 import { renderEvalCard } from "../cards/eval-card.ts";
@@ -354,6 +354,8 @@ function renderSearchDemo(theme: unknown): Container {
 function renderThinkingDemo(theme: unknown, width: number): readonly string[] {
   const header = formatRowLine(theme, width, {
     body: "Reasoning over project architecture & card seams...",
+    // Same header padding as the live thinking block, so the showcase shows the real shape.
+    indent: CARD_CONTENT_PREFIX,
     live: true,
     right: "(1.8s)",
   });
