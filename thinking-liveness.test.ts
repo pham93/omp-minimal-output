@@ -52,6 +52,8 @@ describe("thought row formatting", () => {
 
     setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.4 });
     try {
+      // The block is composer chrome, not a transcript card, so the widget applies the host's block
+      // indent itself: the header mark and the rail glyph both start one column in, like every card.
       const header = Bun.stripANSI(
         cardHeaderLine(null, 80, {
           body: "Thinking...",
@@ -64,10 +66,15 @@ describe("thought row formatting", () => {
             error: false,
             detail: { level: "standard", minimal: false, standard: true, detailed: false },
           },
+          indent: " ",
         }),
       );
       const [rail] = thinkingRailLines(null, 80, "thought text");
       const labelColumn = header.indexOf("Thinking...");
+      expect(labelColumn, "the label sits past the block indent, the mark, and its space").toBe(3);
+      expect(header.indexOf("◈") >= 0 || header.trimStart() !== header, "the mark carries the indent").toBe(
+        true,
+      );
       // The glyph hangs under the first character of the header label, past the indicator.
       expect(Bun.stripANSI(rail!).indexOf("│")).toBe(labelColumn);
       expect(Bun.stripANSI(rail!).indexOf("thought text")).toBe(labelColumn + 2);
@@ -435,26 +442,25 @@ describe("thinking widget 4-line placeholder above editor", () => {
     expect(liveLines).toHaveLength(4);
     const headerRow = Bun.stripANSI(liveLines[0] ?? "");
     expect(headerRow).toContain("Thinking...");
-    // The thinking header paints through the shared card-header primitive, so its indent is the card
-    // indent by construction rather than by a hand-tuned number.
+    // The thinking header paints through the shared card-header primitive, so its mark, opacity, and fade
+    // are the card ones; it adds the `blockIndent` setting because composer chrome is not a transcript
+    // block, so the label lands one column further right than a card header's.
     const { cardHeaderLine } = await import("./cards/card-primitives.ts");
-    const cardHeader = Bun.stripANSI(
-      cardHeaderLine(null, 80, {
-        body: "Thinking...",
-        lifecycle: {
-          state: "running",
-          partial: true,
-          expanded: false,
-          running: true,
-          settled: false,
-          error: false,
-          detail: { level: "standard", minimal: false, standard: true, detailed: false },
-        },
-      }),
+    const lifecycle = {
+      state: "running",
+      partial: true,
+      expanded: false,
+      running: true,
+      settled: false,
+      error: false,
+      detail: { level: "standard", minimal: false, standard: true, detailed: false },
+    } as const;
+    const cardHeader = Bun.stripANSI(cardHeaderLine(null, 80, { body: "Thinking...", lifecycle }));
+    expect(headerRow.indexOf("Thinking..."), "header label sits past the block indent").toBe(
+      cardHeader.indexOf("Thinking...") + 1,
     );
-    expect(headerRow.indexOf("Thinking..."), "header shares the card header indent").toBe(
-      cardHeader.indexOf("Thinking..."),
-    );
+    // Transcript cards keep the host's own block indent, so their own label column is unchanged.
+    expect(cardHeader.indexOf("Thinking...")).toBe(2);
     // The thought rows keep the rail prefix.
     const contentRow = Bun.stripANSI(liveLines[1] ?? "");
     expect(contentRow).toContain("│");

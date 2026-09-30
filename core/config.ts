@@ -68,6 +68,12 @@ export interface PluginConfig extends WrappedToolSettings {
   opacity: number;
   /** Opacity for header rows (card titles, group headers, todo/thought rows). */
   headerOpacity: number;
+  /**
+   * Left indent the host puts in front of a transcript card block. Surfaces that are *not* transcript
+   * blocks — the thinking widget above the composer — have to add it themselves to line up with every
+   * other card.
+   */
+  blockIndent: number;
   indicator: IndicatorId;
   indicatorAnimation: boolean;
   detailLevel: DetailLevel;
@@ -96,6 +102,7 @@ export interface PluginConfig extends WrappedToolSettings {
 export const DEFAULT_CONFIG: PluginConfig = {
   opacity: 0.5,
   headerOpacity: 0.9,
+  blockIndent: 1,
   indicator: "diamond",
   indicatorAnimation: true,
   detailLevel: DETAIL_LEVEL.standard,
@@ -200,6 +207,13 @@ export function applyOverlay(base: PluginConfig, raw: unknown): PluginConfig {
         const v = src[key];
         if (typeof v === "number" && Number.isFinite(v)) {
           next.headerOpacity = Math.min(1, Math.max(0, v));
+        }
+        continue;
+      }
+      if (key === "blockIndent") {
+        const v = src[key];
+        if (typeof v === "number" && Number.isFinite(v)) {
+          next.blockIndent = Math.min(8, Math.max(0, Math.floor(v)));
         }
         continue;
       }

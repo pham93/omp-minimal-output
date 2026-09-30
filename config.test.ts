@@ -102,3 +102,16 @@ describe("thinking visibility stays off the disk in render paths", () => {
     expect(yamlHideThinkingReadsForTest()).toBe(0);
   });
 });
+
+describe("blockIndent", () => {
+  test("defaults to the host's card block indent and clamps overrides", () => {
+    expect(DEFAULT_CONFIG.blockIndent, "default").toBe(1);
+    expect(applyOverlay(DEFAULT_CONFIG, { blockIndent: 4 }).blockIndent, "valid value").toBe(4);
+    expect(applyOverlay(DEFAULT_CONFIG, { blockIndent: 0 }).blockIndent, "zero is allowed").toBe(0);
+    expect(applyOverlay(DEFAULT_CONFIG, { blockIndent: 99 }).blockIndent, "clamped high").toBe(8);
+    expect(applyOverlay(DEFAULT_CONFIG, { blockIndent: -3 }).blockIndent, "clamped low").toBe(0);
+    expect(applyOverlay(DEFAULT_CONFIG, { blockIndent: 2.7 }).blockIndent, "floored").toBe(2);
+    expect(applyOverlay(DEFAULT_CONFIG, { blockIndent: "4" }).blockIndent, "garbage keeps the default").toBe(1);
+    expect(applyOverlay(DEFAULT_CONFIG, { blockIndent: Number.NaN }).blockIndent, "NaN keeps the default").toBe(1);
+  });
+});

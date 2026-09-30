@@ -44,22 +44,33 @@ export function extractThinking(message: unknown): { text: string; live: boolean
 }
 
 /**
- * Rail prefix for the thinking block's own rows. The glyph sits under the first character of the header
- * label — the column `Thinking...` starts at, past the mark and its space — so the rail reads as the
- * block's spine under the label: `◈ Thinking...` above `  │ thought text`. Card-context thought blocks
- * (the grouped card, the commentary skin) keep `THOUGHT_RAIL_PREFIX`, because their header is a `╰─` card
- * row whose details belong on the card content column.
+ * Indent the host puts in front of a transcript card block. The thinking widget is composer chrome, not a
+ * transcript block, so it applies the same indent itself and its header lines up with every other card.
  */
-const THINKING_RAIL_PREFIX = "  │ ";
+function blockIndent(): string {
+  try {
+    return " ".repeat(Math.max(0, Math.floor(getPluginConfig().blockIndent)));
+  } catch {
+    return " ";
+  }
+}
+
+/**
+ * Rail prefix for the thinking block's own rows: the block indent, then the two columns the header's
+ * mark and its space take, so the glyph sits under the first character of the header label. Card-context
+ * thought blocks (the grouped card, the commentary skin) keep `THOUGHT_RAIL_PREFIX`, because their header
+ * is a `╰─` card row inside a block the host already indents.
+ */
+function thinkingRailPrefix(): string {
+  return `${blockIndent()}  │ `;
+}
 
 export function thinkingRailLines(theme: unknown, width: number, text: string): string[] {
   if (!text.trim()) return [];
-  const innerW = Math.max(
-    8,
-    Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THINKING_RAIL_PREFIX),
-  );
+  const prefix = thinkingRailPrefix();
+  const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(prefix));
   return wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES).map((preview) =>
-    cardDetailLine(theme, width, preview, THINKING_RAIL_PREFIX),
+    cardDetailLine(theme, width, preview, prefix),
   );
 }
 
@@ -338,10 +349,8 @@ export class ThinkingWidget {
   }
 
   animatedThinkingRailLines(theme: unknown, width: number, text: string): string[] {
-    const innerW = Math.max(
-      8,
-      Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THINKING_RAIL_PREFIX),
-    );
+    const prefix = thinkingRailPrefix();
+    const innerW = Math.max(8, Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(prefix));
     this.#scroller.update(text, innerW);
     const cfgOp = getPluginConfig().opacity;
     const lines: string[] = [];
@@ -350,7 +359,7 @@ export class ThinkingWidget {
       // The stagger rides on a card detail row, so the animated block keeps the card rail, `dim`
       // token and configured rest opacity instead of painting its own brighter rail.
       const effectiveOp = item.isPlaceholder ? Math.max(0.05, cfgOp - 0.25) * 0.35 : item.opacity * cfgOp;
-      lines.push(cardDetailLine(theme, width, item.isPlaceholder ? "" : item.text, THINKING_RAIL_PREFIX, false, effectiveOp));
+      lines.push(cardDetailLine(theme, width, item.isPlaceholder ? "" : item.text, prefix, false, effectiveOp));
     }
 
     return lines;
@@ -375,6 +384,7 @@ export class ThinkingWidget {
           cardHeaderLine(effectiveTheme, width, {
             body: "Thinking...",
             lifecycle: THINKING_LIFECYCLE,
+            indent: blockIndent(),
             right: this.#startedAt > 0 ? elapsedSuffix(this.#startedAt) : "",
             fingerprint: this.thoughtFadeKey(),
           }),

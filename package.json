@@ -25,6 +25,14 @@
         "step": 0.05,
         "description": "Row text opacity (0\u20131) for header rows: card titles, group headers, and the todo and thought rows."
       },
+      "blockIndent": {
+        "type": "number",
+        "default": 1,
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "description": "Left indent the host puts in front of a card block. The thinking block above the composer is not a transcript card, so it applies this itself to line up."
+      },
       "indicator": {
         "type": "enum",
         "values": [

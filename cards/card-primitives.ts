@@ -37,6 +37,12 @@ export interface CardHeaderOptions {
   right?: string;
   fingerprint?: string;
   settledMark?: string;
+  /**
+   * Left indent in front of the mark. Transcript cards get the host's block indent for free, so this
+   * stays empty; surfaces rendered outside a transcript block (the thinking widget above the composer)
+   * pass the `blockIndent` setting so the header lines up with every other card.
+   */
+  indent?: string;
 }
 export interface ParentCardHeaderOptions extends CardHeaderOptions {
   parentLabel?: ParentCardLabel;
@@ -140,6 +146,7 @@ export function cardHeaderLine(theme: unknown, width: number, options: CardHeade
   const settling = options.fingerprint !== undefined && isSettling(options.fingerprint);
   return formatRowLine(theme, width, {
     body: options.body,
+    indent: options.indent,
     live: options.lifecycle.running,
     error: options.lifecycle.error,
     right: options.right,

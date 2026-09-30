@@ -166,6 +166,7 @@ Tools without a dedicated layout — LSP, AST-grep, Debug, GitHub, Checkpoint, R
 | `standardMaxRows` / `standardOutputMaxRows`           | `3` / `4`         | Independent Standard input/output content allowances                  |
 | `standardEditRowsPerFile` / `standardWriteMaxRows`    | `10` / `10`       | Per-file Edit content / latest Write content lines                    |
 | `todosHeader` / `todoHud` / `todoReminderOneLine`     | `true/false/true` | todo chrome                                                           |
+| `blockIndent`                                        | `1`                | left indent composer chrome applies to line up with card blocks         |
 | `editShowTabs` / `editShowSpaces`                     | `true/false`      | whitespace glyphs in diff                                             |
 | `composerRefreshInterval`                             | `60` (`1..3600`)  | composer status refresh polling seconds                               |
 
