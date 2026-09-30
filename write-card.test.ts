@@ -185,6 +185,63 @@ describe("write-card latest lines and hint projection", () => {
   });
 });
 
+describe("running write card geometry", () => {
+  // The host paints the tool block before our tool_execution_start handler records the activity lead,
+  // so a card that only showed a parent row once its label landed re-parented itself a few frames in and
+  // shifted everything below. The parent row is reserved instead, and the content window is painted in
+  // full from the first frame, so a reveal only changes text in place.
+  test("reserves the parent row while running and collapses it once settled", () => {
+    resetWriteCardFadesForTest();
+    setPluginConfigForTest(null);
+    const content = ["line 1", "line 2", "line 3"].join("\n");
+
+    const running = renderCard(
+      renderWriteCard(null, { path: "src/running.ts", content }, undefined, {}, "fp-running"),
+    ).map(stripAnsi);
+    const childRow = running.findIndex((row) => row.includes("Write src/running.ts"));
+    expect(childRow, "the card header is a child row even with no label yet").toBe(1);
+    expect(running[0]?.trim(), "the reserved parent row paints blank").toBe("");
+
+    const settled = renderCard(
+      renderWriteCard(null, { path: "src/running.ts", content }, "ok", {}, "fp-settled"),
+    ).map(stripAnsi);
+    expect(settled[0], "a settled call with no activity keeps the single header").toContain(
+      "Write src/running.ts",
+    );
+    expect(settled[0]?.startsWith("╰─"), "settled without a label is a top-level card").toBe(false);
+  });
+
+  test("keeps the content window the same height while the cascade reveals lines", () => {
+    resetWriteCardFadesForTest();
+    setPluginConfigForTest(null);
+    const content = Array.from({ length: 6 }, (_, i) => `cascade line ${i + 1}`).join("\n");
+    const card = renderWriteCard(null, { path: "src/cascade.ts", content }, undefined, {}, "fp-cascade");
+
+    // First paint: the whole window exists, the newest line is in, older slots are blank.
+    const first = renderCard(card, 100).map(stripAnsi);
+    const header = first.findIndex((row) => row.includes("Write src/cascade.ts"));
+    const firstWindow = first.slice(header + 1);
+    expect(firstWindow).toHaveLength(6);
+    expect(firstWindow[5], "the newest line lands first").toContain("6 │ cascade line 6");
+    expect(firstWindow[0], "the oldest slot waits for the wave front").not.toContain("cascade line 1");
+
+    // A frame later the row count is identical: the reveal fills slots, it never adds rows.
+    const second = renderCard(card, 100).map(stripAnsi);
+    const secondHeader = second.findIndex((row) => row.includes("Write src/cascade.ts"));
+    expect(second.slice(secondHeader + 1)).toHaveLength(firstWindow.length);
+  });
+
+  test("does not render an empty line for a file that ends with a newline", () => {
+    resetWriteCardFadesForTest();
+    setPluginConfigForTest(null);
+    const content = "alpha\nbeta\n";
+    const lines = renderCard(renderWriteCard(null, { path: "src/tail.ts", content }, "ok", {})).map(stripAnsi);
+    expect(lines[0]).toContain("Write src/tail.ts — 2 lines");
+    expect(lines.filter((row) => /\d+ │/.test(row))).toHaveLength(2);
+    expect(lines.at(-1)).toContain("2 │ beta");
+  });
+});
+
 describe("cascading line opacity animation (Option 1)", () => {
   test("returns restOpacity when startedAt is undefined (historical / settled)", () => {
     const rest = 0.7;

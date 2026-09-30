@@ -57,6 +57,14 @@ function writeData(args: unknown, previewLimit: number): WriteData {
     ringStarts.shift();
     ringEnds.shift();
   }
+  // A file that ends with a newline has no last line: the text after the final "\n" is an empty
+  // segment, and counting it both inflated the header's line count and painted a blank content row.
+  if (lineCount > 1 && content.endsWith("\n")) {
+    lineCount -= 1;
+    if (ringStarts[ringStarts.length - 1] === content.length) ringStarts.pop();
+    if (ringEnds[ringEnds.length - 1] === content.length) ringEnds.pop();
+    if (ringEnds.length > 0) ringEnds[ringEnds.length - 1] = content.length - 1;
+  }
 
   const lines: string[] = [];
   if (cap > 0) {
@@ -235,11 +243,17 @@ export function renderWriteCard(
           }
         }
 
-        for (const [index, line] of visible.entries()) {
-          const lineNumber = data.lineCount - visible.length + index + 1;
-          const lineOp = cascadingLineOpacity(index, visible.length, startedAt, restOpacity);
-          if (lineOp === null) continue;
-          lines.push(writeContentLine(theme, width, line, lineNumber, gutterWidth, language, lineOp));
+        // The window is fixed for the life of the card: every slot is painted from the first frame, so
+        // a reveal only changes text in place instead of adding a row and shifting the transcript below.
+        // The newest line lands first and older lines fill in above it, the way a file grows.
+        for (const [slot, line] of visible.entries()) {
+          const lineNumber = data.lineCount - visible.length + slot + 1;
+          const lineOp = cascadingLineOpacity(visible.length - 1 - slot, visible.length, startedAt, restOpacity);
+          lines.push(
+            lineOp === null
+              ? writeContentLine(theme, width, "", lineNumber, gutterWidth, language, restOpacity)
+              : writeContentLine(theme, width, line, lineNumber, gutterWidth, language, lineOp),
+          );
         }
         return lines;
       } catch {

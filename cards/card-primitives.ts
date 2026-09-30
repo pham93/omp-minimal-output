@@ -164,15 +164,27 @@ export function resolveParentCardLabel(parentLabel: ParentCardLabel | undefined)
   return compactCardText(value, 200);
 }
 
+/**
+ * Parent row plus the card's own `╰─` child row, or a single header row for a call that has no parent.
+ *
+ * While a call is running the parent row is *reserved* even when its label has not landed: the host
+ * paints the tool block before our `tool_execution_start` handler records the activity lead, so a
+ * label-dependent shape made a running card start as a standalone `◈` header and re-parent itself to a
+ * `╰─` child a few frames in, inserting a row above itself and shifting the card and everything below
+ * it. The reserved row paints blank, so a late label only adds text in place.
+ */
 export function parentCardHeaderLines(theme: unknown, width: number, options: ParentCardHeaderOptions): string[] {
   const parentLabel = resolveParentCardLabel(options.parentLabel);
-  if (!parentLabel) return [cardHeaderLine(theme, width, options)];
+  if (!parentLabel && !options.lifecycle.running) return [cardHeaderLine(theme, width, options)];
+  const parentRow = parentLabel
+    ? cardHeaderLine(theme, width, {
+        body: parentLabel,
+        lifecycle: options.lifecycle,
+        fingerprint: options.fingerprint,
+      })
+    : " ".repeat(Math.max(0, width));
   return [
-    cardHeaderLine(theme, width, {
-      body: parentLabel,
-      lifecycle: options.lifecycle,
-      fingerprint: options.fingerprint,
-    }),
+    parentRow,
     formatRowLine(theme, width, {
       body: options.body,
       tree: "last",
