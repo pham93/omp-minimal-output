@@ -87,7 +87,13 @@ export class GroupedToolManager {
     });
     if (this.#toolGroups.size > 40) {
       const oldest = this.#toolGroups.keys().next();
-      if (!oldest.done && oldest.value !== gid) this.#toolGroups.delete(oldest.value);
+      if (!oldest.done && oldest.value !== gid) {
+        const evicted = oldest.value;
+        this.#toolGroups.delete(evicted);
+        // Drop the fingerprints that pointed at it, so a later render rebuilds a live group for that
+        // execution instead of resolving a gid that no longer exists.
+        for (const [key, mapped] of this.#fpToGroup) if (mapped === evicted) this.#fpToGroup.delete(key);
+      }
     }
     return gid;
   }
@@ -157,50 +163,97 @@ export class GroupedToolManager {
         const hasHeader = lines.length > 0;
         const isStandalone = !hasHeader;
         for (const [idx, row] of rows.entries()) {
-          const live = this.#deps.rowIsLive(row.fp);
-          const isThought = row.fp.startsWith("thought:");
-          if (isThought && live) continue;
-          // `hideThinkingBlock` hides the transcript thought row. The live widget is the surface that
-          // replaces it, so that one keeps streaming.
-          if (isThought && isHideThinkingBlock(sessionCtx)) continue;
-          const isLastTool = idx === rows.length - 1;
-          const rowLine = formatRowLine(theme, width, {
-            body: row.body,
-            indent: !isStandalone,
-            tree: isStandalone ? undefined : isLastTool ? "last" : "mid",
-            live: isThought ? false : live,
-            error: row.error,
-            fadeKey: row.fp,
-            right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
-            header: isStandalone,
-          });
-          lines.push(rowLine);
-          if (isThought) {
-            const rawThought = typeof row.detail === "string" && row.detail ? row.detail : row.details.join("\n");
-            lines.push(
-              ...formatSettledThought(rawThought, {
-                maxLines: thoughtRowLimit(profile),
-                width,
-                theme,
-              }),
-            );
-            continue;
-          }
-          const detailPrefix = isStandalone || isLastTool ? CARD_CONTENT_PREFIX : CARD_CONTINUATION_PREFIX;
-          const rowProfile = typeof row.detail === "object" ? row.detail : profile;
-          const visibleDetails = Math.min(row.details.length, outputRowLimit(rowProfile));
-          for (let detailIndex = 0; detailIndex < visibleDetails; detailIndex += 1) {
-            const rawDetail = row.details[detailIndex]!;
-            const detailLine = row.fp.startsWith("bash:") ? colorizeConsoleLine(theme, rawDetail) : rawDetail;
-            lines.push(cardDetailLine(theme, width, detailLine, detailPrefix, row.error));
-          }
-          const hidden = Math.max(0, (row.detailTotal ?? row.details.length) - visibleDetails);
-          if (hidden > 0) {
-            lines.push(cardDetailLine(theme, width, `… ${hidden} more lines`, detailPrefix, row.error));
-          }
+          lines.push(
+            ...this.#rowLines(theme, width, row, profile, {
+              sessionCtx,
+              isStandalone,
+              isLastTool: idx === rows.length - 1,
+            }),
+          );
         }
         return lines;
       },
+    });
+    markFlush?.(c);
+    return c;
+  }
+
+  /** One tool row: its label line, its settled thought block, and its output window. */
+  #rowLines(
+    theme: unknown,
+    width: number,
+    row: GroupRow,
+    profile: DetailProfile,
+    opts: { sessionCtx: unknown; isStandalone: boolean; isLastTool: boolean },
+  ): string[] {
+    const { sessionCtx, isStandalone, isLastTool } = opts;
+    const live = this.#deps.rowIsLive(row.fp);
+    const isThought = row.fp.startsWith("thought:");
+    if (isThought && live) return [];
+    // `hideThinkingBlock` hides the transcript thought row. The live widget is the surface that
+    // replaces it, so that one keeps streaming.
+    if (isThought && isHideThinkingBlock(sessionCtx)) return [];
+    const lines: string[] = [
+      formatRowLine(theme, width, {
+        body: row.body,
+        indent: !isStandalone,
+        tree: isStandalone ? undefined : isLastTool ? "last" : "mid",
+        live: isThought ? false : live,
+        error: row.error,
+        fadeKey: row.fp,
+        right: live ? (isThought ? "" : elapsedSuffix(row.startedAt)) : row.right,
+        header: isStandalone,
+      }),
+    ];
+    if (isThought) {
+      const rawThought = typeof row.detail === "string" && row.detail ? row.detail : row.details.join("\n");
+      lines.push(
+        ...formatSettledThought(rawThought, {
+          maxLines: thoughtRowLimit(profile),
+          width,
+          theme,
+        }),
+      );
+      return lines;
+    }
+    const detailPrefix = isStandalone || isLastTool ? CARD_CONTENT_PREFIX : CARD_CONTINUATION_PREFIX;
+    const rowProfile = typeof row.detail === "object" ? row.detail : profile;
+    const visibleDetails = Math.min(row.details.length, outputRowLimit(rowProfile));
+    for (let detailIndex = 0; detailIndex < visibleDetails; detailIndex += 1) {
+      const rawDetail = row.details[detailIndex]!;
+      const detailLine = row.fp.startsWith("bash:") ? colorizeConsoleLine(theme, rawDetail) : rawDetail;
+      lines.push(cardDetailLine(theme, width, detailLine, detailPrefix, row.error));
+    }
+    if (visibleDetails === 0 && !live) {
+      // The host renderer gives an empty result a body; without one this card is a lone label row.
+      lines.push(cardDetailLine(theme, width, "(no output)", detailPrefix, row.error));
+    }
+    const hidden = Math.max(0, (row.detailTotal ?? row.details.length) - visibleDetails);
+    if (hidden > 0) {
+      lines.push(cardDetailLine(theme, width, `… ${hidden} more lines`, detailPrefix, row.error));
+    }
+    return lines;
+  }
+
+  /**
+   * A single execution painted on its own, for the case where the group card that would normally carry
+   * it cannot be. A grouped tool only renders inside its group's lead block; when our group state no
+   * longer holds that group — the map is bounded and evicts old runs, a replay arrives for a result
+   * whose lead was never seen — the block painted nothing and the execution vanished from the
+   * transcript until the next restart rebuilt it from the session log. Rendering the row itself keeps
+   * every execution visible, and the cost is one extra row for a group that is no longer tracked.
+   */
+  #standaloneRow(theme: unknown, fp: string, opts: Parameters<GroupedToolManager["upsertGroupRow"]>[1]): Container {
+    const row: GroupRow = { fp, ...opts, startedAt: Date.now(), details: opts.details ?? [] };
+    const profile = typeof row.detail === "object" ? row.detail : detailProfile(undefined);
+    const c = new Container();
+    c.addChild({
+      render: (width: number): readonly string[] =>
+        this.#rowLines(theme, width, row, profile, {
+          sessionCtx: this.#deps.getSessionContext?.(),
+          isStandalone: true,
+          isLastTool: true,
+        }),
     });
     markFlush?.(c);
     return c;
@@ -234,8 +287,13 @@ export class GroupedToolManager {
       },
       frozen,
     );
-    if (!this.isGroupLead(gid, fp)) return this.emptyBlock();
-    return this.paintGroup(theme, gid);
+    if (this.isGroupLead(gid, fp)) return this.paintGroup(theme, gid);
+    // A non-lead row is normally painted by its group's lead block, which is also where the group's
+    // thought rows live. When the group is no longer ours — evicted by the map bound, or a replay for a
+    // result whose lead this session never saw — there is no such block, so paint this execution itself
+    // rather than an empty block, which the transcript elides.
+    if (!this.#toolGroups.has(gid)) return this.#standaloneRow(theme, fp, opts);
+    return this.emptyBlock();
   }
 
   clear(): void {

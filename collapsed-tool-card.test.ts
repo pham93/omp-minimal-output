@@ -229,3 +229,90 @@ describe("MCP tools render through the shared collapsed card", () => {
     }
   });
 });
+
+describe("grouped executions always render", () => {
+  test("a row whose group is gone paints itself instead of nothing", async () => {
+    // A grouped tool normally renders inside its group's lead block. Once the group's state is gone —
+    // the map is bounded and evicts old runs, or a replay arrives for a result whose lead this session
+    // never saw — the lead-less block used to paint zero rows and the execution vanished from the
+    // transcript until a restart rebuilt it from the session log.
+    const { GroupedToolManager } = await import("./cards/grouped-tool-card.ts");
+    const groups = new GroupedToolManager({
+      rowIsLive: () => false,
+      activityLabel: () => "Running tests",
+      activityRunId: () => "group-gone",
+    });
+    const card = groups.renderToolVisual(
+      null,
+      "bash:orphaned",
+      { body: "ls empty", live: false, error: false, right: "1.0s", details: ["total 0"] },
+      { gid: "evicted-group", label: "Old run" },
+    );
+    const host = card as unknown as { render?: (w: number) => string[]; children: Array<{ render: (w: number) => string[] }> };
+    const rows = typeof host.render === "function" ? host.render(120) : host.children[0].render(120);
+    const lines = rows.map((row) => Bun.stripANSI(String(row)).trimEnd());
+    expect(lines.join("\n"), "the orphaned row paints its label and output").toContain("ls empty");
+    expect(lines.join("\n")).toContain("total 0");
+  });
+
+  test("an empty result still gets a body so the card is never a lone label row", async () => {
+    const { GroupedToolManager } = await import("./cards/grouped-tool-card.ts");
+    const groups = new GroupedToolManager({
+      rowIsLive: () => false,
+      activityLabel: () => "Running tests",
+      activityRunId: () => "empty-result",
+    });
+    const card = groups.renderToolVisual(null, "bash:quiet", {
+      body: "mkdir -p q && ls q",
+      live: false,
+      error: false,
+      right: "1.0s",
+      details: [],
+    });
+    const host = card as unknown as { render?: (w: number) => string[]; children: Array<{ render: (w: number) => string[] }> };
+    const rows = typeof host.render === "function" ? host.render(120) : host.children[0].render(120);
+    const lines = rows.map((row) => Bun.stripANSI(String(row)).trimEnd());
+    expect(lines.length, "label plus a body row").toBeGreaterThan(1);
+    expect(lines.join("\n")).toContain("(no output)");
+  });
+
+  test("an evicted group is rebuilt, so no execution is stranded on a dead group id", async () => {
+    // The group map is bounded. Evicting a group used to leave its fingerprints pointing at a gid that no
+    // longer existed: every later render of those calls resolved nothing and painted an empty block,
+    // which the transcript elides — the call disappeared from the session and only returned when a
+    // restart rebuilt the transcript. Eviction now drops the stale mappings with the group, so a later
+    // render re-creates it and the rows are painted again.
+    const { GroupedToolManager } = await import("./cards/grouped-tool-card.ts");
+    let run = 0;
+    const groups = new GroupedToolManager({
+      rowIsLive: () => false,
+      activityLabel: () => `Run ${run}`,
+      activityRunId: () => `run-${run}`,
+    });
+    const renderCard = (card: unknown): string[] => {
+      const host = card as unknown as {
+        render?: (w: number) => string[];
+        children: Array<{ render: (w: number) => string[] }>;
+      };
+      const rows = typeof host.render === "function" ? host.render(120) : host.children[0].render(120);
+      return rows.map((row) => Bun.stripANSI(String(row)).trimEnd());
+    };
+    const renderRow = (fp: string, body: string, detail: string) =>
+      groups.renderToolVisual(null, fp, { body, live: false, error: false, details: [detail] });
+
+    run = 0;
+    renderRow("bash:evicted", "the evicted call", "first output");
+    for (let index = 1; index <= 45; index += 1) {
+      run = index;
+      renderRow(`bash:filler-${index}`, `filler ${index}`, `out ${index}`);
+    }
+
+    // The evicted call is rendered again: its group is rebuilt under the current run.
+    renderRow("bash:evicted", "the evicted call", "first output");
+    // Whichever block leads the rebuilt group paints both rows, so the call is on screen again.
+    const groupCard = renderRow("bash:filler-45", "filler 45", "out 45");
+    const painted = renderCard(groupCard).join("\n");
+    expect(painted, "the evicted call is painted again").toContain("the evicted call");
+    expect(painted).toContain("first output");
+  });
+});
