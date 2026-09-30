@@ -65,6 +65,25 @@ function thinkingRailPrefix(): string {
   return `${blockIndent()}  │ `;
 }
 
+/**
+ * The thinking block's header row. One renderer for the live widget and the `/demo thinking` showcase:
+ * both carry the same `blockIndent` as a card block, so the rail (which hangs under the first character
+ * of the title) and the title itself can never disagree about that column.
+ */
+export function thinkingHeaderRow(
+  theme: unknown,
+  width: number,
+  options: { body?: string; right?: string; fingerprint?: string } = {},
+): string {
+  return cardHeaderLine(theme, width, {
+    body: options.body ?? "Thinking...",
+    lifecycle: THINKING_LIFECYCLE,
+    indent: blockIndent(),
+    right: options.right,
+    fingerprint: options.fingerprint,
+  });
+}
+
 export function thinkingRailLines(theme: unknown, width: number, text: string): string[] {
   if (!text.trim()) return [];
   const prefix = thinkingRailPrefix();
@@ -381,10 +400,7 @@ export class ThinkingWidget {
         // The header is the same primitive every card header uses, so its indent, mark, and opacity are
         // the shared card ones rather than a bespoke row; the thought rows keep the rail prefix.
         const lines: string[] = [
-          cardHeaderLine(effectiveTheme, width, {
-            body: "Thinking...",
-            lifecycle: THINKING_LIFECYCLE,
-            indent: blockIndent(),
+          thinkingHeaderRow(effectiveTheme, width, {
             right: this.#startedAt > 0 ? elapsedSuffix(this.#startedAt) : "",
             fingerprint: this.thoughtFadeKey(),
           }),

@@ -216,8 +216,18 @@ describe("runPluginDemo", () => {
       theme: unknown,
     ) => { children?: Array<{ render?: (w: number) => unknown }> };
     const thinkingComp = thinkingFactory({}, {});
-    const thinkingLines = thinkingComp?.children?.[0]?.render?.(100);
+    const thinkingLines = (thinkingComp?.children?.[0]?.render?.(100) ?? []).map((line) =>
+      Bun.stripANSI(String(line)),
+    );
     expect(Array.isArray(thinkingLines)).toBe(true);
+    // The showcase shows the real geometry: the title carries the block indent, and the rail hangs under
+    // the title's first character rather than a column of its own.
+    const title = thinkingLines[0] ?? "";
+    const rail = thinkingLines.find((line) => line.includes("│")) ?? "";
+    expect(rail, "a rail row is rendered").not.toBe("");
+    expect(rail.indexOf("│"), "rail sits under the title's first character").toBe(
+      title.indexOf("Reasoning over"),
+    );
     await runPluginDemo(ctx as never, "stop");
     await thinkingPromise;
 

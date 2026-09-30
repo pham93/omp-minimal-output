@@ -11,7 +11,7 @@ import { GroupedToolManager, formatSearchDetails } from "../cards/grouped-tool-c
 import { renderDensityTodoHeader } from "./todos-header.ts";
 import { formatRowLine, paintAt } from "../core/theme.ts";
 import { truncatePlain } from "../core/text.ts";
-import { thinkingRailLines } from "./thinking-widget.ts";
+import { thinkingHeaderRow, thinkingRailLines } from "./thinking-widget.ts";
 import { warningIconFrame } from "./warning-skin.ts";
 
 let activeDemoSeq = 0;
@@ -352,9 +352,10 @@ function renderSearchDemo(theme: unknown): Container {
   return groups.paintGroup(theme, "demo:search");
 }
 function renderThinkingDemo(theme: unknown, width: number): readonly string[] {
-  const header = formatRowLine(theme, width, {
+  // The same header renderer the live thinking block uses, so the showcase shows the real geometry: the
+  // title carries the block indent and the rail hangs under the title's first character.
+  const header = thinkingHeaderRow(theme, width, {
     body: "Reasoning over project architecture & card seams...",
-    live: true,
     right: "(1.8s)",
   });
   const text = [
