@@ -5,7 +5,12 @@ import { installStatusRowGuard, restoreStatusRowGuard } from "./composer-status.
 import { definedChildren } from "../core/container-interceptor.ts";
 import { wrapLatestLines } from "../core/text.ts";
 import { LINE_WIDTH_RATIO, formatRowLine, elapsedSuffix } from "../core/theme.ts";
-import { CARD_CONTENT_PREFIX, THOUGHT_RAIL_PREFIX, thoughtRailLine } from "../cards/card-primitives.ts";
+import {
+  cardHeaderLine,
+  THOUGHT_RAIL_PREFIX,
+  thoughtRailLine,
+  type CardLifecycle,
+} from "../cards/card-primitives.ts";
 
 export const THOUGHT_PREVIEW_LINES = 3;
 export const THOUGHT_WIDGET_KEY = "minimal-thinking";
@@ -242,6 +247,17 @@ export function restoreStatusOrder(tui: unknown): void {
   if (restored !== runtime.children || runtime.pruned) host.applyRuntimeChildren(restored);
 }
 
+/** The thinking header is a running row by construction: live until the thought settles, never an error. */
+const THINKING_LIFECYCLE = {
+  state: "running",
+  partial: true,
+  expanded: false,
+  running: true,
+  settled: false,
+  error: false,
+  detail: { level: "standard", minimal: false, standard: true, detailed: false },
+} as const satisfies CardLifecycle;
+
 export class ThinkingWidget {
   readonly #scroller = new TextScroller({
     maxLines: THOUGHT_PREVIEW_LINES,
@@ -347,16 +363,14 @@ export class ThinkingWidget {
         if (!this.#live) {
           return ["", "", "", ""];
         }
+        // The header is the same primitive every card header uses, so its indent, mark, and opacity are
+        // the shared card ones rather than a bespoke row; the thought rows keep the rail prefix.
         const lines: string[] = [
-          formatRowLine(effectiveTheme, width, {
+          cardHeaderLine(effectiveTheme, width, {
             body: "Thinking...",
-            // Indent the header to the card content column so its mark lines up with the rail and its
-            // text with the thought content below it; the rail rows keep their own prefix.
-            indent: CARD_CONTENT_PREFIX,
-            live: true,
-            fadeKey: this.thoughtFadeKey(),
+            lifecycle: THINKING_LIFECYCLE,
             right: this.#startedAt > 0 ? elapsedSuffix(this.#startedAt) : "",
-            header: true,
+            fingerprint: this.thoughtFadeKey(),
           }),
         ];
         lines.push(...this.animatedThinkingRailLines(effectiveTheme, width, this.#text));

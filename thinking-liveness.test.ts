@@ -419,12 +419,28 @@ describe("thinking widget 4-line placeholder above editor", () => {
     expect(liveLines).toHaveLength(4);
     const headerRow = Bun.stripANSI(liveLines[0] ?? "");
     expect(headerRow).toContain("Thinking...");
-    // The header is padded to the content column: its mark sits where the rail glyph does and its text
-    // two columns further, which is where the thought text starts.
+    // The thinking header paints through the shared card-header primitive, so its indent is the card
+    // indent by construction rather than by a hand-tuned number.
+    const { cardHeaderLine } = await import("./cards/card-primitives.ts");
+    const cardHeader = Bun.stripANSI(
+      cardHeaderLine(null, 80, {
+        body: "Thinking...",
+        lifecycle: {
+          state: "running",
+          partial: true,
+          expanded: false,
+          running: true,
+          settled: false,
+          error: false,
+          detail: { level: "standard", minimal: false, standard: true, detailed: false },
+        },
+      }),
+    );
+    expect(headerRow.indexOf("Thinking..."), "header shares the card header indent").toBe(
+      cardHeader.indexOf("Thinking..."),
+    );
+    // The thought rows keep the rail prefix.
     const contentRow = Bun.stripANSI(liveLines[1] ?? "");
-    const railColumn = contentRow.indexOf("│");
-    expect(headerRow.indexOf("Thinking..."), "header text starts after the rail").toBe(railColumn + 2);
-    // 3 rail lines
     expect(contentRow).toContain("│");
     expect(Bun.stripANSI(liveLines[2])).toContain("│");
     expect(Bun.stripANSI(liveLines[3])).toContain("│");
