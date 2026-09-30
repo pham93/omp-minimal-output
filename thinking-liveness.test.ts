@@ -44,29 +44,45 @@ interface WrappedToolDef {
 }
 
 describe("thought row formatting", () => {
-  test("thought rails sit on the card content column and use the card rest opacity", async () => {
+  test("the thinking block rail sits under the header's first character", async () => {
     const { thinkingRailLines, ThinkingWidget } = await import("./surfaces/thinking-widget.ts");
-    const { THOUGHT_RAIL_PREFIX, cardDetailLine } = await import("./cards/card-primitives.ts");
+    const { cardHeaderLine, cardDetailLine, THOUGHT_RAIL_PREFIX } = await import("./cards/card-primitives.ts");
     const { DEFAULT_CONFIG, setPluginConfigForTest } = await import("./core/config.ts");
     const sgrTail = (line: string) => [...line.matchAll(/\x1b\[38;2;\d+;\d+;\d+m/g)].at(-1)?.[0];
 
     setPluginConfigForTest({ ...DEFAULT_CONFIG, opacity: 0.4 });
     try {
-      const card = cardDetailLine(null, 80, "thought text");
+      const header = Bun.stripANSI(
+        cardHeaderLine(null, 80, {
+          body: "Thinking...",
+          lifecycle: {
+            state: "running",
+            partial: true,
+            expanded: false,
+            running: true,
+            settled: false,
+            error: false,
+            detail: { level: "standard", minimal: false, standard: true, detailed: false },
+          },
+        }),
+      );
       const [rail] = thinkingRailLines(null, 80, "thought text");
-      // The rail sits on the same content column as a card detail row, text one cell past it...
-      const contentColumn = Bun.stripANSI(rail!).indexOf("│");
-      expect(contentColumn).toBe(Bun.stripANSI(card).indexOf("thought text"));
-      expect(Bun.stripANSI(rail!).indexOf("thought text")).toBe(contentColumn + 2);
+      const labelColumn = header.indexOf("Thinking...");
+      // The glyph hangs under the first character of the header label, past the indicator.
+      expect(Bun.stripANSI(rail!).indexOf("│")).toBe(labelColumn);
+      expect(Bun.stripANSI(rail!).indexOf("thought text")).toBe(labelColumn + 2);
       // ...and the same paint for the same text (same token and configured opacity).
-      expect(sgrTail(rail!)).toBe(sgrTail(card));
+      expect(sgrTail(rail!)).toBe(sgrTail(cardDetailLine(null, 80, "thought text")));
 
       // Fading rails keep the column while the stagger runs.
       const widget = new ThinkingWidget({ owns: () => true, activityRunId: () => null });
-      const railColumn = Bun.stripANSI(THOUGHT_RAIL_PREFIX).indexOf("│");
       for (const line of widget.animatedThinkingRailLines(null, 80, "thought text")) {
-        expect(Bun.stripANSI(line).indexOf("│")).toBe(railColumn);
+        expect(Bun.stripANSI(line).indexOf("│")).toBe(labelColumn);
       }
+
+      // Card-context thought rows are untouched: their header is a `╰─` card row, so their rail stays on
+      // the card content column.
+      expect(Bun.stripANSI(THOUGHT_RAIL_PREFIX).indexOf("│")).toBe(5);
     } finally {
       setPluginConfigForTest(null);
     }

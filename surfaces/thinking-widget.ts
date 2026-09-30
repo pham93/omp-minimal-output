@@ -5,12 +5,7 @@ import { installStatusRowGuard, restoreStatusRowGuard } from "./composer-status.
 import { definedChildren } from "../core/container-interceptor.ts";
 import { wrapLatestLines } from "../core/text.ts";
 import { LINE_WIDTH_RATIO, formatRowLine, elapsedSuffix } from "../core/theme.ts";
-import {
-  cardHeaderLine,
-  THOUGHT_RAIL_PREFIX,
-  thoughtRailLine,
-  type CardLifecycle,
-} from "../cards/card-primitives.ts";
+import { cardDetailLine, cardHeaderLine, type CardLifecycle } from "../cards/card-primitives.ts";
 
 export const THOUGHT_PREVIEW_LINES = 3;
 export const THOUGHT_WIDGET_KEY = "minimal-thinking";
@@ -48,13 +43,24 @@ export function extractThinking(message: unknown): { text: string; live: boolean
   }
 }
 
+/**
+ * Rail prefix for the thinking block's own rows. The glyph sits under the first character of the header
+ * label — the column `Thinking...` starts at, past the mark and its space — so the rail reads as the
+ * block's spine under the label: `◈ Thinking...` above `  │ thought text`. Card-context thought blocks
+ * (the grouped card, the commentary skin) keep `THOUGHT_RAIL_PREFIX`, because their header is a `╰─` card
+ * row whose details belong on the card content column.
+ */
+const THINKING_RAIL_PREFIX = "  │ ";
+
 export function thinkingRailLines(theme: unknown, width: number, text: string): string[] {
   if (!text.trim()) return [];
   const innerW = Math.max(
     8,
-    Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THOUGHT_RAIL_PREFIX),
+    Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THINKING_RAIL_PREFIX),
   );
-  return wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES).map((preview) => thoughtRailLine(theme, width, preview));
+  return wrapLatestLines(text, innerW, THOUGHT_PREVIEW_LINES).map((preview) =>
+    cardDetailLine(theme, width, preview, THINKING_RAIL_PREFIX),
+  );
 }
 
 interface ComposerLike {
@@ -334,7 +340,7 @@ export class ThinkingWidget {
   animatedThinkingRailLines(theme: unknown, width: number, text: string): string[] {
     const innerW = Math.max(
       8,
-      Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THOUGHT_RAIL_PREFIX),
+      Math.floor((Math.floor(width) || 0) * LINE_WIDTH_RATIO) - visibleWidth(THINKING_RAIL_PREFIX),
     );
     this.#scroller.update(text, innerW);
     const cfgOp = getPluginConfig().opacity;
@@ -344,7 +350,7 @@ export class ThinkingWidget {
       // The stagger rides on a card detail row, so the animated block keeps the card rail, `dim`
       // token and configured rest opacity instead of painting its own brighter rail.
       const effectiveOp = item.isPlaceholder ? Math.max(0.05, cfgOp - 0.25) * 0.35 : item.opacity * cfgOp;
-      lines.push(thoughtRailLine(theme, width, item.isPlaceholder ? "" : item.text, effectiveOp));
+      lines.push(cardDetailLine(theme, width, item.isPlaceholder ? "" : item.text, THINKING_RAIL_PREFIX, false, effectiveOp));
     }
 
     return lines;
