@@ -243,17 +243,18 @@ export function renderWriteCard(
           }
         }
 
-        // The window is fixed for the life of the card: every slot is painted from the first frame, so
-        // a reveal only changes text in place instead of adding a row and shifting the transcript below.
-        // The newest line lands first and older lines fill in above it, the way a file grows.
+        // The window is fixed for the life of the card, so a reveal only changes text in place instead of
+        // adding a row and shifting the transcript below. The wave front runs top-down, the way the file
+        // reads, and a slot the front has not reached is left blank: a gutter with a number and no text
+        // would read as a half-rendered row rather than as a window still filling.
         for (const [slot, line] of visible.entries()) {
+          const lineOp = cascadingLineOpacity(slot, visible.length, startedAt, restOpacity);
+          if (lineOp === null) {
+            lines.push("");
+            continue;
+          }
           const lineNumber = data.lineCount - visible.length + slot + 1;
-          const lineOp = cascadingLineOpacity(visible.length - 1 - slot, visible.length, startedAt, restOpacity);
-          lines.push(
-            lineOp === null
-              ? writeContentLine(theme, width, "", lineNumber, gutterWidth, language, restOpacity)
-              : writeContentLine(theme, width, line, lineNumber, gutterWidth, language, lineOp),
-          );
+          lines.push(writeContentLine(theme, width, line, lineNumber, gutterWidth, language, lineOp));
         }
         return lines;
       } catch {

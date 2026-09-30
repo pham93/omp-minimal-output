@@ -217,13 +217,17 @@ describe("running write card geometry", () => {
     const content = Array.from({ length: 6 }, (_, i) => `cascade line ${i + 1}`).join("\n");
     const card = renderWriteCard(null, { path: "src/cascade.ts", content }, undefined, {}, "fp-cascade");
 
-    // First paint: the whole window exists, the newest line is in, older slots are blank.
+    // First paint: the whole window exists, the first visible line is in, and the slots the wave front
+    // has not reached are blank rows rather than numbered gutters with no text.
     const first = renderCard(card, 100).map(stripAnsi);
     const header = first.findIndex((row) => row.includes("Write src/cascade.ts"));
     const firstWindow = first.slice(header + 1);
     expect(firstWindow).toHaveLength(6);
-    expect(firstWindow[5], "the newest line lands first").toContain("6 │ cascade line 6");
-    expect(firstWindow[0], "the oldest slot waits for the wave front").not.toContain("cascade line 1");
+    expect(firstWindow[0], "the first visible line lands first").toContain("1 │ cascade line 1");
+    expect(firstWindow[1], "later slots are blank rows, not empty gutters").toBe("");
+    expect(first.some((row) => /\d+ │\s*$/u.test(row) && row.trim() !== ""), "no hollow gutter rows").toBe(
+      false,
+    );
 
     // A frame later the row count is identical: the reveal fills slots, it never adds rows.
     const second = renderCard(card, 100).map(stripAnsi);
